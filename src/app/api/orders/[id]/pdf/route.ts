@@ -30,18 +30,9 @@ export async function GET(
   }
 
   try {
-    // Fetch order with items
+    // Fetch order
     const order = await prisma.customerOrders.findUnique({
       where: { ID: BigInt(orderId) },
-      include: {
-        CustomerOrderDetails: {
-          select: {
-            Sku: true,
-            Qty: true,
-            Price: true,
-          },
-        },
-      },
     })
 
     if (!order) {
@@ -50,6 +41,11 @@ export async function GET(
         { status: 404 }
       )
     }
+
+    // Fetch order items separately (no relation defined in schema)
+    const orderItems = await prisma.customerOrdersItems.findMany({
+      where: { CustomerOrderID: BigInt(orderId) },
+    })
 
     // Determine currency from Country field (legacy behavior)
     const currency = order.Country?.toUpperCase().includes('CAD') ? 'CAD' : 'USD'
@@ -70,16 +66,16 @@ export async function GET(
       shipEndDate: order.ShipEndDate || new Date(),
       orderDate: order.OrderDate || new Date(),
       website: order.Website || '',
-      orderStatus: order.Status || 'Pending',
+      orderStatus: order.OrderStatus || 'Pending',
     }
 
     // Build line items
-    const items = order.CustomerOrderDetails.map((item) => ({
-      sku: item.Sku || 'Unknown SKU',
-      quantity: item.Qty || 0,
+    const items = orderItems.map((item) => ({
+      sku: item.SKU || 'Unknown SKU',
+      quantity: item.Quantity || 0,
       price: item.Price || 0,
       currency: currency,
-      lineTotal: (item.Qty || 0) * (item.Price || 0),
+      lineTotal: (item.Quantity || 0) * (item.Price || 0),
     }))
 
     // Generate HTML
@@ -103,13 +99,14 @@ export async function GET(
     // Build filename
     const filename = `${order.OrderNumber || orderId}-Confirmation.pdf`
 
-    // Return PDF response
-    return new NextResponse(pdfBuffer, {
+    // Return PDF response - convert Uint8Array to Buffer
+    const buffer = Buffer.from(pdfBuffer)
+    return new NextResponse(buffer, {
       status: 200,
       headers: {
         'Content-Type': 'application/pdf',
         'Content-Disposition': `attachment; filename="${filename}"`,
-        'Content-Length': pdfBuffer.length.toString(),
+        'Content-Length': buffer.length.toString(),
       },
     })
   } catch (error) {
