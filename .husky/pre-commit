@@ -1,0 +1,77 @@
+#!/bin/sh
+
+# ============================================================================
+# Pre-commit Hook: Git Config Validation + Lint-Staged
+# ============================================================================
+
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  Pre-Commit Checks"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+# ============================================================================
+# Step 1: Validate Git Configuration
+# ============================================================================
+
+echo "[1/2] Validating git configuration..."
+
+EXPECTED_EMAIL="daniel@plantdynamics.co"
+EXPECTED_NAME="danielplant"
+
+CURRENT_EMAIL=$(git config user.email)
+CURRENT_NAME=$(git config user.name)
+
+CONFIG_VALID=true
+
+if [ "$CURRENT_EMAIL" != "$EXPECTED_EMAIL" ]; then
+  echo "❌ Git email mismatch!"
+  echo "   Expected: ${EXPECTED_EMAIL}"
+  echo "   Current:  ${CURRENT_EMAIL}"
+  echo ""
+  echo "   Fix with: git config user.email \"${EXPECTED_EMAIL}\""
+  CONFIG_VALID=false
+fi
+
+if [ "$CURRENT_NAME" != "$EXPECTED_NAME" ]; then
+  echo "❌ Git username mismatch!"
+  echo "   Expected: ${EXPECTED_NAME}"
+  echo "   Current:  ${CURRENT_NAME}"
+  echo ""
+  echo "   Fix with: git config user.name \"${EXPECTED_NAME}\""
+  CONFIG_VALID=false
+fi
+
+if [ "$CONFIG_VALID" = false ]; then
+  echo ""
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "  Commit blocked: Fix git configuration first"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  exit 1
+fi
+
+echo "✅ Git config valid (${EXPECTED_EMAIL} / ${EXPECTED_NAME})"
+echo ""
+
+# ============================================================================
+# Step 2: Run Lint-Staged
+# ============================================================================
+
+echo "[2/2] Running lint-staged (TypeScript + ESLint on staged files)..."
+npx lint-staged
+
+if [ $? -ne 0 ]; then
+  echo ""
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "  ❌ Lint-staged checks failed"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo ""
+  echo "Please fix the errors above before committing."
+  exit 1
+fi
+
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  ✅ All pre-commit checks passed!"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""

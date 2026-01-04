@@ -1,0 +1,13 @@
+[
+  {
+    "id": "1",
+    "name": "Sample Product",
+    "sku": "SAMPLE-001",
+    "status": "Published",
+    "price": 0,
+    "inventory": 0,
+    "image": "",
+    "options": 0,
+    "availability": "In Stock"
+  }
+]

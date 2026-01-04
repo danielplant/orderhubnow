@@ -1,0 +1,17 @@
+[
+  {
+    "id": 1,
+    "name": "Sample Customer",
+    "email": "sample@example.com",
+    "storeName": "Sample Store",
+    "contactName": "John Doe",
+    "storeType": "Retail",
+    "amountInCart": "$0.00",
+    "cartLastModified": "N/A",
+    "phone": "",
+    "orders": 0,
+    "totalSpent": 0,
+    "tags": [],
+    "createdAt": "2024-01-01"
+  }
+]

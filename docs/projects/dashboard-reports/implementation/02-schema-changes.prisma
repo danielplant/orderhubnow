@@ -1,0 +1,147 @@
+// ============================================================================
+// Prisma Schema Additions for Analytics Platform
+// ============================================================================
+// After running 01-schema-changes.sql, update schema.prisma with these changes
+// Then run: npx prisma db pull (or manually add these fields)
+// ============================================================================
+
+// ----------------------------------------------------------------------------
+// CustomerOrders - Add FK relationships
+// ----------------------------------------------------------------------------
+// REPLACE the existing CustomerOrders model with this:
+
+model CustomerOrders {
+  ID                     BigInt                   @id(map: "PK_CustomerOrders") @default(autoincrement())
+  OrderNumber            String                   @db.NVarChar(50)
+  BuyerName              String                   @db.NVarChar(500)
+  StoreName              String                   @db.NVarChar(500)
+  SalesRep               String                   @db.NVarChar(200)
+  CustomerEmail          String                   @db.NVarChar(500)
+  Country                String                   @db.NVarChar(20)
+  CustomerPhone          String                   @db.NVarChar(100)
+  OrderAmount            Float
+  OrderNotes             String                   @db.NVarChar(Max)
+  CustomerPO             String                   @db.NVarChar(100)
+  ShipStartDate          DateTime                 @db.DateTime
+  ShipEndDate            DateTime                 @db.DateTime
+  OrderDate              DateTime                 @db.DateTime
+  Website                String                   @db.NVarChar(200)
+  IsShipped              Boolean
+  OrderStatus            String                   @db.NVarChar(50)
+  IsTransferredToShopify Boolean?
+  
+  // NEW: Foreign key fields for analytics
+  CustomerID             Int?
+  RepID                  Int?
+  
+  // NEW: Relations
+  Customer               Customers?               @relation(fields: [CustomerID], references: [ID], onDelete: NoAction, onUpdate: NoAction)
+  Rep                    Reps?                    @relation("CustomerOrdersToReps", fields: [RepID], references: [ID], onDelete: NoAction, onUpdate: NoAction)
+  
+  CustomerOrdersComments CustomerOrdersComments[]
+  
+  @@index([CustomerID], map: "IX_CustomerOrders_CustomerID")
+  @@index([RepID], map: "IX_CustomerOrders_RepID")
+  @@index([OrderDate], map: "IX_CustomerOrders_OrderDate")
+}
+
+// ----------------------------------------------------------------------------
+// Customers - Add analytics fields
+// ----------------------------------------------------------------------------
+// REPLACE the existing Customers model with this:
+
+model Customers {
+  ID                    Int              @id(map: "PK_Customers") @default(autoincrement())
+  StoreName             String           @db.NVarChar(500)
+  Email                 String?          @db.NVarChar(500)
+  CustomerName          String?          @db.NVarChar(500)
+  Phone                 String?          @db.NVarChar(500)
+  Rep                   String?          @db.NVarChar(500)
+  Street1               String?          @db.NVarChar(500)
+  Street2               String?          @db.NVarChar(500)
+  City                  String?          @db.NVarChar(500)
+  StateProvince         String?          @db.NVarChar(500)
+  ZipPostal             String?          @db.NVarChar(500)
+  Country               String?          @db.NVarChar(500)
+  AdditionalInfo        String?          @db.NVarChar(Max)
+  ShippingStreet1       String?          @db.NVarChar(500)
+  ShippingStreet2       String?          @db.NVarChar(500)
+  ShippingCity          String?          @db.NVarChar(500)
+  ShippingStateProvince String?          @db.NVarChar(500)
+  ShippingZipPostal     String?          @db.NVarChar(500)
+  ShippingCountry       String?          @db.NVarChar(500)
+  Website               String?          @db.NVarChar(500)
+  
+  // NEW: Analytics fields
+  FirstOrderDate        DateTime?        @db.DateTime
+  LastOrderDate         DateTime?        @db.DateTime
+  OrderCount            Int?             @default(0)
+  LTV                   Decimal?         @db.Decimal(18, 2)
+  Segment               String?          @db.NVarChar(20)  // Platinum, Gold, Silver, Bronze
+  UsualOrderCycle       Int?             // Average days between orders
+  
+  // NEW: Relation to orders
+  CustomerOrders        CustomerOrders[]
+  
+  @@index([Segment], map: "IX_Customers_Segment")
+  @@index([LastOrderDate], map: "IX_Customers_LastOrderDate")
+}
+
+// ----------------------------------------------------------------------------
+// Reps - Add Territory field
+// ----------------------------------------------------------------------------
+// REPLACE the existing Reps model with this:
+
+model Reps {
+  ID                Int              @id(map: "PK_Reps") @default(autoincrement())
+  Name              String           @db.NVarChar(500)
+  Code              String           @db.NVarChar(100)
+  Address           String           @db.NVarChar(Max)
+  Phone             String           @db.NVarChar(50)
+  Fax               String           @db.NVarChar(50)
+  Cell              String           @db.NVarChar(50)
+  Email1            String           @db.NVarChar(250)
+  Email2            String           @db.NVarChar(250)
+  Email3            String           @db.NVarChar(250)
+  Country           String           @db.NVarChar(50)
+  
+  // NEW: Territory for normalized performance
+  Territory         String?          @db.NVarChar(100)
+  
+  Users             Users[]
+  RepTargets        RepTargets[]
+  CustomerOrders    CustomerOrders[] @relation("CustomerOrdersToReps")
+}
+
+// ----------------------------------------------------------------------------
+// RepTargets - NEW table for normalized rep performance
+// ----------------------------------------------------------------------------
+
+model RepTargets {
+  ID           Int      @id @default(autoincrement())
+  RepID        Int
+  PeriodType   String   @db.NVarChar(20)  // 'Monthly', 'Quarterly', 'Annual'
+  PeriodStart  DateTime @db.DateTime
+  TargetAmount Decimal  @db.Decimal(18, 2)
+  CreatedAt    DateTime @default(now()) @db.DateTime
+  UpdatedAt    DateTime? @db.DateTime
+  
+  Rep          Reps     @relation(fields: [RepID], references: [ID], onDelete: NoAction, onUpdate: NoAction)
+  
+  @@index([RepID], map: "IX_RepTargets_RepID")
+  @@index([PeriodType, PeriodStart], map: "IX_RepTargets_Period")
+}
+
+
+// ============================================================================
+// INSTRUCTIONS
+// ============================================================================
+// 
+// Option 1: Run `npx prisma db pull` after running the SQL script
+//           This will auto-detect the new columns and update schema.prisma
+//
+// Option 2: Manually copy the model definitions above into schema.prisma
+//           Then run `npx prisma generate` to update the client
+//
+// Either way, run `npx prisma generate` after to update the Prisma client
+// ============================================================================

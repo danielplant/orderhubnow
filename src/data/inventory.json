@@ -1,0 +1,11 @@
+[
+  {
+    "id": "1",
+    "sku": "SAMPLE-001",
+    "name": "Sample Product",
+    "variants": "Default",
+    "onHand": 0,
+    "committed": 0,
+    "available": 0
+  }
+]

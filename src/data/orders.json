@@ -1,0 +1,10 @@
+[
+  {
+    "id": "1",
+    "customer": "Sample Customer",
+    "status": "New",
+    "amount": 0,
+    "date": "2024-01-01",
+    "items": []
+  }
+]
