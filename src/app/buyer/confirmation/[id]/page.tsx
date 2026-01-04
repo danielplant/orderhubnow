@@ -4,7 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { formatCurrency } from '@/lib/utils'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { CheckCircle2 } from 'lucide-react'
+import { CheckCircle2, Download } from 'lucide-react'
 import { ConfirmationClient } from './client'
 
 interface Props {
@@ -96,6 +96,15 @@ export default async function ConfirmationPage({ params }: Props) {
 
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
               <Button asChild>
+                <a
+                  href={`/api/orders/${order.ID.toString()}/pdf`}
+                  download={`${order.OrderNumber}-Confirmation.pdf`}
+                >
+                  <Download className="size-4 mr-2" />
+                  Download PDF
+                </a>
+              </Button>
+              <Button variant="outline" asChild>
                 <Link href="/buyer/select-journey">Continue Shopping</Link>
               </Button>
               <Button variant="outline" asChild>
