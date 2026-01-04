@@ -269,8 +269,9 @@ model Reps {
   Email2     String       @db.NVarChar(250)
   Email3     String       @db.NVarChar(250)
   Country    String       @db.NVarChar(50)
-  Territory  String?      @db.NVarChar(100)
-  RepTargets RepTargets[]
+  // TODO: Uncomment after running sql-migrations/analytics-schema.sql
+  // Territory  String?      @db.NVarChar(100)
+  // RepTargets RepTargets[]
   Users      Users[]
 }
 
@@ -579,19 +580,20 @@ model PPGPricesN_Modified {
   @@ignore
 }
 
-model RepTargets {
-  ID           Int       @id(map: "PK__RepTarge__3214EC27E6929715") @default(autoincrement())
-  RepID        Int
-  PeriodType   String    @db.NVarChar(20)
-  PeriodStart  DateTime  @db.DateTime
-  TargetAmount Decimal   @db.Decimal(18, 2)
-  CreatedAt    DateTime  @default(now(), map: "DF__RepTarget__Creat__208CD6FA") @db.DateTime
-  UpdatedAt    DateTime? @db.DateTime
-  Reps         Reps      @relation(fields: [RepID], references: [ID], onUpdate: NoAction, map: "FK_RepTargets_Reps")
-
-  @@index([PeriodType, PeriodStart], map: "IX_RepTargets_Period")
-  @@index([RepID], map: "IX_RepTargets_RepID")
-}
+// TODO: Uncomment after running sql-migrations/analytics-schema.sql
+// model RepTargets {
+//   ID           Int       @id(map: "PK__RepTarge__3214EC27E6929715") @default(autoincrement())
+//   RepID        Int
+//   PeriodType   String    @db.NVarChar(20)
+//   PeriodStart  DateTime  @db.DateTime
+//   TargetAmount Decimal   @db.Decimal(18, 2)
+//   CreatedAt    DateTime  @default(now(), map: "DF__RepTarget__Creat__208CD6FA") @db.DateTime
+//   UpdatedAt    DateTime? @db.DateTime
+//   Reps         Reps      @relation(fields: [RepID], references: [ID], onUpdate: NoAction, map: "FK_RepTargets_Reps")
+//
+//   @@index([PeriodType, PeriodStart], map: "IX_RepTargets_Period")
+//   @@index([RepID], map: "IX_RepTargets_RepID")
+// }
 
 model AliasSignals {
   ID             Int       @id(map: "PK__AliasSig__3214EC27A01A4005") @default(autoincrement())
