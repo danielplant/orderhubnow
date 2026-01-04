@@ -4,8 +4,16 @@ import { useState } from 'react'
 import { signIn } from 'next-auth/react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'
+import type { UserRole } from '@/lib/types/auth'
 
-export function LoginForm() {
+interface LoginFormProps {
+  /** If provided, only users with this role can log in */
+  requiredRole?: UserRole
+  /** Default redirect if no callbackUrl is present */
+  defaultRedirect?: string
+}
+
+export function LoginForm({ requiredRole, defaultRedirect }: LoginFormProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [error, setError] = useState<string | null>(null)
@@ -23,6 +31,7 @@ export function LoginForm() {
     const result = await signIn('credentials', {
       loginId,
       password,
+      requiredRole, // Pass to authorize() for server-side role enforcement
       redirect: false,
     })
 
@@ -33,12 +42,14 @@ export function LoginForm() {
       return
     }
 
-    // Get callback URL or determine by role
+    // Get callback URL or use default redirect
     const callbackUrl = searchParams.get('callbackUrl')
     if (callbackUrl) {
       router.push(callbackUrl)
+    } else if (defaultRedirect) {
+      router.push(defaultRedirect)
     } else {
-      // Fetch session to determine role
+      // Fallback: fetch session to determine role
       const res = await fetch('/api/auth/session')
       const session = await res.json()
       const role = session?.user?.role

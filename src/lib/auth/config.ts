@@ -1,7 +1,7 @@
 import type { NextAuthConfig } from 'next-auth'
 import Credentials from 'next-auth/providers/credentials'
 import { prisma } from '@/lib/prisma'
-import { mapUserTypeToRole } from '@/lib/types/auth'
+import { mapUserTypeToRole, type UserRole } from '@/lib/types/auth'
 
 export const authConfig: NextAuthConfig = {
   providers: [
@@ -10,6 +10,7 @@ export const authConfig: NextAuthConfig = {
       credentials: {
         loginId: { label: 'Login ID', type: 'text' },
         password: { label: 'Password', type: 'password' },
+        requiredRole: { label: 'Required Role', type: 'text' },
       },
       async authorize(credentials) {
         if (!credentials?.loginId || !credentials?.password) {
@@ -31,6 +32,13 @@ export const authConfig: NextAuthConfig = {
         // Map role - reject if unknown
         const role = mapUserTypeToRole(user.UserType)
         if (!role) {
+          return null
+        }
+
+        // Server-side role enforcement: if a specific role is required,
+        // reject if user's role doesn't match (same error as wrong password)
+        const requiredRole = credentials.requiredRole as UserRole | undefined
+        if (requiredRole && role !== requiredRole) {
           return null
         }
 
@@ -66,9 +74,7 @@ export const authConfig: NextAuthConfig = {
       return session
     },
   },
-  pages: {
-    signIn: '/login',
-  },
+  // No pages.signIn - middleware handles role-specific login redirects
   session: {
     strategy: 'jwt',
   },

@@ -5,6 +5,7 @@ import { prisma } from '@/lib/prisma'
 import { auth } from '@/lib/auth/providers'
 import type { OrderStatus } from '@/lib/types/order'
 import { createOrderInputSchema, type CreateOrderInput } from '@/lib/schemas/order'
+import { sendOrderEmails } from '@/lib/email/send-order-emails'
 
 // ============================================================================
 // Auth Helper
@@ -291,6 +292,34 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
       }
 
       return newOrder
+    })
+
+    // Send order confirmation emails (non-blocking)
+    // Matches .NET behavior: emails sent after order creation, errors don't fail order
+    sendOrderEmails({
+      orderId: order.ID.toString(),
+      orderNumber: orderNumber,
+      storeName: data.storeName,
+      buyerName: data.buyerName,
+      customerEmail: data.customerEmail,
+      customerPhone: data.customerPhone,
+      salesRep: data.salesRep,
+      orderAmount: orderAmount,
+      currency: data.currency,
+      shipStartDate: new Date(data.shipStartDate),
+      shipEndDate: new Date(data.shipEndDate),
+      orderDate: new Date(),
+      orderNotes: data.orderNotes,
+      customerPO: data.customerPO,
+      items: data.items.map((item) => ({
+        sku: item.sku,
+        quantity: item.quantity,
+        price: item.price,
+        lineTotal: item.price * item.quantity,
+      })),
+    }).catch((err) => {
+      // Log email errors but don't fail the order
+      console.error('Order email error:', err)
     })
 
     revalidatePath('/admin/orders')

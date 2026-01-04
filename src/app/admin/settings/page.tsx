@@ -6,7 +6,7 @@ import { SettingsForm } from '@/components/admin/settings-form'
 export default async function SettingsPage() {
   const session = await auth()
   if (!session?.user || session.user.role !== 'admin') {
-    redirect('/login')
+    redirect('/admin/login')
   }
 
   const settings = await getInventorySettings()

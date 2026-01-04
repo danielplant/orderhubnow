@@ -125,7 +125,7 @@ export default async function AdminDashboard({ searchParams }: PageProps) {
   
   // Ensure user is authenticated and is admin
   if (!session?.user || session.user.role !== 'admin') {
-    redirect('/login');
+    redirect('/admin/login');
   }
   
   const params = await searchParams;

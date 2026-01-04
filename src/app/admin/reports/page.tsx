@@ -29,7 +29,7 @@ export default async function ReportsPage() {
 
   // Ensure user is authenticated and is admin
   if (!session?.user || session.user.role !== 'admin') {
-    redirect('/login');
+    redirect('/admin/login');
   }
 
   return (
