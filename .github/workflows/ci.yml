@@ -33,8 +33,7 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Build (validates compilation)
+      - name: Build (validates against real database schema)
         run: npm run build
         env:
-          # Dummy DATABASE_URL for build - actual DB not needed for static analysis
-          DATABASE_URL: "sqlserver://localhost:1433;database=test;user=test;password=test;encrypt=true;trustServerCertificate=true"
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
