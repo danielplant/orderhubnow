@@ -3,14 +3,16 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, Calendar } from "lucide-react";
 import { BrandHeader } from "@/components/buyer/brand-header";
 import { Divider } from "@/components/ui";
-import { PreOrderProductGrid } from "@/components/buyer/preorder-product-grid";
+import { ProductOrderCard } from "@/components/buyer/product-order-card";
 import {
   getPreOrderCategoryById,
   getPreOrderProductsWithVariants,
 } from "@/lib/data/queries/preorder";
+import { buildRepQueryStringFromObject } from "@/lib/utils/rep-context";
 
 interface Props {
   params: Promise<{ collection: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }
 
 /**
@@ -36,13 +38,16 @@ function formatShipWindow(start: string | null, end: string | null): string {
 
 export const dynamic = "force-dynamic";
 
-export default async function PreOrderCollectionPage({ params }: Props) {
-  const { collection } = await params;
+export default async function PreOrderCollectionPage({ params, searchParams }: Props) {
+  const [{ collection }, queryParams] = await Promise.all([params, searchParams]);
   const categoryId = parseInt(collection, 10);
 
   if (Number.isNaN(categoryId)) {
     notFound();
   }
+
+  // Build rep context query string to preserve through navigation
+  const repQuery = buildRepQueryStringFromObject(queryParams);
 
   // Fetch category and products in parallel
   const [category, products] = await Promise.all([
@@ -68,7 +73,7 @@ export default async function PreOrderCollectionPage({ params }: Props) {
         {/* Header */}
         <div className="mb-8 space-y-4">
           <Link
-            href="/buyer/pre-order"
+            href={`/buyer/pre-order${repQuery}`}
             className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
           >
             <ArrowLeft className="h-4 w-4" />
@@ -98,15 +103,17 @@ export default async function PreOrderCollectionPage({ params }: Props) {
           <Divider size="md" strong />
         </div>
 
-        {/* Product Grid */}
+        {/* Product Grid - Uses unified ProductOrderCard with isPreOrder=true */}
         {products.length > 0 ? (
-          <PreOrderProductGrid
-            products={products}
-            categoryId={category.id}
-            categoryName={category.name}
-            shipWindowStart={category.onRouteStartDate}
-            shipWindowEnd={category.onRouteEndDate}
-          />
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6">
+            {products.map((product) => (
+              <ProductOrderCard
+                key={product.id}
+                product={product}
+                isPreOrder
+              />
+            ))}
+          </div>
         ) : (
           <div className="text-center py-16">
             <p className="text-muted-foreground">

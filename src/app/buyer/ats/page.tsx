@@ -2,11 +2,22 @@ import { BrandHeader } from "@/components/buyer/brand-header";
 import { CollectionCard } from "@/components/buyer/collection-card";
 import { Divider } from "@/components/ui";
 import { getCategoriesWithProductCount } from "@/lib/data/queries/categories";
+import { buildRepQueryStringFromObject } from "@/lib/utils/rep-context";
 
 export const dynamic = 'force-dynamic'
 
-export default async function ATSPage() {
-  const categories = await getCategoriesWithProductCount();
+interface Props {
+  searchParams: Promise<Record<string, string | string[] | undefined>>
+}
+
+export default async function ATSPage({ searchParams }: Props) {
+  const [categories, params] = await Promise.all([
+    getCategoriesWithProductCount(),
+    searchParams,
+  ]);
+  
+  // Build rep context query string to preserve through navigation
+  const repQuery = buildRepQueryStringFromObject(params);
   
   // Filter to ATS categories (not pre-order) and with products
   const atsCategories = categories.filter(cat => !cat.isPreOrder);
@@ -40,7 +51,7 @@ export default async function ATSPage() {
                 key={category.id}
                 name={category.name}
                 count={category.productCount}
-                href={`/buyer/ats/${category.id}`}
+                href={`/buyer/ats/${category.id}${repQuery}`}
               />
             ))}
           </div>

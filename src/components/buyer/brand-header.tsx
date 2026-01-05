@@ -1,13 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { Compass, Bell, Search, HelpCircle, ShoppingCart } from "lucide-react";
 import { Button, Divider, IndicatorDot, IconBox, Badge } from "@/components/ui";
 import { BRAND_NAME, APP_NAME } from "@/lib/constants/brand";
 import { CurrencyToggle } from "./currency-toggle";
 import { useOrder, useCurrency } from "@/lib/contexts";
 import { formatCurrency } from "@/lib/utils";
+import { buildRepQueryString } from "@/lib/utils/rep-context";
 
 interface BrandHeaderProps {
   userInitials?: string;
@@ -15,12 +16,29 @@ interface BrandHeaderProps {
 
 export function BrandHeader({ userInitials = "?" }: BrandHeaderProps) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const { totalItems, totalPrice } = useOrder();
   const { currency } = useCurrency();
 
   // Determine if we're in pre-order flow
   const isPreOrder = pathname.startsWith("/buyer/pre-order");
-  const myOrderHref = isPreOrder ? "/buyer/my-order?isPreOrder=true" : "/buyer/my-order";
+  
+  // Build my-order href preserving rep context params
+  const buildMyOrderHref = () => {
+    const params = new URLSearchParams();
+    if (isPreOrder) params.set("isPreOrder", "true");
+    
+    // Preserve rep context params
+    const repId = searchParams.get("repId");
+    const returnTo = searchParams.get("returnTo");
+    if (repId) params.set("repId", repId);
+    if (returnTo) params.set("returnTo", returnTo);
+    
+    const qs = params.toString();
+    return `/buyer/my-order${qs ? `?${qs}` : ""}`;
+  };
+  
+  const myOrderHref = buildMyOrderHref();
 
   return (
     <header className="w-full h-16 bg-background border-b border-border flex items-center justify-between px-6 sticky top-0 z-50">

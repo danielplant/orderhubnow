@@ -4,8 +4,13 @@ import { BrandHeader } from "@/components/buyer/brand-header";
 import { Divider } from "@/components/ui";
 import { getPreOrderCategories } from "@/lib/data/queries/preorder";
 import { cn, getCategoryGradient } from "@/lib/utils";
+import { buildRepQueryStringFromObject } from "@/lib/utils/rep-context";
 
 export const dynamic = 'force-dynamic'
+
+interface Props {
+  searchParams: Promise<Record<string, string | string[] | undefined>>
+}
 
 /**
  * Format ship window dates for display.
@@ -82,8 +87,14 @@ function PreOrderCollectionCard({
   );
 }
 
-export default async function PreOrderPage() {
-  const categories = await getPreOrderCategories();
+export default async function PreOrderPage({ searchParams }: Props) {
+  const [categories, params] = await Promise.all([
+    getPreOrderCategories(),
+    searchParams,
+  ]);
+  
+  // Build rep context query string to preserve through navigation
+  const repQuery = buildRepQueryStringFromObject(params);
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -115,7 +126,7 @@ export default async function PreOrderPage() {
                 key={category.id}
                 name={category.name}
                 count={category.productCount}
-                href={`/buyer/pre-order/${category.id}`}
+                href={`/buyer/pre-order/${category.id}${repQuery}`}
                 shipWindowStart={category.onRouteStartDate}
                 shipWindowEnd={category.onRouteEndDate}
               />

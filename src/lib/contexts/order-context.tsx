@@ -21,6 +21,15 @@ export interface PreOrderItemMetadata {
   onRouteEnd: string | null;
 }
 
+/**
+ * Per-SKU order line metadata including isOnRoute flag.
+ * .NET tracks IsOnRoute per order line based on the "governing cap" rule.
+ */
+export interface OrderLineMetadata {
+  /** True if onRoute > available at time of ordering (ATS) or always true (PreOrder) */
+  isOnRoute: boolean;
+}
+
 interface OrderState {
   orders: Record<string, OrderQuantities>;
 }
@@ -29,9 +38,9 @@ interface OrderContextValue {
   orders: Record<string, OrderQuantities>;
   totalItems: number;
   totalPrice: number;
-  addItem: (productId: string, sku: string, qty: number, price: number, preOrderMeta?: PreOrderItemMetadata) => void;
+  addItem: (productId: string, sku: string, qty: number, price: number, preOrderMeta?: PreOrderItemMetadata, lineMeta?: OrderLineMetadata) => void;
   removeItem: (productId: string, sku: string) => void;
-  setQuantity: (productId: string, sku: string, qty: number, price: number) => void;
+  setQuantity: (productId: string, sku: string, qty: number, price: number, lineMeta?: OrderLineMetadata) => void;
   clearProduct: (productId: string) => void;
   clearAll: () => void;
   undo: () => void;
@@ -40,6 +49,8 @@ interface OrderContextValue {
   // Pre-order metadata accessors
   preOrderMetadata: Record<string, PreOrderItemMetadata>;
   getPreOrderShipWindow: () => { start: string | null; end: string | null } | null;
+  // Order line metadata (isOnRoute tracking)
+  orderLineMetadata: Record<string, OrderLineMetadata>;
 }
 
 const OrderContext = createContext<OrderContextValue | null>(null);
@@ -66,9 +77,10 @@ function loadFromStorage(): {
   orders: Record<string, OrderQuantities>;
   prices: Map<string, number>;
   preOrderMeta: Record<string, PreOrderItemMetadata>;
+  lineMeta: Record<string, OrderLineMetadata>;
 } {
   if (typeof window === "undefined") {
-    return { orders: {}, prices: new Map(), preOrderMeta: {} };
+    return { orders: {}, prices: new Map(), preOrderMeta: {}, lineMeta: {} };
   }
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
@@ -78,12 +90,13 @@ function loadFromStorage(): {
         orders: parsed.orders || {},
         prices: new Map(Object.entries(parsed.prices || {})),
         preOrderMeta: parsed.preOrderMeta || {},
+        lineMeta: parsed.lineMeta || {},
       };
     }
   } catch {
     // Invalid storage, start fresh
   }
-  return { orders: {}, prices: new Map(), preOrderMeta: {} };
+  return { orders: {}, prices: new Map(), preOrderMeta: {}, lineMeta: {} };
 }
 
 export function OrderProvider({ children }: { children: ReactNode }) {
@@ -97,17 +110,21 @@ export function OrderProvider({ children }: { children: ReactNode }) {
   const [preOrderMetadata, setPreOrderMetadata] = useState<Record<string, PreOrderItemMetadata>>(
     () => loadFromStorage().preOrderMeta
   );
+  const [orderLineMetadata, setOrderLineMetadata] = useState<Record<string, OrderLineMetadata>>(
+    () => loadFromStorage().lineMeta
+  );
   const [history, setHistory] = useState<OrderState[]>([]);
 
-  // Sync to localStorage when orders/prices/preOrderMeta change
+  // Sync to localStorage when orders/prices/preOrderMeta/lineMeta change
   useEffect(() => {
     const data = {
       orders,
       prices: Object.fromEntries(priceMap),
       preOrderMeta: preOrderMetadata,
+      lineMeta: orderLineMetadata,
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-  }, [orders, priceMap, preOrderMetadata]);
+  }, [orders, priceMap, preOrderMetadata, orderLineMetadata]);
 
   // Listen for changes from other tabs (callback-based, not synchronous)
   useEffect(() => {
@@ -118,6 +135,7 @@ export function OrderProvider({ children }: { children: ReactNode }) {
           setOrders(parsed.orders || {});
           setPriceMap(new Map(Object.entries(parsed.prices || {})));
           setPreOrderMetadata(parsed.preOrderMeta || {});
+          setOrderLineMetadata(parsed.lineMeta || {});
         } catch {
           // Ignore invalid data
         }
@@ -132,7 +150,7 @@ export function OrderProvider({ children }: { children: ReactNode }) {
   }, [orders]);
 
   const addItem = useCallback(
-    (productId: string, sku: string, qty: number, price: number, preOrderMeta?: PreOrderItemMetadata) => {
+    (productId: string, sku: string, qty: number, price: number, preOrderMeta?: PreOrderItemMetadata, lineMeta?: OrderLineMetadata) => {
       saveToHistory();
       setPriceMap((prev) => new Map(prev).set(sku, price));
       setOrders((prev) => ({
@@ -147,6 +165,13 @@ export function OrderProvider({ children }: { children: ReactNode }) {
         setPreOrderMetadata((prev) => ({
           ...prev,
           [sku]: preOrderMeta,
+        }));
+      }
+      // Store order line metadata (isOnRoute flag) if provided
+      if (lineMeta) {
+        setOrderLineMetadata((prev) => ({
+          ...prev,
+          [sku]: lineMeta,
         }));
       }
     },
@@ -171,7 +196,7 @@ export function OrderProvider({ children }: { children: ReactNode }) {
   );
 
   const setQuantity = useCallback(
-    (productId: string, sku: string, qty: number, price: number) => {
+    (productId: string, sku: string, qty: number, price: number, lineMeta?: OrderLineMetadata) => {
       saveToHistory();
       setPriceMap((prev) => new Map(prev).set(sku, price));
       if (qty <= 0) {
@@ -185,6 +210,12 @@ export function OrderProvider({ children }: { children: ReactNode }) {
           }
           return { ...prev, [productId]: productOrders };
         });
+        // Clean up line metadata when removing item
+        setOrderLineMetadata((prev) => {
+          const next = { ...prev };
+          delete next[sku];
+          return next;
+        });
       } else {
         setOrders((prev) => ({
           ...prev,
@@ -193,6 +224,13 @@ export function OrderProvider({ children }: { children: ReactNode }) {
             [sku]: qty,
           },
         }));
+        // Store order line metadata (isOnRoute flag) if provided
+        if (lineMeta) {
+          setOrderLineMetadata((prev) => ({
+            ...prev,
+            [sku]: lineMeta,
+          }));
+        }
       }
     },
     [saveToHistory]
@@ -214,6 +252,7 @@ export function OrderProvider({ children }: { children: ReactNode }) {
     saveToHistory();
     setOrders({});
     setPreOrderMetadata({});
+    setOrderLineMetadata({});
   }, [saveToHistory]);
 
   const undo = useCallback(() => {
@@ -271,6 +310,7 @@ export function OrderProvider({ children }: { children: ReactNode }) {
         getProductTotal,
         preOrderMetadata,
         getPreOrderShipWindow,
+        orderLineMetadata,
       }}
     >
       {children}

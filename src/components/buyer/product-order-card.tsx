@@ -17,9 +17,41 @@ function getPrice(item: { priceCad: number; priceUsd: number }, currency: Curren
 
 interface ProductOrderCardProps {
   product: Product;
+  /** PreOrder mode: no qty caps, all lines marked as OnRoute */
+  isPreOrder?: boolean;
 }
 
-export function ProductOrderCard({ product }: ProductOrderCardProps) {
+/**
+ * Get max orderable quantity for a variant.
+ * .NET: ATS caps at max(available, onRoute), PreOrder has no cap
+ */
+function getMaxOrderable(variant: ProductVariant, isPreOrder: boolean): number {
+  if (isPreOrder) {
+    return 9999; // No cap for PreOrder per .NET behavior
+  }
+  return Math.max(variant.available, variant.onRoute);
+}
+
+/**
+ * Check if a variant is orderable (should be shown).
+ * .NET: Show if available > 0 OR onRoute > 0
+ */
+function isVariantOrderable(variant: ProductVariant): boolean {
+  return variant.available > 0 || variant.onRoute > 0;
+}
+
+/**
+ * Determine if an order line should be marked as OnRoute.
+ * .NET: ATS uses "governing cap" rule (onRoute > available), PreOrder always true
+ */
+function getIsOnRoute(variant: ProductVariant, isPreOrder: boolean): boolean {
+  if (isPreOrder) {
+    return true; // All PreOrder lines are OnRoute
+  }
+  return variant.onRoute > variant.available;
+}
+
+export function ProductOrderCard({ product, isPreOrder = false }: ProductOrderCardProps) {
   const { orders, addItem, setQuantity, getProductTotal } = useOrder();
   const { announce } = useAnnouncement();
   const { currency } = useCurrency();
@@ -36,29 +68,33 @@ export function ProductOrderCard({ product }: ProductOrderCardProps) {
 
   const handleChipTap = useCallback(
     (variant: ProductVariant) => {
-      if (variant.available === 0) return;
+      const maxOrderable = getMaxOrderable(variant, isPreOrder);
+      if (maxOrderable === 0) return;
 
       const currentQty = productOrders[variant.sku] || 0;
-      if (currentQty >= variant.available) return;
+      if (currentQty >= maxOrderable) return;
 
       const variantPrice = getPrice(variant, currency);
-      addItem(product.id, variant.sku, 1, variantPrice);
+      const isOnRoute = getIsOnRoute(variant, isPreOrder);
+      addItem(product.id, variant.sku, 1, variantPrice, undefined, { isOnRoute });
 
       // Announce change for screen readers
       const newTotal = totalItems + 1;
       const newPrice = totalPrice + variantPrice;
       announce(`${product.title}: ${newTotal} ${newTotal === 1 ? "unit" : "units"}, ${formatPrice(newPrice)}`);
     },
-    [product, productOrders, totalItems, totalPrice, addItem, announce, currency]
+    [product, productOrders, totalItems, totalPrice, addItem, announce, currency, isPreOrder]
   );
 
   const handleQuantityChange = useCallback(
     (variant: ProductVariant, delta: number) => {
       const currentQty = productOrders[variant.sku] || 0;
-      const newQty = Math.max(0, Math.min(currentQty + delta, variant.available));
+      const maxOrderable = getMaxOrderable(variant, isPreOrder);
+      const newQty = Math.max(0, Math.min(currentQty + delta, maxOrderable));
 
       const variantPrice = getPrice(variant, currency);
-      setQuantity(product.id, variant.sku, newQty, variantPrice);
+      const isOnRoute = getIsOnRoute(variant, isPreOrder);
+      setQuantity(product.id, variant.sku, newQty, variantPrice, { isOnRoute });
 
       // Announce change for screen readers
       const qtyDiff = newQty - currentQty;
@@ -66,15 +102,17 @@ export function ProductOrderCard({ product }: ProductOrderCardProps) {
       const newPrice = totalPrice + qtyDiff * variantPrice;
       announce(`${product.title}: ${newTotal} ${newTotal === 1 ? "unit" : "units"}, ${formatPrice(newPrice)}`);
     },
-    [product, productOrders, totalItems, totalPrice, setQuantity, announce, currency]
+    [product, productOrders, totalItems, totalPrice, setQuantity, announce, currency, isPreOrder]
   );
 
-  const availableVariants = product.variants.filter((v) => v.available > 0);
+  // Filter: Show variants where available > 0 OR onRoute > 0 (.NET parity)
+  const orderableVariants = product.variants.filter(isVariantOrderable);
   
-  // Card-level low stock indicator: true if ANY variant has 1-6 units
-  const hasLowStock = availableVariants.some(
-    (v) => v.available > 0 && v.available <= STOCK_THRESHOLDS.LOW
-  );
+  // Card-level low stock indicator: considers max(available, onRoute) per .NET
+  const hasLowStock = orderableVariants.some((v) => {
+    const maxQty = Math.max(v.available, v.onRoute);
+    return maxQty > 0 && maxQty <= STOCK_THRESHOLDS.LOW;
+  });
 
   return (
     <motion.div
@@ -166,21 +204,24 @@ export function ProductOrderCard({ product }: ProductOrderCardProps) {
       </div>
 
       {/* Size Chips */}
-      <div className="h-20 border-t border-border shrink-0">
+      <div className="h-24 border-t border-border shrink-0">
         <div className="h-full px-3 py-2 flex items-center gap-2 overflow-x-auto scrollbar-none">
-          {availableVariants.length === 0 ? (
+          {orderableVariants.length === 0 ? (
             <span className="text-sm text-muted-foreground italic">
               No sizes available
             </span>
           ) : (
-            availableVariants.map((variant) => {
+            orderableVariants.map((variant) => {
               const orderedQty = productOrders[variant.sku] || 0;
+              const maxOrderable = getMaxOrderable(variant, isPreOrder);
 
               return (
                 <SizeChip
                   key={variant.sku}
                   size={variant.size}
                   available={variant.available}
+                  onRoute={variant.onRoute}
+                  maxOrderable={maxOrderable}
                   orderedQty={orderedQty}
                   onTap={() => handleChipTap(variant)}
                   onQuantityChange={(delta) => handleQuantityChange(variant, delta)}

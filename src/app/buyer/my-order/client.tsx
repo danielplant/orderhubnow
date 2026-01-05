@@ -24,6 +24,7 @@ interface MyOrderClientProps {
   isPreOrder?: boolean
   existingOrder?: OrderForEditing | null
   returnTo?: string
+  repContext?: { repId: string } | null
 }
 
 export function MyOrderClient({
@@ -32,6 +33,7 @@ export function MyOrderClient({
   isPreOrder = false,
   existingOrder = null,
   returnTo = '/buyer/select-journey',
+  repContext = null,
 }: MyOrderClientProps) {
   const router = useRouter()
   const { orders, totalItems, removeItem } = useOrder()
@@ -92,12 +94,17 @@ export function MyOrderClient({
     0
   )
 
+  // Build rep query string for navigation
+  const repQuery = repContext?.repId 
+    ? `?repId=${repContext.repId}${returnTo !== '/buyer/select-journey' ? `&returnTo=${encodeURIComponent(returnTo)}` : ''}`
+    : ''
+
   // Redirect to collections if cart is empty (only in non-edit mode)
   useEffect(() => {
     if (!isEditMode && totalItems === 0) {
-      router.replace('/buyer/select-journey')
+      router.replace(`/buyer/select-journey${repQuery}`)
     }
-  }, [totalItems, router, isEditMode])
+  }, [totalItems, router, isEditMode, repQuery])
 
   // Don't render form until we've checked cart (only in non-edit mode)
   if (!isEditMode && totalItems === 0) {
@@ -187,7 +194,7 @@ export function MyOrderClient({
                 <Button
                   variant="outline"
                   className="w-full"
-                  onClick={() => router.push(isPreOrder ? '/buyer/pre-order' : '/buyer/ats')}
+                  onClick={() => router.push((isPreOrder ? '/buyer/pre-order' : '/buyer/ats') + repQuery)}
                 >
                   Continue Shopping
                 </Button>
@@ -216,6 +223,7 @@ export function MyOrderClient({
             editMode={isEditMode}
             existingOrder={existingOrder}
             returnTo={returnTo}
+            repContext={repContext}
           />
         </div>
       </div>

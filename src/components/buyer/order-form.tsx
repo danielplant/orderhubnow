@@ -31,6 +31,7 @@ import {
   normalizeWebsite,
 } from '@/lib/utils/form-normalization'
 import { formatCurrency } from '@/lib/utils'
+import { isValidReturnTo, isRepPortalReturn } from '@/lib/utils/rep-context'
 import type { Currency } from '@/lib/types'
 import type { OrderForEditing } from '@/lib/data/queries/orders'
 
@@ -48,6 +49,7 @@ interface OrderFormProps {
   editMode?: boolean
   existingOrder?: OrderForEditing | null
   returnTo?: string
+  repContext?: { repId: string } | null
 }
 
 // Helper to format date as YYYY-MM-DD for input[type="date"]
@@ -70,6 +72,7 @@ export function OrderForm({
   editMode = false,
   existingOrder = null,
   returnTo = '/buyer/select-journey',
+  repContext = null,
 }: OrderFormProps) {
   const router = useRouter()
   const { clearAll, getPreOrderShipWindow } = useOrder()
@@ -159,6 +162,14 @@ export function OrderForm({
     }
   }, [editMode, existingOrder, setValue])
 
+  // Lock rep dropdown when rep context is present (rep creating order)
+  useEffect(() => {
+    if (repContext?.repId) {
+      setValue('salesRepId', repContext.repId)
+      setIsRepLocked(true)
+    }
+  }, [repContext, setValue])
+
   // Debounced store name search (only for new orders)
   useEffect(() => {
     if (editMode) return // No autocomplete in edit mode
@@ -233,14 +244,15 @@ export function OrderForm({
     setValue('shippingCountry', normalizeCountry(customer.shippingCountry))
 
     // Auto-select and lock rep based on customer's rep code
-    if (customer.rep) {
+    // (Only if not in rep context - rep context takes priority)
+    if (!repContext?.repId && customer.rep) {
       const matchedRep = findRepByCustomerCode(customer.rep, reps)
       if (matchedRep) {
         setValue('salesRepId', matchedRep.id)
         setIsRepLocked(true)
       }
     }
-  }, [setValue, reps])
+  }, [setValue, reps, repContext])
 
   // Handle store name change - reset customer selection if user types new name
   const handleStoreNameChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -249,9 +261,12 @@ export function OrderForm({
     const currentSuggestion = storeSuggestions.find(s => s.storeName === newValue)
     if (!currentSuggestion) {
       setSelectedCustomerId(null)
-      setIsRepLocked(false)
+      // Only unlock rep if not in rep context (rep context keeps rep locked)
+      if (!repContext?.repId) {
+        setIsRepLocked(false)
+      }
     }
-  }, [storeSuggestions])
+  }, [storeSuggestions, repContext])
 
   // Watch billing address for "copy to shipping" functionality
   const billingStreet1 = watch('street1')
@@ -324,7 +339,13 @@ export function OrderForm({
           if (result.success && result.orderId) {
             clearAll() // Clear cart
             toast.success(`Order ${result.orderNumber} created successfully!`)
-            router.push(`/buyer/confirmation/${result.orderId}`)
+            
+            // For rep-created orders, redirect back to rep portal if returnTo is valid
+            if (isRepPortalReturn(returnTo)) {
+              router.push(returnTo)
+            } else {
+              router.push(`/buyer/confirmation/${result.orderId}`)
+            }
           } else {
             toast.error(result.error || 'Failed to create order')
             setIsSubmitting(false)

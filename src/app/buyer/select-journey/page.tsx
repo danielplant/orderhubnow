@@ -3,20 +3,31 @@ import { BrandHeader } from "@/components/buyer/brand-header";
 import { CurrencyToggle } from "@/components/buyer/currency-toggle";
 import { getInventoryMetrics } from "@/lib/data/queries/inventory";
 import { redirect } from "next/navigation";
+import { buildRepQueryStringFromObject } from "@/lib/utils/rep-context";
 
 export const dynamic = 'force-dynamic'
 
-export default async function SelectJourneyPage() {
-  const metrics = await getInventoryMetrics();
+interface Props {
+  searchParams: Promise<Record<string, string | string[] | undefined>>
+}
+
+export default async function SelectJourneyPage({ searchParams }: Props) {
+  const [metrics, params] = await Promise.all([
+    getInventoryMetrics(),
+    searchParams,
+  ]);
+
+  // Build rep context query string to preserve through navigation
+  const repQuery = buildRepQueryStringFromObject(params);
 
   async function navigateToAts() {
     "use server";
-    redirect("/buyer/ats");
+    redirect(`/buyer/ats${repQuery}`);
   }
 
   async function navigateToPreOrder() {
     "use server";
-    redirect("/buyer/pre-order");
+    redirect(`/buyer/pre-order${repQuery}`);
   }
 
   return (

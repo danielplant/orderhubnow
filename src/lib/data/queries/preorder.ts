@@ -6,11 +6,18 @@
  * Pre-order categories: IsPreOrder=true
  * Pre-order SKU filter: ShowInPreOrder=true OR Quantity < 1
  * Excludes: "Defective" categories
+ * 
+ * NOTE: Returns Product type (same as ATS) for unified ProductOrderCard usage.
+ * Field mapping from .NET:
+ * - baseSku → skuBase
+ * - description → title
+ * - fabricContent → fabric
  */
 
 import { prisma } from '@/lib/prisma'
 import { parseSkuId, parsePrice } from '@/lib/utils'
 import { isPrepackCategory, getPPSizeDisplayBatch } from '@/lib/utils/ppsize'
+import type { Product, ProductVariant } from '@/lib/types/inventory'
 
 // ============================================================================
 // Types
@@ -26,28 +33,8 @@ export interface PreOrderCategory {
   imageUrl: string
 }
 
-export interface PreOrderProductVariant {
-  sku: string
-  size: string
-  available: number
-  onRoute: number
-  priceUsd: number
-  priceCad: number
-  msrpUsd: number | null
-  msrpCad: number | null
-  shopifyVariantId: number | null
-}
-
-export interface PreOrderProduct {
-  id: string
-  baseSku: string
-  description: string
-  imageUrl: string | null
-  fabricContent: string | null
-  color: string | null
-  displayPriority: number
-  variants: PreOrderProductVariant[]
-}
+// Legacy types - kept for reference but no longer used
+// PreOrderProduct and PreOrderProductVariant have been replaced by Product and ProductVariant
 
 // ============================================================================
 // Category Queries
@@ -118,13 +105,15 @@ export async function getPreOrderCategoryById(
 /**
  * Get pre-order products with variants for a category.
  * 
+ * Returns Product[] type (same as ATS) for unified ProductOrderCard usage.
+ * Field mapping: baseSku → skuBase, description → title, fabricContent → fabric
+ * 
  * SKU filter: ShowInPreOrder=true OR Quantity < 1
- * Returns OnRoute prominently for pre-order display.
  * Uses PPSize for categories 399, 401.
  */
 export async function getPreOrderProductsWithVariants(
   categoryId: number
-): Promise<PreOrderProduct[]> {
+): Promise<Product[]> {
   // Fetch SKUs matching pre-order criteria
   const skus = await prisma.sku.findMany({
     where: {
@@ -170,12 +159,16 @@ export async function getPreOrderProductsWithVariants(
   const productMap = new Map<
     string,
     {
-      description: string
+      title: string // mapped from description
       imageUrl: string | null
       displayPriority: number
-      fabricContent: string | null
-      color: string | null
-      variants: PreOrderProductVariant[]
+      fabric: string // mapped from fabricContent
+      color: string
+      priceCad: number
+      priceUsd: number
+      msrpCad: number
+      msrpUsd: number
+      variants: ProductVariant[]
     }
   >()
 
@@ -191,28 +184,26 @@ export async function getPreOrderProductsWithVariants(
       size = parsedSize || 'O/S'
     }
 
-    const variant: PreOrderProductVariant = {
+    const variant: ProductVariant = {
       sku: sku.SkuID,
       size,
       available: sku.Quantity ?? 0,
       onRoute: sku.OnRoute ?? 0,
       priceUsd: parsePrice(sku.PriceUSD),
       priceCad: parsePrice(sku.PriceCAD),
-      msrpUsd: sku.MSRPUSD ? parsePrice(sku.MSRPUSD) : null,
-      msrpCad: sku.MSRPCAD ? parsePrice(sku.MSRPCAD) : null,
-      shopifyVariantId: sku.ShopifyProductVariantId
-        ? Number(sku.ShopifyProductVariantId)
-        : null,
     }
 
     if (!productMap.has(baseSku)) {
       productMap.set(baseSku, {
-        description:
-          sku.OrderEntryDescription ?? sku.Description ?? baseSku,
+        title: sku.OrderEntryDescription ?? sku.Description ?? baseSku,
         imageUrl: sku.ShopifyImageURL ?? null,
         displayPriority: sku.DisplayPriority ?? 10000,
-        fabricContent: sku.FabricContent ?? null,
-        color: sku.SkuColor ?? null,
+        fabric: sku.FabricContent ?? '',
+        color: sku.SkuColor ?? '',
+        priceCad: parsePrice(sku.PriceCAD),
+        priceUsd: parsePrice(sku.PriceUSD),
+        msrpCad: sku.MSRPCAD ? parsePrice(sku.MSRPCAD) : 0,
+        msrpUsd: sku.MSRPUSD ? parsePrice(sku.MSRPUSD) : 0,
         variants: [variant],
       })
     } else {
@@ -220,16 +211,20 @@ export async function getPreOrderProductsWithVariants(
     }
   }
 
-  // Convert to array and sort
-  const products: PreOrderProduct[] = Array.from(productMap.entries())
+  // Convert to Product[] array and sort
+  const products: Product[] = Array.from(productMap.entries())
     .map(([baseSku, data]) => ({
       id: baseSku,
-      baseSku,
-      description: data.description,
-      imageUrl: data.imageUrl,
-      fabricContent: data.fabricContent,
+      skuBase: baseSku, // mapped from baseSku
+      title: data.title, // mapped from description
+      fabric: data.fabric, // mapped from fabricContent
       color: data.color,
-      displayPriority: data.displayPriority,
+      imageUrl: data.imageUrl ?? '',
+      priceCad: data.priceCad,
+      priceUsd: data.priceUsd,
+      msrpCad: data.msrpCad,
+      msrpUsd: data.msrpUsd,
+      popularityRank: data.displayPriority, // mapped from displayPriority
       variants: data.variants.sort((a, b) => {
         // Sort sizes: numeric first, then alpha
         const aNum = parseInt(a.size, 10)
@@ -242,8 +237,8 @@ export async function getPreOrderProductsWithVariants(
     }))
     .sort(
       (a, b) =>
-        a.displayPriority - b.displayPriority ||
-        a.baseSku.localeCompare(b.baseSku)
+        (a.popularityRank ?? 10000) - (b.popularityRank ?? 10000) ||
+        a.skuBase.localeCompare(b.skuBase)
     )
 
   return products

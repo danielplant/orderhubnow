@@ -9,6 +9,7 @@ interface Props {
     isPreOrder?: string
     editOrder?: string
     returnTo?: string
+    repId?: string
   }>
 }
 
@@ -19,13 +20,17 @@ interface Props {
  * Query params:
  * - isPreOrder=true: Pre-order flow (order prefix "P")
  * - editOrder={id}: Edit existing order mode
- * - returnTo={path}: Redirect path after successful edit
+ * - returnTo={path}: Redirect path after successful edit/create
+ * - repId={id}: Rep context for rep-created orders (auto-selects and locks rep dropdown)
  */
 export default async function MyOrderPage({ searchParams }: Props) {
   const params = await searchParams
   const isPreOrder = params.isPreOrder === 'true'
   const editOrderId = params.editOrder
   const returnTo = params.returnTo || '/buyer/select-journey'
+  
+  // Extract rep context for rep-created orders
+  const repContext = params.repId ? { repId: params.repId } : null
 
   // Fetch reps for dropdown and SKU data for cart items
   const [reps, skuList] = await Promise.all([
@@ -68,6 +73,7 @@ export default async function MyOrderPage({ searchParams }: Props) {
       isPreOrder={isPreOrder}
       existingOrder={existingOrder}
       returnTo={returnTo}
+      repContext={repContext}
     />
   )
 }

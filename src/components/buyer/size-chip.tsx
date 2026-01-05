@@ -2,27 +2,45 @@
 
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
-import { getStockStatus } from "@/lib/constants/inventory";
+import { STOCK_THRESHOLDS } from "@/lib/constants/inventory";
 import { Button, Popover, PopoverTrigger, PopoverContent, Text } from "@/components/ui";
 
 interface SizeChipProps {
   size: string;
   available: number;
+  /** OnRoute quantity - units in transit to warehouse */
+  onRoute: number;
+  /** Max orderable = max(available, onRoute) for ATS, or 9999 for PreOrder */
+  maxOrderable: number;
   orderedQty: number;
   onTap: () => void;
   onQuantityChange: (delta: number) => void;
 }
 
+/**
+ * Get stock status considering both available and onRoute.
+ * .NET: Uses max(available, onRoute) for determining stock level
+ */
+function getStockStatusWithOnRoute(available: number, onRoute: number): 'out' | 'low' | 'ok' {
+  const maxQty = Math.max(available, onRoute);
+  if (maxQty === 0) return 'out';
+  if (maxQty <= STOCK_THRESHOLDS.LOW) return 'low';
+  return 'ok';
+}
+
 export function SizeChip({
   size,
   available,
+  onRoute,
+  maxOrderable,
   orderedQty,
   onTap,
   onQuantityChange,
 }: SizeChipProps) {
-  const status = getStockStatus(available);
+  const status = getStockStatusWithOnRoute(available, onRoute);
   // Size is now pre-extracted on the server (matches .NET grouping logic)
   const sizeLabel = size || "OS";
+  const hasOnRoute = onRoute > 0;
 
   return (
     <div className="relative shrink-0">
@@ -35,9 +53,9 @@ export function SizeChip({
       <motion.button
         onClick={status !== 'out' ? onTap : undefined}
         disabled={status === 'out'}
-        aria-label={`Size ${sizeLabel}, ${available} available${orderedQty > 0 ? `, ${orderedQty} in order` : ""}${status === 'out' ? ', out of stock' : ''}`}
+        aria-label={`Size ${sizeLabel}, ${available} available${hasOnRoute ? `, ${onRoute} on route` : ""}${orderedQty > 0 ? `, ${orderedQty} in order` : ""}${status === 'out' ? ', out of stock' : ''}`}
         className={cn(
-          "min-w-[var(--size-chip-min)] h-14 px-3 rounded-lg flex flex-col items-center justify-center gap-0.5",
+          "min-w-[var(--size-chip-min)] h-16 px-3 rounded-lg flex flex-col items-center justify-center gap-0.5",
           "ring-1 ring-inset ring-border motion-fast transition-all",
           status === 'out'
             ? "opacity-40 cursor-not-allowed bg-muted text-muted-foreground"
@@ -48,6 +66,12 @@ export function SizeChip({
       >
         <span className="text-sm font-semibold">{sizeLabel}</span>
         <Text variant="caption" className="opacity-60">{available}</Text>
+        {/* OnRoute indicator - matches .NET separate row display */}
+        {hasOnRoute && (
+          <Text variant="caption" className="opacity-50 text-[10px]">
+            ⟳{onRoute}
+          </Text>
+        )}
       </motion.button>
 
       {/* Order Badge with Radix Popover for quantity adjustment */}
@@ -69,35 +93,51 @@ export function SizeChip({
               </motion.button>
             </PopoverTrigger>
             <PopoverContent 
-              className="w-auto p-2" 
+              className="w-auto p-3" 
               side="top" 
               align="center"
               sideOffset={8}
             >
-              {/* Accessible stepper with focus trap (built into Radix Popover) */}
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="icon-sm"
-                  onClick={() => onQuantityChange(-1)}
-                  aria-label="Decrease quantity"
-                >
-                  −
-                </Button>
-                <span className="w-8 text-center text-sm font-semibold tabular-nums">
-                  {orderedQty}
-                </span>
-                <Button
-                  variant="outline"
-                  size="icon-sm"
-                  onClick={() => onQuantityChange(1)}
-                  disabled={orderedQty >= available}
-                  aria-label={orderedQty >= available ? "Maximum available reached" : "Increase quantity"}
-                  title={orderedQty >= available ? "Maximum available reached" : undefined}
-                  className={cn(orderedQty >= available && "opacity-40 cursor-not-allowed")}
-                >
-                  +
-                </Button>
+              {/* Quantity info and stepper - matches .NET display */}
+              <div className="flex flex-col gap-2">
+                {/* Stock info */}
+                <div className="flex gap-3 text-xs text-muted-foreground">
+                  <span>Avail: <span className="font-medium text-foreground">{available}</span></span>
+                  {hasOnRoute && (
+                    <span>Route: <span className="font-medium text-foreground">{onRoute}</span></span>
+                  )}
+                </div>
+                
+                {/* Stepper */}
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="icon-sm"
+                    onClick={() => onQuantityChange(-1)}
+                    aria-label="Decrease quantity"
+                  >
+                    −
+                  </Button>
+                  <span className="w-8 text-center text-sm font-semibold tabular-nums">
+                    {orderedQty}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="icon-sm"
+                    onClick={() => onQuantityChange(1)}
+                    disabled={orderedQty >= maxOrderable}
+                    aria-label={orderedQty >= maxOrderable ? "Maximum orderable reached" : "Increase quantity"}
+                    title={orderedQty >= maxOrderable ? `Max: ${maxOrderable}` : undefined}
+                    className={cn(orderedQty >= maxOrderable && "opacity-40 cursor-not-allowed")}
+                  >
+                    +
+                  </Button>
+                </div>
+                
+                {/* Max info */}
+                <div className="text-[10px] text-muted-foreground text-center">
+                  Max: {maxOrderable}
+                </div>
               </div>
             </PopoverContent>
           </Popover>

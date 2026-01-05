@@ -4,16 +4,21 @@ import { BrandHeader } from "@/components/buyer/brand-header";
 import { ProductOrderCard } from "@/components/buyer/product-order-card";
 import { Divider } from "@/components/ui";
 import { getSkusByCategory, getCategoryName } from "@/lib/data/queries/skus";
+import { buildRepQueryStringFromObject } from "@/lib/utils/rep-context";
 
 interface PageProps {
   params: Promise<{ category: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }
 
 export const dynamic = 'force-dynamic';
 
-export default async function CategoryPage({ params }: PageProps) {
-  const { category } = await params;
+export default async function CategoryPage({ params, searchParams }: PageProps) {
+  const [{ category }, queryParams] = await Promise.all([params, searchParams]);
   const categoryId = parseInt(category, 10);
+  
+  // Build rep context query string to preserve through navigation
+  const repQuery = buildRepQueryStringFromObject(queryParams);
   
   // Fetch category name and products in parallel
   const [categoryName, products] = await Promise.all([
@@ -31,7 +36,7 @@ export default async function CategoryPage({ params }: PageProps) {
         {/* Header */}
         <div className="mb-8 space-y-4">
           <Link
-            href="/buyer/ats"
+            href={`/buyer/ats${repQuery}`}
             className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
           >
             <ArrowLeft className="h-4 w-4" />
