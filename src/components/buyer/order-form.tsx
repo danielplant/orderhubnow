@@ -18,13 +18,14 @@ import {
 } from '@/components/ui/select'
 import { useOrder } from '@/lib/contexts/order-context'
 import { orderFormSchema, type OrderFormData } from '@/lib/schemas/order'
-import { createOrder } from '@/lib/data/actions/orders'
+import { createOrder, updateOrder } from '@/lib/data/actions/orders'
 import { formatCurrency } from '@/lib/utils'
 import type { Currency } from '@/lib/types'
+import type { OrderForEditing } from '@/lib/data/queries/orders'
 
 interface OrderFormProps {
   currency: Currency
-  reps: Array<{ id: string; name: string }>
+  reps: Array<{ id: string; name: string; code: string }>
   cartItems: Array<{
     sku: string
     skuVariantId: number
@@ -32,6 +33,10 @@ interface OrderFormProps {
     price: number
     description?: string
   }>
+  isPreOrder?: boolean
+  editMode?: boolean
+  existingOrder?: OrderForEditing | null
+  returnTo?: string
 }
 
 // Helper to format date as YYYY-MM-DD for input[type="date"]
@@ -39,16 +44,48 @@ function formatDateForInput(date: Date): string {
   return date.toISOString().split('T')[0]
 }
 
-export function OrderForm({ currency, reps, cartItems }: OrderFormProps) {
+// Format ISO date string to display format
+function formatDisplayDate(isoDate: string | null): string {
+  if (!isoDate) return 'TBD'
+  const date = new Date(isoDate)
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+export function OrderForm({
+  currency,
+  reps,
+  cartItems,
+  isPreOrder = false,
+  editMode = false,
+  existingOrder = null,
+  returnTo = '/buyer/select-journey',
+}: OrderFormProps) {
   const router = useRouter()
-  const { clearAll } = useOrder()
+  const { clearAll, getPreOrderShipWindow } = useOrder()
   const [isPending, startTransition] = useTransition()
   const [isSubmitting, setIsSubmitting] = useState(false)
 
-  // Default ship dates: today and today + 14 days
+  // Get pre-order ship window from cart metadata (if available)
+  const preOrderWindow = isPreOrder ? getPreOrderShipWindow() : null
+
+  // Default ship dates:
+  // - For edit mode: use existing order dates
+  // - For pre-orders: use category on-route dates if available
+  // - For ATS: today and today + 14 days
   const today = new Date()
   const twoWeeksFromNow = new Date(today)
   twoWeeksFromNow.setDate(today.getDate() + 14)
+
+  const defaultStartDate = editMode && existingOrder
+    ? existingOrder.shipStartDate
+    : preOrderWindow?.start
+      ? preOrderWindow.start.split('T')[0]
+      : formatDateForInput(today)
+  const defaultEndDate = editMode && existingOrder
+    ? existingOrder.shipEndDate
+    : preOrderWindow?.end
+      ? preOrderWindow.end.split('T')[0]
+      : formatDateForInput(twoWeeksFromNow)
 
   const {
     register,
@@ -58,13 +95,44 @@ export function OrderForm({ currency, reps, cartItems }: OrderFormProps) {
     formState: { errors },
   } = useForm<OrderFormData>({
     resolver: zodResolver(orderFormSchema),
-    defaultValues: {
-      country: 'USA',
-      shippingCountry: 'USA',
-      shipStartDate: formatDateForInput(today),
-      shipEndDate: formatDateForInput(twoWeeksFromNow),
-    },
+    defaultValues: editMode && existingOrder
+      ? {
+          storeName: existingOrder.storeName,
+          buyerName: existingOrder.buyerName,
+          salesRepId: existingOrder.salesRepId || '',
+          customerPhone: existingOrder.customerPhone,
+          customerEmail: existingOrder.customerEmail,
+          website: existingOrder.website || '',
+          // For edit mode, use placeholder values for address (will be skipped)
+          street1: 'N/A',
+          city: 'N/A',
+          stateProvince: 'N/A',
+          zipPostal: 'N/A',
+          country: 'USA',
+          shippingStreet1: 'N/A',
+          shippingCity: 'N/A',
+          shippingStateProvince: 'N/A',
+          shippingZipPostal: 'N/A',
+          shippingCountry: 'USA',
+          shipStartDate: existingOrder.shipStartDate,
+          shipEndDate: existingOrder.shipEndDate,
+          customerPO: existingOrder.customerPO || '',
+          orderNotes: existingOrder.orderNotes || '',
+        }
+      : {
+          country: 'USA',
+          shippingCountry: 'USA',
+          shipStartDate: defaultStartDate,
+          shipEndDate: defaultEndDate,
+        },
   })
+
+  // Set initial salesRepId for edit mode (Select component doesn't read from defaultValues well)
+  useEffect(() => {
+    if (editMode && existingOrder?.salesRepId) {
+      setValue('salesRepId', existingOrder.salesRepId)
+    }
+  }, [editMode, existingOrder, setValue])
 
   // Watch billing address for "copy to shipping" functionality
   const billingStreet1 = watch('street1')
@@ -89,25 +157,58 @@ export function OrderForm({ currency, reps, cartItems }: OrderFormProps) {
 
     startTransition(async () => {
       try {
-        const result = await createOrder({
-          ...data,
-          currency,
-          items: cartItems.map((item) => ({
-            sku: item.sku,
-            skuVariantId: item.skuVariantId,
-            quantity: item.quantity,
-            price: item.price,
-          })),
-          isPreOrder: false, // ATS orders for now
-        })
+        if (editMode && existingOrder) {
+          // Update existing order
+          const result = await updateOrder({
+            orderId: existingOrder.id,
+            storeName: data.storeName,
+            buyerName: data.buyerName,
+            salesRepId: data.salesRepId,
+            customerEmail: data.customerEmail,
+            customerPhone: data.customerPhone,
+            currency,
+            shipStartDate: data.shipStartDate,
+            shipEndDate: data.shipEndDate,
+            orderNotes: data.orderNotes,
+            customerPO: data.customerPO,
+            website: data.website,
+            items: cartItems.map((item) => ({
+              sku: item.sku,
+              skuVariantId: item.skuVariantId,
+              quantity: item.quantity,
+              price: item.price,
+            })),
+          })
 
-        if (result.success && result.orderId) {
-          clearAll() // Clear cart
-          toast.success(`Order ${result.orderNumber} created successfully!`)
-          router.push(`/buyer/confirmation/${result.orderId}`)
+          if (result.success) {
+            toast.success(`Order ${result.orderNumber} updated successfully!`)
+            router.push(returnTo)
+          } else {
+            toast.error(result.error || 'Failed to update order')
+            setIsSubmitting(false)
+          }
         } else {
-          toast.error(result.error || 'Failed to create order')
-          setIsSubmitting(false)
+          // Create new order
+          const result = await createOrder({
+            ...data,
+            currency,
+            items: cartItems.map((item) => ({
+              sku: item.sku,
+              skuVariantId: item.skuVariantId,
+              quantity: item.quantity,
+              price: item.price,
+            })),
+            isPreOrder, // P prefix for pre-orders, A prefix for ATS
+          })
+
+          if (result.success && result.orderId) {
+            clearAll() // Clear cart
+            toast.success(`Order ${result.orderNumber} created successfully!`)
+            router.push(`/buyer/confirmation/${result.orderId}`)
+          } else {
+            toast.error(result.error || 'Failed to create order')
+            setIsSubmitting(false)
+          }
         }
       } catch (error) {
         toast.error('An unexpected error occurred')
@@ -156,21 +257,24 @@ export function OrderForm({ currency, reps, cartItems }: OrderFormProps) {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="salesRep">Sales Rep *</Label>
-              <Select onValueChange={(value) => setValue('salesRep', value)}>
+              <Label htmlFor="salesRepId">Sales Rep *</Label>
+              <Select
+                defaultValue={editMode && existingOrder?.salesRepId ? existingOrder.salesRepId : undefined}
+                onValueChange={(value) => setValue('salesRepId', value)}
+              >
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="Select a rep" />
                 </SelectTrigger>
                 <SelectContent>
                   {reps.map((rep) => (
-                    <SelectItem key={rep.id} value={rep.name}>
+                    <SelectItem key={rep.id} value={rep.id}>
                       {rep.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-              {errors.salesRep && (
-                <p className="text-sm text-destructive">{errors.salesRep.message}</p>
+              {errors.salesRepId && (
+                <p className="text-sm text-destructive">{errors.salesRepId.message}</p>
               )}
             </div>
 
@@ -216,183 +320,211 @@ export function OrderForm({ currency, reps, cartItems }: OrderFormProps) {
         </CardContent>
       </Card>
 
-      {/* Billing Address */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Billing Address</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2 md:col-span-2">
-              <Label htmlFor="street1">Street Address *</Label>
-              <Input
-                id="street1"
-                {...register('street1')}
-                placeholder="123 Main St"
-              />
-              {errors.street1 && (
-                <p className="text-sm text-destructive">{errors.street1.message}</p>
-              )}
-            </div>
+      {/* Billing Address - Only show for new orders */}
+      {!editMode && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Billing Address</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2 md:col-span-2">
+                <Label htmlFor="street1">Street Address *</Label>
+                <Input
+                  id="street1"
+                  {...register('street1')}
+                  placeholder="123 Main St"
+                />
+                {errors.street1 && (
+                  <p className="text-sm text-destructive">{errors.street1.message}</p>
+                )}
+              </div>
 
-            <div className="space-y-2 md:col-span-2">
-              <Label htmlFor="street2">Street Address 2</Label>
-              <Input
-                id="street2"
-                {...register('street2')}
-                placeholder="Suite 100"
-              />
-            </div>
+              <div className="space-y-2 md:col-span-2">
+                <Label htmlFor="street2">Street Address 2</Label>
+                <Input
+                  id="street2"
+                  {...register('street2')}
+                  placeholder="Suite 100"
+                />
+              </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="city">City *</Label>
-              <Input id="city" {...register('city')} placeholder="City" />
-              {errors.city && (
-                <p className="text-sm text-destructive">{errors.city.message}</p>
-              )}
-            </div>
+              <div className="space-y-2">
+                <Label htmlFor="city">City *</Label>
+                <Input id="city" {...register('city')} placeholder="City" />
+                {errors.city && (
+                  <p className="text-sm text-destructive">{errors.city.message}</p>
+                )}
+              </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="stateProvince">State/Province *</Label>
-              <Input
-                id="stateProvince"
-                {...register('stateProvince')}
-                placeholder="CA"
-                maxLength={3}
-              />
-              {errors.stateProvince && (
-                <p className="text-sm text-destructive">{errors.stateProvince.message}</p>
-              )}
-            </div>
+              <div className="space-y-2">
+                <Label htmlFor="stateProvince">State/Province *</Label>
+                <Input
+                  id="stateProvince"
+                  {...register('stateProvince')}
+                  placeholder="CA"
+                  maxLength={3}
+                />
+                {errors.stateProvince && (
+                  <p className="text-sm text-destructive">{errors.stateProvince.message}</p>
+                )}
+              </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="zipPostal">Zip/Postal Code *</Label>
-              <Input
-                id="zipPostal"
-                {...register('zipPostal')}
-                placeholder="12345"
-              />
-              {errors.zipPostal && (
-                <p className="text-sm text-destructive">{errors.zipPostal.message}</p>
-              )}
-            </div>
+              <div className="space-y-2">
+                <Label htmlFor="zipPostal">Zip/Postal Code *</Label>
+                <Input
+                  id="zipPostal"
+                  {...register('zipPostal')}
+                  placeholder="12345"
+                />
+                {errors.zipPostal && (
+                  <p className="text-sm text-destructive">{errors.zipPostal.message}</p>
+                )}
+              </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="country">Country *</Label>
-              <Select
-                defaultValue="USA"
-                onValueChange={(value) => setValue('country', value as 'USA' | 'Canada')}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select country" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="USA">USA</SelectItem>
-                  <SelectItem value="Canada">Canada</SelectItem>
-                </SelectContent>
-              </Select>
-              {errors.country && (
-                <p className="text-sm text-destructive">{errors.country.message}</p>
-              )}
+              <div className="space-y-2">
+                <Label htmlFor="country">Country *</Label>
+                <Select
+                  defaultValue="USA"
+                  onValueChange={(value) => setValue('country', value as 'USA' | 'Canada')}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Select country" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="USA">USA</SelectItem>
+                    <SelectItem value="Canada">Canada</SelectItem>
+                  </SelectContent>
+                </Select>
+                {errors.country && (
+                  <p className="text-sm text-destructive">{errors.country.message}</p>
+                )}
+              </div>
             </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
 
-      {/* Shipping Address */}
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle>Shipping Address</CardTitle>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={copyBillingToShipping}
-          >
-            Copy from Billing
-          </Button>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2 md:col-span-2">
-              <Label htmlFor="shippingStreet1">Street Address *</Label>
-              <Input
-                id="shippingStreet1"
-                {...register('shippingStreet1')}
-                placeholder="123 Main St"
-              />
-              {errors.shippingStreet1 && (
-                <p className="text-sm text-destructive">{errors.shippingStreet1.message}</p>
-              )}
-            </div>
+      {/* Shipping Address - Only show for new orders */}
+      {!editMode && (
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle>Shipping Address</CardTitle>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={copyBillingToShipping}
+            >
+              Copy from Billing
+            </Button>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2 md:col-span-2">
+                <Label htmlFor="shippingStreet1">Street Address *</Label>
+                <Input
+                  id="shippingStreet1"
+                  {...register('shippingStreet1')}
+                  placeholder="123 Main St"
+                />
+                {errors.shippingStreet1 && (
+                  <p className="text-sm text-destructive">{errors.shippingStreet1.message}</p>
+                )}
+              </div>
 
-            <div className="space-y-2 md:col-span-2">
-              <Label htmlFor="shippingStreet2">Street Address 2</Label>
-              <Input
-                id="shippingStreet2"
-                {...register('shippingStreet2')}
-                placeholder="Suite 100"
-              />
-            </div>
+              <div className="space-y-2 md:col-span-2">
+                <Label htmlFor="shippingStreet2">Street Address 2</Label>
+                <Input
+                  id="shippingStreet2"
+                  {...register('shippingStreet2')}
+                  placeholder="Suite 100"
+                />
+              </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="shippingCity">City *</Label>
-              <Input
-                id="shippingCity"
-                {...register('shippingCity')}
-                placeholder="City"
-              />
-              {errors.shippingCity && (
-                <p className="text-sm text-destructive">{errors.shippingCity.message}</p>
-              )}
-            </div>
+              <div className="space-y-2">
+                <Label htmlFor="shippingCity">City *</Label>
+                <Input
+                  id="shippingCity"
+                  {...register('shippingCity')}
+                  placeholder="City"
+                />
+                {errors.shippingCity && (
+                  <p className="text-sm text-destructive">{errors.shippingCity.message}</p>
+                )}
+              </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="shippingStateProvince">State/Province *</Label>
-              <Input
-                id="shippingStateProvince"
-                {...register('shippingStateProvince')}
-                placeholder="CA"
-                maxLength={3}
-              />
-              {errors.shippingStateProvince && (
-                <p className="text-sm text-destructive">{errors.shippingStateProvince.message}</p>
-              )}
-            </div>
+              <div className="space-y-2">
+                <Label htmlFor="shippingStateProvince">State/Province *</Label>
+                <Input
+                  id="shippingStateProvince"
+                  {...register('shippingStateProvince')}
+                  placeholder="CA"
+                  maxLength={3}
+                />
+                {errors.shippingStateProvince && (
+                  <p className="text-sm text-destructive">{errors.shippingStateProvince.message}</p>
+                )}
+              </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="shippingZipPostal">Zip/Postal Code *</Label>
-              <Input
-                id="shippingZipPostal"
-                {...register('shippingZipPostal')}
-                placeholder="12345"
-              />
-              {errors.shippingZipPostal && (
-                <p className="text-sm text-destructive">{errors.shippingZipPostal.message}</p>
-              )}
-            </div>
+              <div className="space-y-2">
+                <Label htmlFor="shippingZipPostal">Zip/Postal Code *</Label>
+                <Input
+                  id="shippingZipPostal"
+                  {...register('shippingZipPostal')}
+                  placeholder="12345"
+                />
+                {errors.shippingZipPostal && (
+                  <p className="text-sm text-destructive">{errors.shippingZipPostal.message}</p>
+                )}
+              </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="shippingCountry">Country *</Label>
-              <Select
-                defaultValue="USA"
-                onValueChange={(value) => setValue('shippingCountry', value as 'USA' | 'Canada')}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select country" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="USA">USA</SelectItem>
-                  <SelectItem value="Canada">Canada</SelectItem>
-                </SelectContent>
-              </Select>
-              {errors.shippingCountry && (
-                <p className="text-sm text-destructive">{errors.shippingCountry.message}</p>
-              )}
+              <div className="space-y-2">
+                <Label htmlFor="shippingCountry">Country *</Label>
+                <Select
+                  defaultValue="USA"
+                  onValueChange={(value) => setValue('shippingCountry', value as 'USA' | 'Canada')}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Select country" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="USA">USA</SelectItem>
+                    <SelectItem value="Canada">Canada</SelectItem>
+                  </SelectContent>
+                </Select>
+                {errors.shippingCountry && (
+                  <p className="text-sm text-destructive">{errors.shippingCountry.message}</p>
+                )}
+              </div>
             </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Pre-Order Info Banner */}
+      {isPreOrder && preOrderWindow && !editMode && (
+        <Card className="border-primary/30 bg-primary/5">
+          <CardContent className="pt-6">
+            <div className="flex items-start gap-3">
+              <div className="rounded-full bg-primary/10 p-2">
+                <svg className="h-5 w-5 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+              </div>
+              <div>
+                <p className="font-medium text-foreground">Pre-Order</p>
+                <p className="text-sm text-muted-foreground">
+                  Category ships: {formatDisplayDate(preOrderWindow.start)} - {formatDisplayDate(preOrderWindow.end)}
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  You can adjust your requested ship window below.
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Order Details */}
       <Card>
@@ -454,14 +586,27 @@ export function OrderForm({ currency, reps, cartItems }: OrderFormProps) {
             <div className="text-lg font-semibold">
               Order Total: {formatCurrency(orderTotal, currency)}
             </div>
-            <Button
-              type="submit"
-              size="lg"
-              disabled={isPending || isSubmitting}
-              className="w-full sm:w-auto"
-            >
-              {isPending || isSubmitting ? 'Submitting...' : 'Submit Order'}
-            </Button>
+            <div className="flex gap-2">
+              {editMode && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => router.push(returnTo)}
+                >
+                  Cancel
+                </Button>
+              )}
+              <Button
+                type="submit"
+                size="lg"
+                disabled={isPending || isSubmitting}
+                className="w-full sm:w-auto"
+              >
+                {isPending || isSubmitting
+                  ? (editMode ? 'Updating...' : 'Submitting...')
+                  : (editMode ? 'Update Order' : 'Submit Order')}
+              </Button>
+            </div>
           </div>
         </CardContent>
       </Card>

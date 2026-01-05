@@ -1,6 +1,7 @@
 'use client'
 
 import * as React from 'react'
+import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import {
   DataTable,
@@ -198,7 +199,11 @@ export function OrdersTable({ initialOrders, total, statusCounts, reps }: Orders
       {
         id: 'orderNumber',
         header: 'Order #',
-        cell: (o) => <span className="font-medium">{o.orderNumber}</span>,
+        cell: (o) => (
+          <Link href={`/admin/orders/${o.id}`} className="font-medium hover:underline">
+            {o.orderNumber}
+          </Link>
+        ),
       },
       {
         id: 'status',
@@ -257,6 +262,9 @@ export function OrdersTable({ initialOrders, total, statusCounts, reps }: Orders
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
+              <DropdownMenuItem asChild>
+                <Link href={`/admin/orders/${o.id}`}>View</Link>
+              </DropdownMenuItem>
               <DropdownMenuItem onClick={() => setCommentsOrderId(o.id)}>
                 Comments
               </DropdownMenuItem>

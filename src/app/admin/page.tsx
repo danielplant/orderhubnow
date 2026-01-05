@@ -64,11 +64,14 @@ async function POSoldSection() {
 
 // Server component for Exception Alerts
 async function ExceptionAlertsSection() {
+  let exceptions: Awaited<ReturnType<typeof getExceptionReport>> | null = null;
   try {
-    const exceptions = await getExceptionReport();
-    return <ExceptionAlertsWidget exceptions={exceptions} maxItems={5} />;
-  } catch (error) {
-    // Schema not yet updated - show placeholder
+    exceptions = await getExceptionReport();
+  } catch {
+    exceptions = null;
+  }
+
+  if (!exceptions) {
     return (
       <div className="rounded-lg border bg-muted/30 p-6 text-center">
         <AlertTriangle className="mx-auto h-8 w-8 text-muted-foreground mb-2" />
@@ -81,15 +84,20 @@ async function ExceptionAlertsSection() {
       </div>
     );
   }
+
+  return <ExceptionAlertsWidget exceptions={exceptions} maxItems={5} />;
 }
 
 // Server component for At-Risk Accounts
 async function AtRiskAccountsSection() {
+  let accounts: Awaited<ReturnType<typeof getAtRiskAccounts>> | null = null;
   try {
-    const accounts = await getAtRiskAccounts(60, 5);
-    return <AtRiskAccountsWidget accounts={accounts} maxItems={5} />;
-  } catch (error) {
-    // Schema not yet updated - show placeholder
+    accounts = await getAtRiskAccounts(60, 5);
+  } catch {
+    accounts = null;
+  }
+
+  if (!accounts) {
     return (
       <div className="rounded-lg border bg-muted/30 p-6 text-center">
         <AlertTriangle className="mx-auto h-8 w-8 text-muted-foreground mb-2" />
@@ -99,6 +107,8 @@ async function AtRiskAccountsSection() {
       </div>
     );
   }
+
+  return <AtRiskAccountsWidget accounts={accounts} maxItems={5} />;
 }
 
 // Period label mapping

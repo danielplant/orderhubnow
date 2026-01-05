@@ -42,6 +42,7 @@ export interface CustomerInput {
   customerName?: string | null
   phone?: string | null
   rep?: string | null
+  repId?: string | null  // If provided, look up code from Reps table (takes precedence over rep)
   street1?: string | null
   street2?: string | null
   city?: string | null

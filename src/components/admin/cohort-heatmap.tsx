@@ -74,6 +74,25 @@ export function CohortHeatmap({
   data,
   colorThresholds = DEFAULT_THRESHOLDS,
 }: CohortHeatmapProps) {
+  // Calculate averages for footer
+  const averages = React.useMemo(() => {
+    const result: Record<string, number | null> = {};
+
+    RETENTION_COLUMNS.forEach((col) => {
+      const values = data
+        .map((row) => row[col])
+        .filter((v): v is number => v !== null);
+
+      if (values.length === 0) {
+        result[col] = null;
+      } else {
+        result[col] = values.reduce((sum, v) => sum + v, 0) / values.length;
+      }
+    });
+
+    return result;
+  }, [data]);
+
   if (data.length === 0) {
     return (
       <EmptyReportState
@@ -85,25 +104,6 @@ export function CohortHeatmap({
       </EmptyReportState>
     );
   }
-
-  // Calculate averages for footer
-  const averages = React.useMemo(() => {
-    const result: Record<string, number | null> = {};
-    
-    RETENTION_COLUMNS.forEach((col) => {
-      const values = data
-        .map((row) => row[col])
-        .filter((v): v is number => v !== null);
-      
-      if (values.length === 0) {
-        result[col] = null;
-      } else {
-        result[col] = values.reduce((sum, v) => sum + v, 0) / values.length;
-      }
-    });
-    
-    return result;
-  }, [data]);
 
   const totalLTV = data.reduce((sum, row) => sum + row.ltv, 0);
   const avgLTV = data.length > 0 ? totalLTV / data.length : 0;

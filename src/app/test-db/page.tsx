@@ -1,5 +1,7 @@
 import { prisma } from "@/lib/prisma";
 
+export const dynamic = 'force-dynamic'
+
 export default async function TestDbPage() {
   const categories = await prisma.skuCategories.findMany({
     orderBy: { SortOrder: "asc" },

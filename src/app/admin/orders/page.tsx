@@ -1,6 +1,8 @@
 import { getOrders, getRepsForFilter } from '@/lib/data/queries/orders'
 import { OrdersTable } from '@/components/admin/orders-table'
 
+export const dynamic = 'force-dynamic'
+
 interface OrdersPageProps {
   searchParams: Promise<Record<string, string | string[] | undefined>>
 }

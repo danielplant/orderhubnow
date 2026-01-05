@@ -16,9 +16,29 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from '@/components/ui'
-import type { RepWithLogin } from '@/lib/types/rep'
-import { createRep, updateRep, updateRepPassword, deleteRep } from '@/lib/data/actions/reps'
-import { MoreHorizontal, Plus, Pencil, Key, Trash2, ExternalLink } from 'lucide-react'
+import type { RepWithLogin, UserStatus } from '@/lib/types/rep'
+import {
+  createRep,
+  updateRep,
+  deleteRep,
+  resendInvite,
+  forcePasswordReset,
+  disableRep,
+  enableRep,
+  getInviteLink,
+} from '@/lib/data/actions/reps'
+import {
+  MoreHorizontal,
+  Plus,
+  Pencil,
+  Trash2,
+  ExternalLink,
+  Mail,
+  Link2,
+  ShieldOff,
+  ShieldCheck,
+  RotateCcw,
+} from 'lucide-react'
 
 // ============================================================================
 // Types
@@ -28,7 +48,40 @@ export interface RepsTableProps {
   items: RepWithLogin[]
 }
 
-type ModalMode = 'add' | 'edit' | 'password' | 'delete' | null
+type ModalMode = 'add' | 'edit' | 'delete' | 'invite-success' | null
+
+// ============================================================================
+// Status Badge Component
+// ============================================================================
+
+function StatusBadge({ status }: { status: UserStatus }) {
+  const config: Record<UserStatus, { label: string; className: string }> = {
+    invited: {
+      label: 'Invited',
+      className: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400',
+    },
+    active: {
+      label: 'Active',
+      className: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400',
+    },
+    legacy: {
+      label: 'Needs Reset',
+      className: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400',
+    },
+    disabled: {
+      label: 'Disabled',
+      className: 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400',
+    },
+  }
+
+  const c = config[status] ?? { label: status, className: 'bg-gray-100 text-gray-500' }
+
+  return (
+    <span className={`px-2 py-1 rounded-full text-xs font-medium ${c.className}`}>
+      {c.label}
+    </span>
+  )
+}
 
 // ============================================================================
 // Component
@@ -54,16 +107,18 @@ export function RepsTable({ items }: RepsTableProps) {
     fax: '',
     address: '',
     country: '',
-    password: '',
   })
 
-  // Password form state
-  const [newPassword, setNewPassword] = React.useState('')
+  // Invite success state
+  const [inviteUrl, setInviteUrl] = React.useState<string | null>(null)
+  const [copySuccess, setCopySuccess] = React.useState(false)
 
   const openModal = (mode: ModalMode, rep?: RepWithLogin) => {
     setModalMode(mode)
     setSelectedRep(rep ?? null)
     setError(null)
+    setInviteUrl(null)
+    setCopySuccess(false)
 
     if (mode === 'edit' && rep) {
       setFormData({
@@ -77,7 +132,6 @@ export function RepsTable({ items }: RepsTableProps) {
         fax: rep.fax,
         address: rep.address,
         country: rep.country,
-        password: '',
       })
     } else if (mode === 'add') {
       setFormData({
@@ -91,10 +145,7 @@ export function RepsTable({ items }: RepsTableProps) {
         fax: '',
         address: '',
         country: 'CA',
-        password: '',
       })
-    } else if (mode === 'password') {
-      setNewPassword('')
     }
   }
 
@@ -102,6 +153,8 @@ export function RepsTable({ items }: RepsTableProps) {
     setModalMode(null)
     setSelectedRep(null)
     setError(null)
+    setInviteUrl(null)
+    setCopySuccess(false)
   }
 
   const handleSubmit = async () => {
@@ -121,12 +174,16 @@ export function RepsTable({ items }: RepsTableProps) {
           fax: formData.fax,
           address: formData.address,
           country: formData.country,
-          password: formData.password,
         })
         if (!result.success) {
           setError(result.error ?? 'Failed to add rep')
           return
         }
+        // Show success modal with invite URL
+        setInviteUrl(result.inviteUrl ?? null)
+        setModalMode('invite-success')
+        router.refresh()
+        return
       } else if (modalMode === 'edit' && selectedRep) {
         const result = await updateRep(String(selectedRep.id), {
           name: formData.name,
@@ -144,15 +201,6 @@ export function RepsTable({ items }: RepsTableProps) {
           setError(result.error ?? 'Failed to update rep')
           return
         }
-      } else if (modalMode === 'password' && selectedRep) {
-        const result = await updateRepPassword({
-          repId: String(selectedRep.id),
-          newPassword,
-        })
-        if (!result.success) {
-          setError(result.error ?? 'Failed to update password')
-          return
-        }
       } else if (modalMode === 'delete' && selectedRep) {
         const result = await deleteRep(String(selectedRep.id))
         if (!result.success) {
@@ -165,6 +213,85 @@ export function RepsTable({ items }: RepsTableProps) {
       router.refresh()
     } finally {
       setIsSubmitting(false)
+    }
+  }
+
+  const handleAction = React.useCallback(
+    async (
+      action: 'resend' | 'reset' | 'disable' | 'enable' | 'copyLink',
+      rep: RepWithLogin
+    ) => {
+      if (!rep.userId) return
+
+      setIsSubmitting(true)
+      setError(null)
+
+      try {
+        let result: { success: boolean; inviteUrl?: string; resetUrl?: string; error?: string }
+
+        switch (action) {
+          case 'resend':
+            result = await resendInvite(rep.userId)
+            break
+          case 'reset':
+            result = await forcePasswordReset(rep.userId)
+            break
+          case 'disable':
+            result = await disableRep(rep.userId)
+            break
+          case 'enable':
+            result = await enableRep(rep.userId)
+            break
+          case 'copyLink':
+            result = await getInviteLink(rep.userId)
+            if (result.success && result.inviteUrl) {
+              await navigator.clipboard.writeText(result.inviteUrl)
+            }
+            break
+          default:
+            return
+        }
+
+        if (!result.success) {
+          setError(result.error ?? 'Action failed')
+          return
+        }
+
+        // Show success with invite URL if available
+        if ((action === 'resend' || action === 'enable') && result.inviteUrl) {
+          setSelectedRep(rep)
+          setInviteUrl(result.inviteUrl)
+          setModalMode('invite-success')
+        } else if (action === 'reset' && result.resetUrl) {
+          setSelectedRep(rep)
+          setInviteUrl(result.resetUrl)
+          setModalMode('invite-success')
+        }
+
+        router.refresh()
+      } finally {
+        setIsSubmitting(false)
+      }
+    },
+    [router]
+  )
+
+  const copyToClipboard = async () => {
+    if (!inviteUrl) return
+    try {
+      await navigator.clipboard.writeText(inviteUrl)
+      setCopySuccess(true)
+      setTimeout(() => setCopySuccess(false), 2000)
+    } catch {
+      // Fallback for older browsers
+      const textArea = document.createElement('textarea')
+      textArea.value = inviteUrl
+      document.body.appendChild(textArea)
+      textArea.select()
+      document.execCommand('copy')
+      document.body.removeChild(textArea)
+      setCopySuccess(true)
+      setTimeout(() => setCopySuccess(false), 2000)
     }
   }
 
@@ -181,6 +308,11 @@ export function RepsTable({ items }: RepsTableProps) {
         cell: (r) => <span className="font-mono text-sm">{r.code}</span>,
       },
       {
+        id: 'status',
+        header: 'Status',
+        cell: (r) => <StatusBadge status={r.status} />,
+      },
+      {
         id: 'email1',
         header: 'Email',
         cell: (r) => <span className="text-muted-foreground">{r.email1}</span>,
@@ -193,11 +325,7 @@ export function RepsTable({ items }: RepsTableProps) {
       {
         id: 'country',
         header: 'Country',
-        cell: (r) => (
-          <span className="text-sm">
-            {r.country === 'CA' ? '🇨🇦' : r.country === 'US' ? '🇺🇸' : r.country || '—'}
-          </span>
-        ),
+        cell: (r) => <span className="text-sm">{r.country || '—'}</span>,
       },
       {
         id: 'actions',
@@ -215,17 +343,67 @@ export function RepsTable({ items }: RepsTableProps) {
                 <Pencil className="h-4 w-4 mr-2" />
                 Edit
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => openModal('password', r)}>
-                <Key className="h-4 w-4 mr-2" />
-                Update Password
-              </DropdownMenuItem>
+
+              {/* Status-specific actions */}
+              {r.status === 'invited' && (
+                <>
+                  <DropdownMenuItem onClick={() => handleAction('resend', r)}>
+                    <Mail className="h-4 w-4 mr-2" />
+                    Resend Invite
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleAction('copyLink', r)}>
+                    <Link2 className="h-4 w-4 mr-2" />
+                    Copy Invite Link
+                  </DropdownMenuItem>
+                </>
+              )}
+
+              {r.status === 'active' && (
+                <DropdownMenuItem onClick={() => handleAction('reset', r)}>
+                  <RotateCcw className="h-4 w-4 mr-2" />
+                  Force Password Reset
+                </DropdownMenuItem>
+              )}
+
+              {r.status === 'legacy' && (
+                <>
+                  <DropdownMenuItem onClick={() => handleAction('resend', r)}>
+                    <Mail className="h-4 w-4 mr-2" />
+                    Send Reset Link
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleAction('copyLink', r)}>
+                    <Link2 className="h-4 w-4 mr-2" />
+                    Copy Reset Link
+                  </DropdownMenuItem>
+                </>
+              )}
+
+              {r.status === 'disabled' && (
+                <DropdownMenuItem onClick={() => handleAction('enable', r)}>
+                  <ShieldCheck className="h-4 w-4 mr-2" />
+                  Enable Account
+                </DropdownMenuItem>
+              )}
+
               <DropdownMenuItem
                 onClick={() => router.push(`/admin/orders?rep=${encodeURIComponent(r.name)}`)}
               >
                 <ExternalLink className="h-4 w-4 mr-2" />
                 View Orders
               </DropdownMenuItem>
+
               <DropdownMenuSeparator />
+
+              {(r.status === 'active' || r.status === 'invited' || r.status === 'legacy') && (
+                <DropdownMenuItem
+                  onClick={() => handleAction('disable', r)}
+                  className="text-destructive"
+                >
+                  <ShieldOff className="h-4 w-4 mr-2" />
+                  Disable Account
+                </DropdownMenuItem>
+              )}
+
               <DropdownMenuItem
                 onClick={() => openModal('delete', r)}
                 className="text-destructive"
@@ -238,7 +416,7 @@ export function RepsTable({ items }: RepsTableProps) {
         ),
       },
     ],
-    [router]
+    [router, handleAction]
   )
 
   return (
@@ -250,6 +428,13 @@ export function RepsTable({ items }: RepsTableProps) {
           Add Rep
         </Button>
       </div>
+
+      {/* Error display */}
+      {error && (
+        <div className="bg-destructive/10 text-destructive px-4 py-2 rounded-md text-sm">
+          {error}
+        </div>
+      )}
 
       {/* Table */}
       <DataTable
@@ -268,6 +453,12 @@ export function RepsTable({ items }: RepsTableProps) {
           </DialogHeader>
 
           <div className="grid gap-4 mt-4">
+            {modalMode === 'add' && (
+              <p className="text-sm text-muted-foreground">
+                An invite email will be sent to set up their password.
+              </p>
+            )}
+
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium mb-1">Name *</label>
@@ -291,7 +482,7 @@ export function RepsTable({ items }: RepsTableProps) {
             </div>
 
             <div>
-              <label className="block text-sm font-medium mb-1">Email 1 *</label>
+              <label className="block text-sm font-medium mb-1">Email *</label>
               <input
                 type="email"
                 value={formData.email1}
@@ -374,18 +565,6 @@ export function RepsTable({ items }: RepsTableProps) {
               </select>
             </div>
 
-            {modalMode === 'add' && (
-              <div>
-                <label className="block text-sm font-medium mb-1">Password *</label>
-                <input
-                  type="password"
-                  value={formData.password}
-                  onChange={(e) => setFormData((f) => ({ ...f, password: e.target.value }))}
-                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                />
-              </div>
-            )}
-
             {error && <p className="text-sm text-destructive">{error}</p>}
 
             <div className="flex gap-2 justify-end">
@@ -393,40 +572,51 @@ export function RepsTable({ items }: RepsTableProps) {
                 Cancel
               </Button>
               <Button onClick={handleSubmit} disabled={isSubmitting}>
-                {isSubmitting ? 'Saving...' : modalMode === 'add' ? 'Add Rep' : 'Save Changes'}
+                {isSubmitting
+                  ? 'Saving...'
+                  : modalMode === 'add'
+                    ? 'Add Rep & Send Invite'
+                    : 'Save Changes'}
               </Button>
             </div>
           </div>
         </DialogContent>
       </Dialog>
 
-      {/* Password Modal */}
-      <Dialog open={modalMode === 'password'} onOpenChange={closeModal}>
+      {/* Invite Success Modal */}
+      <Dialog open={modalMode === 'invite-success'} onOpenChange={closeModal}>
         <DialogContent className="bg-background sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Update Password — {selectedRep?.name}</DialogTitle>
+            <DialogTitle>Invite Sent</DialogTitle>
           </DialogHeader>
 
-          <div className="flex flex-col gap-4 mt-4">
-            <div>
-              <label className="block text-sm font-medium mb-1">New Password</label>
-              <input
-                type="password"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              />
-            </div>
+          <div className="mt-4 space-y-4">
+            <p className="text-muted-foreground">
+              An invite email has been sent to{' '}
+              <strong>{selectedRep?.email1 || 'the rep'}</strong>.
+            </p>
 
-            {error && <p className="text-sm text-destructive">{error}</p>}
+            {inviteUrl && (
+              <div className="space-y-2">
+                <p className="text-sm text-muted-foreground">
+                  If the email does not arrive, you can copy the invite link:
+                </p>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={inviteUrl}
+                    readOnly
+                    className="flex-1 h-10 rounded-md border border-input bg-muted px-3 text-sm"
+                  />
+                  <Button variant="secondary" onClick={copyToClipboard}>
+                    {copySuccess ? 'Copied!' : 'Copy'}
+                  </Button>
+                </div>
+              </div>
+            )}
 
-            <div className="flex gap-2 justify-end">
-              <Button variant="secondary" onClick={closeModal} disabled={isSubmitting}>
-                Cancel
-              </Button>
-              <Button onClick={handleSubmit} disabled={isSubmitting}>
-                {isSubmitting ? 'Updating...' : 'Update Password'}
-              </Button>
+            <div className="flex justify-end">
+              <Button onClick={closeModal}>Done</Button>
             </div>
           </div>
         </DialogContent>

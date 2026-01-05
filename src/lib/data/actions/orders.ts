@@ -137,10 +137,39 @@ export async function updateOrderRep(input: {
 
 /**
  * Generate next order number with A (ATS) or P (Pre-Order) prefix.
- * Matches .NET MyOrder.aspx.cs order number generation.
+ * Uses atomic stored procedure to prevent race conditions.
+ * 
+ * Matches .NET MyOrder.aspx.cs format: A{number} or P{number}
  */
 export async function getNextOrderNumber(isPreOrder: boolean): Promise<string> {
   const prefix = isPreOrder ? 'P' : 'A'
+
+  try {
+    // Use atomic stored procedure for concurrency safety
+    const result = await prisma.$queryRaw<[{ OrderNumber: string }]>`
+      DECLARE @OrderNumber NVARCHAR(50);
+      EXEC [dbo].[uspGetNextOrderNumber] @Prefix = ${prefix}, @OrderNumber = @OrderNumber OUTPUT;
+      SELECT @OrderNumber AS OrderNumber;
+    `
+    
+    if (result?.[0]?.OrderNumber) {
+      return result[0].OrderNumber
+    }
+    
+    // Fallback if SP not available (e.g., migration not run yet)
+    return getNextOrderNumberFallback(prefix)
+  } catch (error) {
+    // Fallback to legacy method if SP doesn't exist
+    console.warn('Order number SP not available, using fallback:', error)
+    return getNextOrderNumberFallback(prefix)
+  }
+}
+
+/**
+ * Fallback order number generation (legacy method).
+ * WARNING: Has race condition - only use if SP is unavailable.
+ */
+async function getNextOrderNumberFallback(prefix: string): Promise<string> {
   const defaultStart = 10001
 
   const lastOrder = await prisma.customerOrders.findFirst({
@@ -194,14 +223,26 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
     )
 
     // Create order and items in transaction
-    const order = await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
+      // Look up rep by ID - fail if not found
+      const rep = await tx.reps.findUnique({
+        where: { ID: parseInt(data.salesRepId) },
+        select: { Name: true, Code: true },
+      })
+      if (!rep) {
+        throw new Error('Invalid sales rep')
+      }
+      // NAME for CustomerOrders.SalesRep, CODE (with fallback) for Customers.Rep
+      const salesRepName = rep.Name ?? ''
+      const salesRepCode = rep.Code?.trim() || rep.Name || ''
+
       // Create order header
       const newOrder = await tx.customerOrders.create({
         data: {
           OrderNumber: orderNumber,
           BuyerName: data.buyerName,
           StoreName: data.storeName,
-          SalesRep: data.salesRep,
+          SalesRep: salesRepName,
           CustomerEmail: data.customerEmail,
           CustomerPhone: data.customerPhone,
           Country: data.currency, // Legacy: stores currency, not country
@@ -245,7 +286,7 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
             CustomerName: data.buyerName,
             Email: data.customerEmail,
             Phone: data.customerPhone,
-            Rep: data.salesRep,
+            Rep: salesRepCode,
             Street1: data.street1,
             Street2: data.street2 ?? '',
             City: data.city,
@@ -270,7 +311,7 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
             CustomerName: data.buyerName,
             Email: data.customerEmail,
             Phone: data.customerPhone,
-            Rep: data.salesRep,
+            Rep: salesRepCode,
             Street1: data.street1,
             Street2: data.street2 ?? '',
             City: data.city,
@@ -291,19 +332,19 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
         })
       }
 
-      return newOrder
+      return { order: newOrder, salesRepName }
     })
 
     // Send order confirmation emails (non-blocking)
     // Matches .NET behavior: emails sent after order creation, errors don't fail order
     sendOrderEmails({
-      orderId: order.ID.toString(),
+      orderId: result.order.ID.toString(),
       orderNumber: orderNumber,
       storeName: data.storeName,
       buyerName: data.buyerName,
       customerEmail: data.customerEmail,
       customerPhone: data.customerPhone,
-      salesRep: data.salesRep,
+      salesRep: result.salesRepName,
       orderAmount: orderAmount,
       currency: data.currency,
       shipStartDate: new Date(data.shipStartDate),
@@ -326,12 +367,163 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
 
     return {
       success: true,
-      orderId: order.ID.toString(),
+      orderId: result.order.ID.toString(),
       orderNumber: orderNumber,
     }
   } catch (e) {
     console.error('createOrder error:', e)
     const message = e instanceof Error ? e.message : 'Failed to create order'
+    return { success: false, error: message }
+  }
+}
+
+// ============================================================================
+// Order Update (Edit Items)
+// ============================================================================
+
+/**
+ * Input for updating an existing order.
+ */
+export interface UpdateOrderInput {
+  orderId: string
+  storeName: string
+  buyerName: string
+  salesRepId: string
+  customerEmail: string
+  customerPhone: string
+  currency: 'USD' | 'CAD'
+  shipStartDate: string
+  shipEndDate: string
+  orderNotes?: string
+  customerPO?: string
+  website?: string
+  items: Array<{
+    sku: string
+    skuVariantId: number
+    quantity: number
+    price: number
+  }>
+}
+
+/**
+ * Result shape from updateOrder action.
+ */
+export interface UpdateOrderResult {
+  success: boolean
+  orderNumber?: string
+  error?: string
+}
+
+/**
+ * Update an existing order.
+ * Matches .NET MyOrder.aspx.cs behavior for edit mode:
+ * - Updates CustomerOrders header
+ * - Deletes old items, inserts new items
+ * - Recalculates order amount
+ *
+ * @param input - Order update data
+ * @returns Success status with order number
+ */
+export async function updateOrder(
+  input: UpdateOrderInput
+): Promise<UpdateOrderResult> {
+  try {
+    const { orderId, items, ...headerData } = input
+
+    // Verify order exists and is editable
+    const existingOrder = await prisma.customerOrders.findUnique({
+      where: { ID: BigInt(orderId) },
+      select: {
+        ID: true,
+        OrderNumber: true,
+        OrderStatus: true,
+        IsTransferredToShopify: true,
+      },
+    })
+
+    if (!existingOrder) {
+      return { success: false, error: 'Order not found' }
+    }
+
+    // Check edit conditions: Pending AND NOT in Shopify
+    if (existingOrder.OrderStatus !== 'Pending') {
+      return { success: false, error: 'Only Pending orders can be edited' }
+    }
+
+    if (existingOrder.IsTransferredToShopify) {
+      return {
+        success: false,
+        error: 'Orders transferred to Shopify cannot be edited',
+      }
+    }
+
+    // Calculate new total
+    const orderAmount = items.reduce(
+      (sum, item) => sum + item.price * item.quantity,
+      0
+    )
+
+    // Update order in transaction
+    await prisma.$transaction(async (tx) => {
+      // Look up rep by ID
+      const rep = await tx.reps.findUnique({
+        where: { ID: parseInt(headerData.salesRepId) },
+        select: { Name: true },
+      })
+      if (!rep) {
+        throw new Error('Invalid sales rep')
+      }
+      const salesRepName = rep.Name ?? ''
+
+      // Update order header
+      await tx.customerOrders.update({
+        where: { ID: BigInt(orderId) },
+        data: {
+          StoreName: headerData.storeName,
+          BuyerName: headerData.buyerName,
+          SalesRep: salesRepName,
+          CustomerEmail: headerData.customerEmail,
+          CustomerPhone: headerData.customerPhone,
+          Country: headerData.currency, // Legacy: stores currency
+          OrderAmount: orderAmount,
+          OrderNotes: headerData.orderNotes ?? '',
+          CustomerPO: headerData.customerPO ?? '',
+          ShipStartDate: new Date(headerData.shipStartDate),
+          ShipEndDate: new Date(headerData.shipEndDate),
+          Website: headerData.website ?? '',
+        },
+      })
+
+      // Delete old items
+      await tx.customerOrdersItems.deleteMany({
+        where: { CustomerOrderID: BigInt(orderId) },
+      })
+
+      // Insert new items
+      await tx.customerOrdersItems.createMany({
+        data: items.map((item) => ({
+          CustomerOrderID: BigInt(orderId),
+          OrderNumber: existingOrder.OrderNumber,
+          SKU: item.sku,
+          SKUVariantID: BigInt(item.skuVariantId),
+          Quantity: item.quantity,
+          Price: item.price,
+          PriceCurrency: headerData.currency,
+          Notes: '',
+        })),
+      })
+    })
+
+    revalidatePath('/admin/orders')
+    revalidatePath('/rep/orders')
+
+    return {
+      success: true,
+      orderNumber: existingOrder.OrderNumber,
+    }
+  } catch (e) {
+    console.error('updateOrder error:', e)
+    const message = e instanceof Error ? e.message : 'Failed to update order'
     return { success: false, error: message }
   }
 }

@@ -1,6 +1,8 @@
 import { getPPSizes } from '@/lib/data/queries/prepacks'
 import { PrepacksTable } from '@/components/admin/prepacks-table'
 
+export const dynamic = 'force-dynamic'
+
 export default async function PrepacksPage() {
   const result = await getPPSizes()
 

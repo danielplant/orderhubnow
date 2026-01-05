@@ -1,27 +1,52 @@
 # SQL Migrations for OrderHubNow
 
-## Overview
+## Quick Start (FOR BILAL)
 
-These SQL scripts must be run against the production database (`Limeapple_Live_Nov2024`) before the OrderHubNow application can fully function. They add required schema changes, create new tables, and grant necessary permissions.
+**Run this ONE file in SQL Server Management Studio:**
 
-**Database:** Limeapple_Live_Nov2024  
-**Server:** 3.141.136.218:1433  
-**User:** limeappleNext
+```
+MASTER-MIGRATION.sql
+```
 
-## Background
-
-The OrderHubNow Next.js application replaces the legacy .NET WebForms inventory system. The existing database schema was designed for the .NET app and lacks:
-
-1. **Foreign key relationships** - Orders reference customers/reps by name strings, not IDs
-2. **Analytics fields** - No LTV, segment, order cycle data on customers
-3. **New tables** - ShopifySyncRun for tracking Shopify bulk operations, AliasSignals for learning entity aliases
-4. **Write permissions** - The `limeappleNext` database user only has SELECT access
-
-These scripts bridge that gap.
+That's it. This single file contains everything needed. It's idempotent (safe to re-run).
 
 ---
 
-## Scripts (Run in Order)
+## Details
+
+**Database:** Limeapple_Live_Nov2024  
+**Server:** 3.141.136.218:1433  
+**User to grant permissions to:** limeappleNext
+
+### What MASTER-MIGRATION.sql Does
+
+1. **Grants write permissions** to limeappleNext user (INSERT/UPDATE/DELETE)
+2. **Creates ShopifySyncRun table** for Shopify sync tracking
+3. **Creates AliasSignals table** for learning entity aliases
+4. **Creates AuthTokens table** for secure password reset/invite flow
+5. **Adds auth columns to Users** (PasswordHash, Status, MustResetPassword)
+6. **Creates OrderNumberSequence table** for thread-safe order numbers
+7. **Creates uspGetNextOrderNumber stored procedure** for atomic order number generation
+8. **Adds analytics columns** to Customers (LTV, Segment, FirstOrderDate, etc.)
+9. **Backfills FK columns** (CustomerID, RepID) on CustomerOrders
+10. **Creates performance indexes**
+
+### Expected Runtime
+~2-5 minutes
+
+### Validation
+The script prints validation results at the end showing:
+- Tables created
+- Stored procedures created
+- Order sequence values
+- CustomerID match rate
+- Customer segment distribution
+
+---
+
+## Individual Scripts (Reference Only)
+
+The individual scripts below are kept for reference. Use MASTER-MIGRATION.sql instead.
 
 ### 1. `01-schema-changes.sql`
 **Purpose:** Core schema changes for analytics and reporting
@@ -78,6 +103,66 @@ These scripts bridge that gap.
 - MissingShopifySkus, RawSkusFromShopify, ShopifySyncRun, CustomersFromShopify
 - SkuCategories, SkuMainCategory, SkuMainSubRship
 - Reps, Users, PPSizes, InventorySettings
+
+---
+
+### 5. `05-auth-system.sql`
+**Purpose:** Password security upgrade with invite flow and hashing
+
+**What it does:**
+- Adds columns to `Users`: `PasswordHash`, `Status`, `MustResetPassword`, `Email`
+- Creates `AuthTokens` table for invite and password reset tokens
+- Backfills `Email` from `LoginID` or `Reps.Email1`
+- Sets all existing users to `Status = 'legacy'` (forces password reset)
+
+**When to run:** Before deploying new auth system
+
+**Idempotent:** Yes - uses IF NOT EXISTS checks
+
+**Related code:**
+- `src/lib/auth/password.ts` - bcrypt hashing utilities
+- `src/lib/auth/config.ts` - NextAuth with status-based blocking
+- `src/lib/auth/tokens.ts` - Token generation and validation
+
+---
+
+### 6. `06-order-number-sequence.sql` 
+**Purpose:** Fix order number race condition with atomic generation
+
+**CRITICAL:** Must run BEFORE Next.js goes live with order creation
+
+**What it does:**
+- Creates `OrderNumberSequence` table with counters for A and P prefixes
+- Initializes counters from current MAX values in `CustomerOrders`
+- Creates `uspGetNextOrderNumber` stored procedure (atomic increment)
+- Adds UNIQUE constraint on `CustomerOrders.OrderNumber`
+
+**Why needed:**
+The legacy .NET code has a race condition where two concurrent orders can get the same order number. The stored procedure uses atomic `UPDATE...SET @var = col = col + 1` which is safe under concurrency.
+
+**Idempotent:** Yes - uses IF NOT EXISTS checks
+
+**Verification after running:**
+```sql
+-- Check sequence counters initialized
+SELECT Prefix, LastNumber FROM OrderNumberSequence;
+
+-- Check unique constraint exists
+SELECT name FROM sys.indexes 
+WHERE object_id = OBJECT_ID('CustomerOrders') 
+  AND name = 'UQ_CustomerOrders_OrderNumber';
+
+-- Test the stored procedure
+DECLARE @OrderNumber NVARCHAR(50);
+EXEC uspGetNextOrderNumber @Prefix = 'A', @OrderNumber = @OrderNumber OUTPUT;
+SELECT @OrderNumber AS TestOrderNumber;
+```
+
+**Related code:**
+- `src/lib/data/actions/orders.ts` - `getNextOrderNumber()` calls the SP
+- `prisma/schema.prisma` - `OrderNumberSequence` model added
+
+**Note:** The Next.js code has a fallback to the legacy method if the SP doesn't exist yet, so deploy order is flexible. However, the SP MUST be deployed before any real orders are created to avoid duplicates.
 
 ---
 

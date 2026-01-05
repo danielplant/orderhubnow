@@ -2,10 +2,16 @@
 
 import { revalidatePath } from 'next/cache'
 import { prisma } from '@/lib/prisma'
+import {
+  sendRepInviteEmail,
+  sendPasswordResetEmail,
+  generateInviteLink as generateLink,
+} from '@/lib/email/send-auth-emails'
 
 /**
- * Create a new rep with login credentials.
- * Creates both Reps row and Users row for authentication.
+ * Create a new rep with invite flow.
+ * Creates Reps row + Users row, sends invite email.
+ * Returns invite URL for copy-link fallback.
  */
 export async function createRep(input: {
   name: string
@@ -18,8 +24,7 @@ export async function createRep(input: {
   email2?: string
   email3?: string
   country: string
-  password: string
-}): Promise<{ success: boolean; id?: number; error?: string }> {
+}): Promise<{ success: boolean; id?: number; inviteUrl?: string; error?: string }> {
   try {
     if (!input.name.trim()) {
       return { success: false, error: 'Name is required' }
@@ -30,8 +35,12 @@ export async function createRep(input: {
     if (!input.email1.trim()) {
       return { success: false, error: 'Email is required' }
     }
-    if (!input.password.trim()) {
-      return { success: false, error: 'Password is required' }
+
+    const email = input.email1.trim()
+
+    // Validate email format
+    if (!email.includes('@')) {
+      return { success: false, error: 'Invalid email format' }
     }
 
     // Check if rep code already exists
@@ -51,33 +60,47 @@ export async function createRep(input: {
         Phone: input.phone ?? '',
         Fax: input.fax ?? '',
         Cell: input.cell ?? '',
-        Email1: input.email1.trim(),
+        Email1: email,
         Email2: input.email2 ?? '',
         Email3: input.email3 ?? '',
         Country: input.country.trim(),
       },
+      select: { ID: true, Name: true },
+    })
+
+    // Create user login with invited status
+    const user = await prisma.users.create({
+      data: {
+        LoginID: email,
+        Email: email,
+        Password: null,
+        PasswordHash: null,
+        UserType: 'rep',
+        RepId: created.ID,
+        Status: 'invited',
+        MustResetPassword: true,
+      },
       select: { ID: true },
     })
 
-    // Create user login (Email1 as LoginID, legacy plaintext password)
-    await prisma.users.create({
-      data: {
-        LoginID: input.email1.trim(),
-        Password: input.password.trim(),
-        UserType: 'rep',
-        RepId: created.ID,
-      },
-    })
+    // Send invite email
+    const emailResult = await sendRepInviteEmail(user.ID, created.Name, email)
 
     revalidatePath('/admin/reps')
-    return { success: true, id: created.ID }
-  } catch {
+
+    return {
+      success: true,
+      id: created.ID,
+      inviteUrl: emailResult.inviteUrl,
+    }
+  } catch (error) {
+    console.error('Create rep error:', error)
     return { success: false, error: 'Failed to create rep' }
   }
 }
 
 /**
- * Update rep details (not password).
+ * Update rep details (not password or status).
  */
 export async function updateRep(
   id: string,
@@ -129,6 +152,14 @@ export async function updateRep(
       },
     })
 
+    // If email1 changed, update Users.Email too
+    if (data.email1 !== undefined) {
+      await prisma.users.updateMany({
+        where: { RepId: repId },
+        data: { Email: data.email1.trim() },
+      })
+    }
+
     revalidatePath('/admin/reps')
     return { success: true }
   } catch {
@@ -137,36 +168,165 @@ export async function updateRep(
 }
 
 /**
- * Update rep password in Users table.
+ * Resend invite email to a rep who hasn't set their password yet.
+ * Returns invite URL for copy-link fallback.
  */
-export async function updateRepPassword(input: {
-  repId: string
-  newPassword: string
-}): Promise<{ success: boolean; error?: string }> {
+export async function resendInvite(
+  userId: number
+): Promise<{ success: boolean; inviteUrl?: string; error?: string }> {
   try {
-    const repId = parseInt(input.repId)
-    if (Number.isNaN(repId)) {
-      return { success: false, error: 'Invalid rep id' }
-    }
-
-    if (!input.newPassword.trim()) {
-      return { success: false, error: 'Password cannot be empty' }
-    }
-
-    // Update all user records for this rep
-    const result = await prisma.users.updateMany({
-      where: { RepId: repId },
-      data: { Password: input.newPassword.trim() },
+    const user = await prisma.users.findUnique({
+      where: { ID: userId },
+      include: { Reps: true },
     })
 
-    if (result.count === 0) {
-      return { success: false, error: 'No login found for this rep' }
+    if (!user) {
+      return { success: false, error: 'User not found' }
     }
+
+    const email = user.Email || user.LoginID
+    if (!email || !email.includes('@')) {
+      return { success: false, error: 'No valid email address on file' }
+    }
+
+    const repName = user.Reps?.Name || 'Rep'
+
+    const result = await sendRepInviteEmail(user.ID, repName, email)
+
+    revalidatePath('/admin/reps')
+
+    if (!result.success) {
+      return { success: false, error: result.error }
+    }
+
+    return { success: true, inviteUrl: result.inviteUrl }
+  } catch {
+    return { success: false, error: 'Failed to send invite' }
+  }
+}
+
+/**
+ * Force password reset for an active user.
+ * Sets MustResetPassword flag and sends reset email.
+ * Returns reset URL for copy-link fallback.
+ */
+export async function forcePasswordReset(
+  userId: number
+): Promise<{ success: boolean; resetUrl?: string; error?: string }> {
+  try {
+    const user = await prisma.users.findUnique({
+      where: { ID: userId },
+    })
+
+    if (!user) {
+      return { success: false, error: 'User not found' }
+    }
+
+    const email = user.Email || user.LoginID
+    if (!email || !email.includes('@')) {
+      return { success: false, error: 'No valid email address on file' }
+    }
+
+    // Set must reset flag
+    await prisma.users.update({
+      where: { ID: userId },
+      data: { MustResetPassword: true },
+    })
+
+    // Send reset email
+    const result = await sendPasswordResetEmail(user.ID, email)
+
+    revalidatePath('/admin/reps')
+
+    if (!result.success) {
+      return { success: false, error: result.error }
+    }
+
+    return { success: true, resetUrl: result.inviteUrl }
+  } catch {
+    return { success: false, error: 'Failed to send reset email' }
+  }
+}
+
+/**
+ * Disable a rep's login.
+ */
+export async function disableRep(
+  userId: number
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    await prisma.users.update({
+      where: { ID: userId },
+      data: { Status: 'disabled' },
+    })
 
     revalidatePath('/admin/reps')
     return { success: true }
   } catch {
-    return { success: false, error: 'Failed to update password' }
+    return { success: false, error: 'Failed to disable rep' }
+  }
+}
+
+/**
+ * Re-enable a disabled rep by sending them a new invite.
+ * Returns invite URL for copy-link fallback.
+ */
+export async function enableRep(
+  userId: number
+): Promise<{ success: boolean; inviteUrl?: string; error?: string }> {
+  try {
+    const user = await prisma.users.findUnique({
+      where: { ID: userId },
+      include: { Reps: true },
+    })
+
+    if (!user) {
+      return { success: false, error: 'User not found' }
+    }
+
+    const email = user.Email || user.LoginID
+    if (!email || !email.includes('@')) {
+      return { success: false, error: 'No valid email address on file' }
+    }
+
+    // Reset to invited status
+    await prisma.users.update({
+      where: { ID: userId },
+      data: {
+        Status: 'invited',
+        PasswordHash: null,
+        MustResetPassword: true,
+      },
+    })
+
+    const repName = user.Reps?.Name || 'Rep'
+
+    // Send new invite
+    const result = await sendRepInviteEmail(user.ID, repName, email)
+
+    revalidatePath('/admin/reps')
+
+    if (!result.success) {
+      return { success: false, error: result.error }
+    }
+
+    return { success: true, inviteUrl: result.inviteUrl }
+  } catch {
+    return { success: false, error: 'Failed to enable rep' }
+  }
+}
+
+/**
+ * Generate invite/reset link without sending email (copy-link fallback).
+ */
+export async function getInviteLink(
+  userId: number
+): Promise<{ success: boolean; inviteUrl?: string; error?: string }> {
+  try {
+    const result = await generateLink(userId)
+    return result
+  } catch {
+    return { success: false, error: 'Failed to generate link' }
   }
 }
 

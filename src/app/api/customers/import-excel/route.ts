@@ -233,6 +233,37 @@ export async function POST(request: NextRequest): Promise<NextResponse<ImportRes
     let errors = 0
     const errorDetails: Array<{ row: number; email: string; error: string }> = []
 
+    // Build rep lookup maps for name->code mapping
+    const repsData = await prisma.reps.findMany({
+      select: { Name: true, Code: true },
+    })
+    // Code (lowercase) -> actual code (with fallback)
+    const codeMap = new Map<string, string>()
+    // Name (lowercase) -> actual code (with fallback)
+    const nameToCodeMap = new Map<string, string>()
+    for (const r of repsData) {
+      const actualCode = r.Code?.trim() || r.Name || ''
+      if (r.Code?.trim()) {
+        codeMap.set(r.Code.trim().toLowerCase(), actualCode)
+      }
+      if (r.Name) {
+        nameToCodeMap.set(r.Name.toLowerCase(), actualCode)
+      }
+    }
+
+    // Helper to map rep value to code
+    const mapRepToCode = (rawRep: string | undefined): string | null => {
+      if (!rawRep?.trim()) return null
+      const trimmed = rawRep.trim()
+      const lower = trimmed.toLowerCase()
+      // Try exact code match first
+      if (codeMap.has(lower)) return codeMap.get(lower)!
+      // Try name match
+      if (nameToCodeMap.has(lower)) return nameToCodeMap.get(lower)!
+      // No match - keep raw value
+      return trimmed
+    }
+
     for (const row of rows) {
       // Skip invalid rows
       if (row.errors && row.errors.length > 0) {
@@ -257,7 +288,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<ImportRes
           Email: row.Email.trim(),
           CustomerName: row.CustomerName?.trim() || null,
           Phone: row.Phone?.trim() || null,
-          Rep: row.Rep?.trim() || null,
+          Rep: mapRepToCode(row.Rep),
           Street1: row.Street1?.trim() || null,
           Street2: row.Street2?.trim() || null,
           City: row.City?.trim() || null,

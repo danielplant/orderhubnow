@@ -31,20 +31,26 @@ import type { FilterField, FilterState, FilterOperator } from '@/lib/types/repor
 // ============================================================================
 
 function useAliasSignalLogging(reportType: string) {
-  const sessionId = React.useMemo(() => {
-    if (typeof window === 'undefined') return '';
+  const [sessionId, setSessionId] = React.useState('');
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
     let id = sessionStorage.getItem('aliasSessionId');
     if (!id) {
-      id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      id =
+        typeof crypto !== 'undefined' && 'randomUUID' in crypto
+          ? crypto.randomUUID()
+          : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
       sessionStorage.setItem('aliasSessionId', id);
     }
-    return id;
+    setSessionId(id);
   }, []);
 
   const logAliasSignal = React.useCallback(
     async (fieldId: string, values: string[]) => {
       // Only log if 2+ values selected
       if (values.length < 2) return;
+      if (!sessionId) return;
 
       // Check debounce (don't log same combo twice per session)
       const key = `alias_${fieldId}_${values.sort().join('_')}`;

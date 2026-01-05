@@ -1,6 +1,8 @@
 import { getCategoryTree } from '@/lib/data/queries/categories'
 import { CategoryTree } from '@/components/admin/category-tree'
 
+export const dynamic = 'force-dynamic'
+
 export default async function CategoriesPage() {
   const categories = await getCategoryTree()
 

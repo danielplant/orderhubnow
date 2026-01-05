@@ -39,7 +39,7 @@ import { CustomerExcelImportModal } from './customer-excel-import-modal'
 export interface CustomersTableProps {
   initialCustomers: Customer[]
   total: number
-  reps: Array<{ id: number; name: string }>
+  reps: Array<{ id: number; name: string; code: string }>
 }
 
 type ModalMode = 'add' | 'edit' | 'delete' | null
@@ -68,13 +68,13 @@ export function CustomersTable({ initialCustomers, total, reps }: CustomersTable
   const [showShopifyImport, setShowShopifyImport] = React.useState(false)
   const [showExcelImport, setShowExcelImport] = React.useState(false)
 
-  // Form state
+  // Form state - repId stores the selected rep's ID (as string)
   const [formData, setFormData] = React.useState({
     storeName: '',
     customerName: '',
     email: '',
     phone: '',
-    rep: '',
+    repId: '',
     street1: '',
     street2: '',
     city: '',
@@ -83,6 +83,32 @@ export function CustomersTable({ initialCustomers, total, reps }: CustomersTable
     country: '',
     website: '',
   })
+
+  // Helper to find rep by code first, then by name (for pre-selection in edit mode)
+  const findRepByCodeOrName = React.useCallback(
+    (repValue: string | null): string => {
+      if (!repValue) return ''
+      const lower = repValue.toLowerCase()
+      // Try matching by code first
+      const byCode = reps.find((r) => r.code.toLowerCase() === lower)
+      if (byCode) return String(byCode.id)
+      // Try matching by name
+      const byName = reps.find((r) => r.name.toLowerCase() === lower)
+      if (byName) return String(byName.id)
+      return ''
+    },
+    [reps]
+  )
+
+  // Build code-to-name lookup for display
+  const codeToName = React.useMemo(() => {
+    const map = new Map<string, string>()
+    for (const r of reps) {
+      map.set(r.code.toLowerCase(), r.name)
+      map.set(r.name.toLowerCase(), r.name) // Also map name->name for bad OHN data
+    }
+    return map
+  }, [reps])
 
   // URL helpers
   const setParam = React.useCallback(
@@ -116,7 +142,7 @@ export function CustomersTable({ initialCustomers, total, reps }: CustomersTable
         customerName: customer.customerName ?? '',
         email: customer.email ?? '',
         phone: customer.phone ?? '',
-        rep: customer.rep ?? '',
+        repId: findRepByCodeOrName(customer.rep),
         street1: customer.address.street1 ?? '',
         street2: customer.address.street2 ?? '',
         city: customer.address.city ?? '',
@@ -131,7 +157,7 @@ export function CustomersTable({ initialCustomers, total, reps }: CustomersTable
         customerName: '',
         email: '',
         phone: '',
-        rep: '',
+        repId: '',
         street1: '',
         street2: '',
         city: '',
@@ -160,7 +186,7 @@ export function CustomersTable({ initialCustomers, total, reps }: CustomersTable
           customerName: formData.customerName || null,
           email: formData.email || null,
           phone: formData.phone || null,
-          rep: formData.rep || null,
+          repId: formData.repId || null,
           street1: formData.street1 || null,
           street2: formData.street2 || null,
           city: formData.city || null,
@@ -179,7 +205,7 @@ export function CustomersTable({ initialCustomers, total, reps }: CustomersTable
           customerName: formData.customerName || null,
           email: formData.email || null,
           phone: formData.phone || null,
-          rep: formData.rep || null,
+          repId: formData.repId || null,
           street1: formData.street1 || null,
           street2: formData.street2 || null,
           city: formData.city || null,
@@ -236,7 +262,11 @@ export function CustomersTable({ initialCustomers, total, reps }: CustomersTable
       {
         id: 'rep',
         header: 'Rep',
-        cell: (r) => <span className="text-muted-foreground">{r.rep || '—'}</span>,
+        cell: (r) => {
+          // Display rep name (looked up from code), fallback to raw value
+          const displayName = r.rep ? (codeToName.get(r.rep.toLowerCase()) || r.rep) : null
+          return <span className="text-muted-foreground">{displayName || '—'}</span>
+        },
       },
       {
         id: 'country',
@@ -423,13 +453,13 @@ export function CustomersTable({ initialCustomers, total, reps }: CustomersTable
               <div>
                 <label className="block text-sm font-medium mb-1">Rep</label>
                 <select
-                  value={formData.rep}
-                  onChange={(e) => setFormData((f) => ({ ...f, rep: e.target.value }))}
+                  value={formData.repId}
+                  onChange={(e) => setFormData((f) => ({ ...f, repId: e.target.value }))}
                   className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   <option value="">Select rep...</option>
                   {reps.map((r) => (
-                    <option key={r.id} value={r.name}>
+                    <option key={r.id} value={String(r.id)}>
                       {r.name}
                     </option>
                   ))}

@@ -242,3 +242,45 @@ export async function reorderProductsInCategory(
     return { success: false, error: 'Failed to reorder products in category' }
   }
 }
+
+/**
+ * Update DisplayPriority for all SKUs matching baseSku pattern within a category.
+ * Matches .NET UpdateSkuCategoryOrder behavior from ProductOrderWithinCategory.aspx.
+ *
+ * @param categoryId - Category ID to scope the update
+ * @param baseSku - SKU ID pattern (e.g., "LA-BL" updates "LA-BL-XS", "LA-BL-SM", etc.)
+ * @param priority - New display priority (lower = first; null/0/negative treated as 100000)
+ */
+export async function updateProductPriority(
+  categoryId: string,
+  baseSku: string,
+  priority: number | null
+): Promise<{ success: boolean; updated?: number; error?: string }> {
+  try {
+    const categoryInt = parseInt(categoryId)
+    if (Number.isNaN(categoryInt)) return { success: false, error: 'Invalid category id' }
+
+    // .NET treats null, 0, or negative as 100000 (end of list)
+    const effectivePriority =
+      priority === null || priority <= 0 ? 100000 : priority
+
+    const result = await prisma.sku.updateMany({
+      where: {
+        CategoryID: categoryInt,
+        SkuID: { contains: baseSku },
+      },
+      data: {
+        DisplayPriority: effectivePriority,
+        DateModified: new Date(),
+      },
+    })
+
+    revalidatePath('/admin/categories')
+    revalidatePath('/buyer/pre-order')
+    revalidatePath('/buyer/ats')
+
+    return { success: true, updated: result.count }
+  } catch {
+    return { success: false, error: 'Failed to update product priority' }
+  }
+}

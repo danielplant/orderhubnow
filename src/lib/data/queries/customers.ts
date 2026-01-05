@@ -1,8 +1,11 @@
 import { prisma } from '@/lib/prisma'
+import type { Prisma } from '@prisma/client'
 import type { Customer, CustomersListResult } from '@/lib/types/customer'
 
 /**
  * Get paginated list of customers with search.
+ * Search includes rep name lookup: if search matches a rep's name,
+ * customers with that rep's code are also returned.
  */
 export async function getCustomers(input: {
   search?: string
@@ -11,17 +14,34 @@ export async function getCustomers(input: {
 }): Promise<CustomersListResult> {
   const q = (input.search ?? '').trim()
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const where: any = q
-    ? {
-        OR: [
-          { StoreName: { contains: q } },
-          { Email: { contains: q } },
-          { CustomerName: { contains: q } },
-          { Rep: { contains: q } },
-        ],
-      }
-    : {}
+  let where: Prisma.CustomersWhereInput = {}
+
+  if (q) {
+    // Find rep codes that match the search term (by rep name)
+    // This allows searching by rep name to find customers with that rep's code
+    const matchingReps = await prisma.reps.findMany({
+      where: { Name: { contains: q } },
+      select: { Code: true, Name: true },
+    })
+    // Get the codes (with fallback to name if code is empty)
+    const repCodes = matchingReps
+      .map((r) => r.Code?.trim() || r.Name || '')
+      .filter(Boolean)
+
+    const orConditions: Prisma.CustomersWhereInput[] = [
+      { StoreName: { contains: q } },
+      { Email: { contains: q } },
+      { CustomerName: { contains: q } },
+      { Rep: { contains: q } }, // Direct code/value match
+    ]
+
+    // Add rep code matches from name lookup
+    if (repCodes.length > 0) {
+      orConditions.push({ Rep: { in: repCodes } })
+    }
+
+    where = { OR: orConditions }
+  }
 
   const [rows, total] = await Promise.all([
     prisma.customers.findMany({
@@ -103,11 +123,16 @@ export async function getCustomerById(id: number): Promise<Customer | null> {
 
 /**
  * Get list of available reps for customer assignment dropdown.
+ * Returns id, name, and code (with fallback to Name if Code is empty).
  */
-export async function getRepNames(): Promise<Array<{ id: number; name: string }>> {
+export async function getRepNames(): Promise<Array<{ id: number; name: string; code: string }>> {
   const reps = await prisma.reps.findMany({
     orderBy: { Name: 'asc' },
-    select: { ID: true, Name: true },
+    select: { ID: true, Name: true, Code: true },
   })
-  return reps.map((r) => ({ id: r.ID, name: r.Name }))
+  return reps.map((r) => ({
+    id: r.ID,
+    name: r.Name ?? '',
+    code: r.Code?.trim() || r.Name || '',  // Fallback: Code empty -> use Name
+  }))
 }

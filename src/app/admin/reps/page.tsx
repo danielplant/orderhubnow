@@ -1,6 +1,8 @@
 import { getReps } from '@/lib/data/queries/reps'
 import { RepsTable } from '@/components/admin/reps-table'
 
+export const dynamic = 'force-dynamic'
+
 export default async function RepsPage() {
   const result = await getReps()
 

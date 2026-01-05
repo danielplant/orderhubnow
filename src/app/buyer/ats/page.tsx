@@ -3,6 +3,8 @@ import { CollectionCard } from "@/components/buyer/collection-card";
 import { Divider } from "@/components/ui";
 import { getCategoriesWithProductCount } from "@/lib/data/queries/categories";
 
+export const dynamic = 'force-dynamic'
+
 export default async function ATSPage() {
   const categories = await getCategoriesWithProductCount();
   

@@ -2,6 +2,17 @@ import type { NextAuthConfig } from 'next-auth'
 import Credentials from 'next-auth/providers/credentials'
 import { prisma } from '@/lib/prisma'
 import { mapUserTypeToRole, type UserRole } from '@/lib/types/auth'
+import { verifyPassword } from '@/lib/auth/password'
+
+/**
+ * Custom error codes for auth status blocking.
+ * These are thrown from authorize() and handled in the login form.
+ */
+export const AUTH_ERROR_CODES = {
+  INVITED: 'INVITED', // User hasn't set password yet
+  DISABLED: 'DISABLED', // Account disabled
+  RESET_REQUIRED: 'RESET_REQUIRED', // Legacy user or forced reset
+} as const
 
 export const authConfig: NextAuthConfig = {
   providers: [
@@ -17,15 +28,43 @@ export const authConfig: NextAuthConfig = {
           return null
         }
 
-        // Query user (minimal first - no relations)
+        const loginId = credentials.loginId as string
+        const password = credentials.password as string
+
+        // Find user by Email or LoginID
         const user = await prisma.users.findFirst({
           where: {
-            LoginID: credentials.loginId as string,
-            Password: credentials.password as string, // Plaintext (legacy)
+            OR: [{ Email: loginId }, { LoginID: loginId }],
           },
         })
 
         if (!user) {
+          return null
+        }
+
+        // Status-based blocking
+        // These throw specific error messages that the login form can handle
+        if (user.Status === 'invited') {
+          throw new Error(AUTH_ERROR_CODES.INVITED)
+        }
+
+        if (user.Status === 'disabled') {
+          throw new Error(AUTH_ERROR_CODES.DISABLED)
+        }
+
+        if (user.Status === 'legacy' || user.MustResetPassword) {
+          throw new Error(AUTH_ERROR_CODES.RESET_REQUIRED)
+        }
+
+        // Active users must have PasswordHash
+        if (!user.PasswordHash) {
+          // This shouldn't happen for active users, but handle gracefully
+          throw new Error(AUTH_ERROR_CODES.RESET_REQUIRED)
+        }
+
+        // Verify password against hash
+        const passwordValid = await verifyPassword(password, user.PasswordHash)
+        if (!passwordValid) {
           return null
         }
 
@@ -35,8 +74,7 @@ export const authConfig: NextAuthConfig = {
           return null
         }
 
-        // Server-side role enforcement: if a specific role is required,
-        // reject if user's role doesn't match (same error as wrong password)
+        // Server-side role enforcement
         const requiredRole = credentials.requiredRole as UserRole | undefined
         if (requiredRole && role !== requiredRole) {
           return null
@@ -44,10 +82,10 @@ export const authConfig: NextAuthConfig = {
 
         return {
           id: user.ID,
-          loginId: user.LoginID,
+          loginId: user.Email || user.LoginID,
           role,
           repId: user.RepId,
-          name: user.LoginID, // Use LoginID as name for now
+          name: user.Email || user.LoginID,
         }
       },
     }),

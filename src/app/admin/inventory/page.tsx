@@ -1,6 +1,8 @@
 import { getInventoryList, type InventoryStatusFilter } from '@/lib/data/queries/inventory'
 import { InventoryTable } from '@/components/admin/inventory-table'
 
+export const dynamic = 'force-dynamic'
+
 export default async function InventoryPage({
   searchParams,
 }: {

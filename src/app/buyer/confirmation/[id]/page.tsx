@@ -7,6 +7,8 @@ import { Button } from '@/components/ui/button'
 import { CheckCircle2, Download } from 'lucide-react'
 import { ConfirmationClient } from './client'
 
+export const dynamic = 'force-dynamic'
+
 interface Props {
   params: Promise<{ id: string }>
 }

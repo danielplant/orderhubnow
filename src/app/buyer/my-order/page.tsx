@@ -1,12 +1,32 @@
 import { prisma } from '@/lib/prisma'
-import { getRepsForFilter } from '@/lib/data/queries/orders'
+import { getRepsForFilter, getOrderForEditing } from '@/lib/data/queries/orders'
 import { MyOrderClient } from './client'
+
+export const dynamic = 'force-dynamic'
+
+interface Props {
+  searchParams: Promise<{
+    isPreOrder?: string
+    editOrder?: string
+    returnTo?: string
+  }>
+}
 
 /**
  * My Order page - server component that fetches data
  * Client component handles cart state and form submission
+ *
+ * Query params:
+ * - isPreOrder=true: Pre-order flow (order prefix "P")
+ * - editOrder={id}: Edit existing order mode
+ * - returnTo={path}: Redirect path after successful edit
  */
-export default async function MyOrderPage() {
+export default async function MyOrderPage({ searchParams }: Props) {
+  const params = await searchParams
+  const isPreOrder = params.isPreOrder === 'true'
+  const editOrderId = params.editOrder
+  const returnTo = params.returnTo || '/buyer/select-journey'
+
   // Fetch reps for dropdown and SKU data for cart items
   const [reps, skuList] = await Promise.all([
     getRepsForFilter(),
@@ -34,5 +54,20 @@ export default async function MyOrderPage() {
     ])
   )
 
-  return <MyOrderClient reps={reps} skuMap={Object.fromEntries(skuMap)} />
+  // If editing, fetch the existing order
+  let existingOrder = null
+  if (editOrderId) {
+    existingOrder = await getOrderForEditing(editOrderId)
+    // If order not found or not editable, existingOrder will be null
+  }
+
+  return (
+    <MyOrderClient
+      reps={reps}
+      skuMap={Object.fromEntries(skuMap)}
+      isPreOrder={isPreOrder}
+      existingOrder={existingOrder}
+      returnTo={returnTo}
+    />
+  )
 }

@@ -7,6 +7,8 @@ import { MissingSkusTable } from '@/components/admin/missing-skus-table'
 import { OrdersPendingTransferTableClient } from '@/components/admin/orders-pending-transfer-client'
 import { cn } from '@/lib/utils'
 
+export const dynamic = 'force-dynamic'
+
 // ============================================================================
 // Types
 // ============================================================================

@@ -47,6 +47,32 @@ const REPORT_RENDERERS: Record<ReportType, string> = {
   'first-to-second': 'funnel',
 };
 
+function getStringField(row: Record<string, unknown>, key: string, fallback = ''): string {
+  const v = row[key]
+  return typeof v === 'string' ? v : v == null ? fallback : String(v)
+}
+
+function getNumberField(row: Record<string, unknown>, key: string, fallback = 0): number {
+  const v = row[key]
+  if (typeof v === 'number' && Number.isFinite(v)) return v
+  if (typeof v === 'string') {
+    const n = Number(v)
+    return Number.isFinite(n) ? n : fallback
+  }
+  return fallback
+}
+
+function getNullableNumberField(row: Record<string, unknown>, key: string): number | null {
+  const v = row[key]
+  if (v == null) return null
+  if (typeof v === 'number' && Number.isFinite(v)) return v
+  if (typeof v === 'string') {
+    const n = Number(v)
+    return Number.isFinite(n) ? n : null
+  }
+  return null
+}
+
 // ============================================================================
 // URL State Helpers
 // ============================================================================
@@ -494,71 +520,78 @@ export function ReportsPageClient({ initialType }: ReportsPageClientProps) {
           )}
           
           {reportType === 'exception' && (
-            <ExceptionTabs data={data as any} />
+            <ExceptionTabs data={data as unknown as React.ComponentProps<typeof ExceptionTabs>['data']} />
           )}
           
           {reportType === 'cohort-retention' && (
             <CohortHeatmap
-              data={data.map((row: any) => ({
-                cohort: row.cohortMonth,
-                customerCount: row.size,
-                m1: row.m1,
-                m2: row.m2,
-                m3: row.m3,
-                m6: row.m6,
-                m12: row.m12,
-                ltv: row.ltv,
+              data={data.map((row) => ({
+                cohort: getStringField(row, 'cohortMonth'),
+                customerCount: getNumberField(row, 'size'),
+                m1: getNullableNumberField(row, 'm1'),
+                m2: getNullableNumberField(row, 'm2'),
+                m3: getNullableNumberField(row, 'm3'),
+                m6: getNullableNumberField(row, 'm6'),
+                m12: getNullableNumberField(row, 'm12'),
+                ltv: getNumberField(row, 'ltv'),
               }))}
             />
           )}
           
           {reportType === 'account-potential' && (
             <QuadrantChart
-              data={data.map((row: any) => ({
-                id: String(row.customerId),
-                storeName: row.storeName,
-                currentRevenue: row.currentRevenue,
-                estimatedPotential: row.estimatedPotential,
-                segment: row.segment,
-                rep: row.rep,
+              data={data.map((row) => ({
+                id: getStringField(row, 'customerId'),
+                storeName: getStringField(row, 'storeName'),
+                currentRevenue: getNumberField(row, 'currentRevenue'),
+                estimatedPotential: getNumberField(row, 'estimatedPotential'),
+                segment: getStringField(row, 'segment'),
+                rep: getStringField(row, 'rep'),
               }))}
             />
           )}
           
           {reportType === 'sku-velocity' && (
             <VelocityTable
-              data={data.map((row: any) => ({
-                sku: row.sku,
-                description: row.description || row.sku,
-                category: row.category,
-                currentStock: row.currentStock || 0,
-                avgDailySales: row.avgDailySales || 0,
-                daysOfStock: row.daysOfStock || 999,
-                last30dSales: row.last30dSales || 0,
-                last30dTrend: row.last30dTrend || 0,
-                healthScore: row.healthScore || 'monitor',
-                recommendedAction: row.recommendedAction || '',
+              data={data.map((row) => ({
+                sku: getStringField(row, 'sku'),
+                description: getStringField(row, 'description', getStringField(row, 'sku')),
+                category: getStringField(row, 'category'),
+                currentStock: getNumberField(row, 'currentStock', 0),
+                avgDailySales: getNumberField(row, 'avgDailySales', 0),
+                daysOfStock: getNumberField(row, 'daysOfStock', 999),
+                last30dSales: getNumberField(row, 'last30dSales', 0),
+                last30dTrend: getNumberField(row, 'last30dTrend', 0),
+                healthScore: getStringField(row, 'healthScore', 'monitor') as 'reorder-now' | 'reorder-soon' | 'monitor' | 'overstock' | 'discontinue',
+                recommendedAction: getStringField(row, 'recommendedAction', ''),
               }))}
             />
           )}
           
           {reportType === 'rep-scorecard' && (
             <ScorecardTable
-              data={data.map((row: any) => ({
-                repId: row.repId,
-                repName: row.repName,
-                territory: row.territory,
-                revenue: row.revenue,
-                revenueRank: row.revenueRank,
-                targetAmount: row.targetAmount,
-                targetPercent: row.percentOfTarget * 100,
-                targetRank: row.targetRank,
-                shareOfPotential: row.shareOfPotential,
-                potentialRank: row.potentialRank,
-                orderCount: row.orderCount || 0,
-                customerCount: row.activeAccounts || 0,
-                revenueHistory: row.revenueHistory || [],
-              }))}
+              data={data.map((row) => {
+                const history = row.revenueHistory
+                const revenueHistory = Array.isArray(history)
+                  ? history.map((v) => (typeof v === 'number' ? v : Number(v))).filter((n) => Number.isFinite(n))
+                  : []
+
+                return {
+                  repId: getNumberField(row, 'repId'),
+                  repName: getStringField(row, 'repName'),
+                  territory: getStringField(row, 'territory', ''),
+                  revenue: getNumberField(row, 'revenue'),
+                  revenueRank: getNumberField(row, 'revenueRank'),
+                  targetAmount: getNumberField(row, 'targetAmount'),
+                  targetPercent: getNumberField(row, 'percentOfTarget') * 100,
+                  targetRank: getNumberField(row, 'targetRank'),
+                  shareOfPotential: getNumberField(row, 'shareOfPotential'),
+                  potentialRank: getNumberField(row, 'potentialRank'),
+                  orderCount: getNumberField(row, 'orderCount', 0),
+                  customerCount: getNumberField(row, 'activeAccounts', 0),
+                  revenueHistory,
+                }
+              })}
             />
           )}
           
@@ -582,10 +615,18 @@ export function ReportsPageClient({ initialType }: ReportsPageClientProps) {
           {reportType === 'first-to-second' && (
             <FirstToSecondFunnel
               data={{
-                newCustomers: data.reduce((sum: number, row: any) => sum + row.newCustomers, 0),
-                converted30d: data.reduce((sum: number, row: any) => sum + Math.round(row.newCustomers * row.conversionRate * 0.4), 0),
-                converted60d: data.reduce((sum: number, row: any) => sum + Math.round(row.newCustomers * row.conversionRate * 0.7), 0),
-                converted90d: data.reduce((sum: number, row: any) => sum + row.convertedCustomers, 0),
+                newCustomers: data.reduce((sum, row) => sum + getNumberField(row, 'newCustomers', 0), 0),
+                converted30d: data.reduce((sum, row) => {
+                  const newCustomers = getNumberField(row, 'newCustomers', 0)
+                  const conversionRate = getNumberField(row, 'conversionRate', 0)
+                  return sum + Math.round(newCustomers * conversionRate * 0.4)
+                }, 0),
+                converted60d: data.reduce((sum, row) => {
+                  const newCustomers = getNumberField(row, 'newCustomers', 0)
+                  const conversionRate = getNumberField(row, 'conversionRate', 0)
+                  return sum + Math.round(newCustomers * conversionRate * 0.7)
+                }, 0),
+                converted90d: data.reduce((sum, row) => sum + getNumberField(row, 'convertedCustomers', 0), 0),
               }}
             />
           )}

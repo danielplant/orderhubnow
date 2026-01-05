@@ -1,8 +1,9 @@
 import { prisma } from '@/lib/prisma'
-import type { Rep, RepWithLogin, RepsListResult } from '@/lib/types/rep'
+import type { Rep, RepWithLogin, RepsListResult, UserStatus } from '@/lib/types/rep'
 
 /**
- * Get all reps with their login info from Users table.
+ * Get all reps with their login status from Users table.
+ * Note: Password is never exposed - only status.
  */
 export async function getReps(): Promise<RepsListResult> {
   const rows = await prisma.reps.findMany({
@@ -10,8 +11,10 @@ export async function getReps(): Promise<RepsListResult> {
     include: {
       Users: {
         select: {
+          ID: true,
+          Email: true,
           LoginID: true,
-          Password: true,
+          Status: true,
         },
       },
     },
@@ -33,8 +36,9 @@ export async function getReps(): Promise<RepsListResult> {
       email2: r.Email2,
       email3: r.Email3,
       country: r.Country,
-      loginId: user?.LoginID ?? null,
-      password: user?.Password ?? null,
+      userId: user?.ID ?? null,
+      loginEmail: user?.Email || user?.LoginID || null,
+      status: (user?.Status as UserStatus) ?? 'invited',
     }
   })
 

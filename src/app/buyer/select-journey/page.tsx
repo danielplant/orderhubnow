@@ -4,6 +4,8 @@ import { CurrencyToggle } from "@/components/buyer/currency-toggle";
 import { getInventoryMetrics } from "@/lib/data/queries/inventory";
 import { redirect } from "next/navigation";
 
+export const dynamic = 'force-dynamic'
+
 export default async function SelectJourneyPage() {
   const metrics = await getInventoryMetrics();
 

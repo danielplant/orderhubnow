@@ -9,6 +9,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { formatCurrency } from '@/lib/utils'
 import { Trash2 } from 'lucide-react'
+import type { OrderForEditing } from '@/lib/data/queries/orders'
 
 interface SkuData {
   skuVariantId: number
@@ -18,24 +19,42 @@ interface SkuData {
 }
 
 interface MyOrderClientProps {
-  reps: Array<{ id: string; name: string }>
+  reps: Array<{ id: string; name: string; code: string }>
   skuMap: Record<string, SkuData>
+  isPreOrder?: boolean
+  existingOrder?: OrderForEditing | null
+  returnTo?: string
 }
 
-export function MyOrderClient({ reps, skuMap }: MyOrderClientProps) {
+export function MyOrderClient({
+  reps,
+  skuMap,
+  isPreOrder = false,
+  existingOrder = null,
+  returnTo = '/buyer/select-journey',
+}: MyOrderClientProps) {
   const router = useRouter()
   const { orders, totalItems, removeItem } = useOrder()
   const { currency } = useCurrency()
 
-  // Redirect to collections if cart is empty
-  useEffect(() => {
-    if (totalItems === 0) {
-      router.replace('/buyer/select-journey')
-    }
-  }, [totalItems, router])
+  // Determine if we're in edit mode
+  const isEditMode = !!existingOrder
 
-  // Transform cart state to flat cart items array with SKU data
+  // In edit mode, use existing order items; otherwise use cart
   const cartItems = useMemo(() => {
+    if (isEditMode && existingOrder) {
+      // Use items from existing order
+      return existingOrder.items.map((item) => ({
+        productId: item.sku, // Use SKU as productId for edit mode
+        sku: item.sku,
+        skuVariantId: item.skuVariantId,
+        quantity: item.quantity,
+        price: item.price,
+        description: item.description,
+      }))
+    }
+
+    // Normal cart flow
     const items: Array<{
       productId: string
       sku: string
@@ -62,7 +81,10 @@ export function MyOrderClient({ reps, skuMap }: MyOrderClientProps) {
     })
 
     return items
-  }, [orders, skuMap, currency])
+  }, [orders, skuMap, currency, isEditMode, existingOrder])
+
+  // For edit mode, use the order's currency; otherwise use context
+  const effectiveCurrency = isEditMode && existingOrder ? existingOrder.currency : currency
 
   // Calculate totals
   const orderTotal = cartItems.reduce(
@@ -70,14 +92,38 @@ export function MyOrderClient({ reps, skuMap }: MyOrderClientProps) {
     0
   )
 
-  // Don't render form until we've checked cart
-  if (totalItems === 0) {
+  // Redirect to collections if cart is empty (only in non-edit mode)
+  useEffect(() => {
+    if (!isEditMode && totalItems === 0) {
+      router.replace('/buyer/select-journey')
+    }
+  }, [totalItems, router, isEditMode])
+
+  // Don't render form until we've checked cart (only in non-edit mode)
+  if (!isEditMode && totalItems === 0) {
     return null
+  }
+
+  // In edit mode, show error if order not editable
+  if (isEditMode && !existingOrder) {
+    return (
+      <div className="container mx-auto py-8 px-4">
+        <div className="text-center">
+          <h1 className="text-2xl font-bold mb-4">Order Not Found</h1>
+          <p className="text-muted-foreground mb-4">
+            The order you&apos;re trying to edit was not found or is no longer editable.
+          </p>
+          <Button onClick={() => router.push(returnTo)}>Go Back</Button>
+        </div>
+      </div>
+    )
   }
 
   return (
     <div className="container mx-auto py-8 px-4">
-      <h1 className="text-2xl font-bold mb-6">Review Your Order</h1>
+      <h1 className="text-2xl font-bold mb-6">
+        {isEditMode ? `Edit Order ${existingOrder?.orderNumber}` : 'Review Your Order'}
+      </h1>
 
       <div className="grid lg:grid-cols-3 gap-8">
         {/* Order Summary - Right side on desktop */}
@@ -88,7 +134,7 @@ export function MyOrderClient({ reps, skuMap }: MyOrderClientProps) {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="text-sm text-muted-foreground">
-                {totalItems} item{totalItems !== 1 ? 's' : ''} in cart
+                {cartItems.length} item{cartItems.length !== 1 ? 's' : ''} in order
               </div>
 
               <div className="divide-y max-h-[400px] overflow-y-auto">
@@ -107,22 +153,24 @@ export function MyOrderClient({ reps, skuMap }: MyOrderClientProps) {
                         </div>
                       )}
                       <div className="text-xs text-muted-foreground mt-1">
-                        {item.quantity} x {formatCurrency(item.price, currency)}
+                        {item.quantity} x {formatCurrency(item.price, effectiveCurrency)}
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="font-medium text-sm">
-                        {formatCurrency(item.price * item.quantity, currency)}
+                        {formatCurrency(item.price * item.quantity, effectiveCurrency)}
                       </span>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-sm"
-                        onClick={() => removeItem(item.productId, item.sku)}
-                        className="text-muted-foreground hover:text-destructive"
-                      >
-                        <Trash2 className="size-4" />
-                      </Button>
+                      {!isEditMode && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          onClick={() => removeItem(item.productId, item.sku)}
+                          className="text-muted-foreground hover:text-destructive"
+                        >
+                          <Trash2 className="size-4" />
+                        </Button>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -130,25 +178,45 @@ export function MyOrderClient({ reps, skuMap }: MyOrderClientProps) {
 
               <div className="border-t pt-4">
                 <div className="flex justify-between items-center text-lg font-semibold">
-                  <span>Total ({currency})</span>
-                  <span>{formatCurrency(orderTotal, currency)}</span>
+                  <span>Total ({effectiveCurrency})</span>
+                  <span>{formatCurrency(orderTotal, effectiveCurrency)}</span>
                 </div>
               </div>
 
-              <Button
-                variant="outline"
-                className="w-full"
-                onClick={() => router.push('/buyer/ats')}
-              >
-                Continue Shopping
-              </Button>
+              {!isEditMode && (
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => router.push(isPreOrder ? '/buyer/pre-order' : '/buyer/ats')}
+                >
+                  Continue Shopping
+                </Button>
+              )}
+
+              {isEditMode && (
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => router.push(returnTo)}
+                >
+                  Cancel Edit
+                </Button>
+              )}
             </CardContent>
           </Card>
         </div>
 
         {/* Customer Form - Left side on desktop */}
         <div className="lg:col-span-2 lg:order-1">
-          <OrderForm currency={currency} reps={reps} cartItems={cartItems} />
+          <OrderForm
+            currency={effectiveCurrency}
+            reps={reps}
+            cartItems={cartItems}
+            isPreOrder={isPreOrder}
+            editMode={isEditMode}
+            existingOrder={existingOrder}
+            returnTo={returnTo}
+          />
         </div>
       </div>
     </div>

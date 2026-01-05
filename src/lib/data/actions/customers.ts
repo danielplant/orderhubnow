@@ -5,6 +5,27 @@ import { prisma } from '@/lib/prisma'
 import type { CustomerInput } from '@/lib/types/customer'
 
 /**
+ * Helper to resolve rep code from repId or fallback to raw rep string.
+ * If repId is provided, looks up the code from Reps table.
+ * Returns code (with fallback to Name if Code is empty).
+ */
+async function resolveRepCode(repId: string | null | undefined, repFallback: string | null | undefined): Promise<string | null> {
+  if (repId) {
+    const repIdNum = parseInt(repId)
+    if (!Number.isNaN(repIdNum)) {
+      const rep = await prisma.reps.findUnique({
+        where: { ID: repIdNum },
+        select: { Code: true, Name: true },
+      })
+      if (rep) {
+        return rep.Code?.trim() || rep.Name || ''
+      }
+    }
+  }
+  return repFallback ?? null
+}
+
+/**
  * Create a new customer.
  */
 export async function createCustomer(
@@ -15,13 +36,16 @@ export async function createCustomer(
       return { success: false, error: 'Store name is required' }
     }
 
+    // Resolve rep code from repId if provided
+    const repCode = await resolveRepCode(data.repId, data.rep)
+
     const created = await prisma.customers.create({
       data: {
         StoreName: data.storeName.trim(),
         Email: data.email ?? null,
         CustomerName: data.customerName ?? null,
         Phone: data.phone ?? null,
-        Rep: data.rep ?? null,
+        Rep: repCode,
         Street1: data.street1 ?? null,
         Street2: data.street2 ?? null,
         City: data.city ?? null,
@@ -60,6 +84,15 @@ export async function updateCustomer(
       return { success: false, error: 'Invalid customer id' }
     }
 
+    // Resolve rep code if repId is provided
+    let repUpdate: { Rep?: string | null } = {}
+    if (data.repId !== undefined) {
+      const repCode = await resolveRepCode(data.repId, data.rep)
+      repUpdate = { Rep: repCode }
+    } else if (data.rep !== undefined) {
+      repUpdate = { Rep: data.rep ?? null }
+    }
+
     await prisma.customers.update({
       where: { ID: customerId },
       data: {
@@ -67,7 +100,7 @@ export async function updateCustomer(
         ...(data.email !== undefined ? { Email: data.email ?? null } : {}),
         ...(data.customerName !== undefined ? { CustomerName: data.customerName ?? null } : {}),
         ...(data.phone !== undefined ? { Phone: data.phone ?? null } : {}),
-        ...(data.rep !== undefined ? { Rep: data.rep ?? null } : {}),
+        ...repUpdate,
         ...(data.street1 !== undefined ? { Street1: data.street1 ?? null } : {}),
         ...(data.street2 !== undefined ? { Street2: data.street2 ?? null } : {}),
         ...(data.city !== undefined ? { City: data.city ?? null } : {}),

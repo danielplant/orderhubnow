@@ -462,18 +462,42 @@ model tmpJSONOrders {
 }
 
 model Users {
-  ID       Int    @id(map: "PK_Users") @default(autoincrement())
-  LoginID  String @db.NVarChar(50)
-  Password String @db.NVarChar(50)
-  UserType String @db.NVarChar(50)
-  RepId    Int?
-  Reps     Reps?  @relation(fields: [RepId], references: [ID], onDelete: NoAction, onUpdate: NoAction, map: "FK_Users_Reps")
+  ID                Int          @id(map: "PK_Users") @default(autoincrement())
+  LoginID           String       @db.NVarChar(50)
+  Password          String?      @db.NVarChar(50) // Legacy plaintext - deprecated
+  PasswordHash      String?      @db.NVarChar(255) // bcrypt hash
+  UserType          String       @db.NVarChar(50)
+  RepId             Int?
+  Status            String       @default("legacy") @db.NVarChar(20) // invited, active, legacy, disabled
+  MustResetPassword Boolean      @default(true)
+  Email             String?      @db.NVarChar(255)
+  Reps              Reps?        @relation(fields: [RepId], references: [ID], onDelete: NoAction, onUpdate: NoAction, map: "FK_Users_Reps")
+  AuthTokens        AuthTokens[]
+}
+
+model AuthTokens {
+  ID        Int       @id(map: "PK_AuthTokens") @default(autoincrement())
+  UserID    Int
+  TokenHash String    @db.NVarChar(255)
+  TokenType String    @db.NVarChar(20) // 'invite' or 'password_reset'
+  ExpiresAt DateTime  @db.DateTime
+  UsedAt    DateTime? @db.DateTime
+  CreatedAt DateTime  @default(now()) @db.DateTime
+  User      Users     @relation(fields: [UserID], references: [ID], onDelete: Cascade, map: "FK_AuthTokens_Users")
+
+  @@index([TokenHash], map: "IX_AuthTokens_TokenHash")
+  @@index([UserID, TokenType], map: "IX_AuthTokens_UserID_Type")
 }
 
 model Warehouses {
   ID          Int           @id(map: "PK_Warehouses") @default(autoincrement())
   Name        String        @db.NVarChar(Max)
   SkuQuantity SkuQuantity[]
+}
+
+model OrderNumberSequence {
+  Prefix     String @id @db.Char(1) // 'A' or 'P'
+  LastNumber Int    @default(10000)
 }
 
 /// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.

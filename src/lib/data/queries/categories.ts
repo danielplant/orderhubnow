@@ -24,6 +24,10 @@ export async function getCategories(): Promise<Category[]> {
 
 export async function getCategoriesWithProductCount(): Promise<CategoryWithCount[]> {
   const categories = await prisma.skuCategories.findMany({
+    where: {
+      // Exclude "Defective" categories from buyer views per .NET PreOrder.aspx.cs
+      Name: { not: 'Defective' },
+    },
     orderBy: { SortOrder: 'asc' },
     include: {
       _count: {

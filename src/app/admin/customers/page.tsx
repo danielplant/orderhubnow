@@ -1,6 +1,8 @@
 import { getCustomers, getRepNames } from '@/lib/data/queries/customers'
 import { CustomersTable } from '@/components/admin/customers-table'
 
+export const dynamic = 'force-dynamic'
+
 export default async function CustomersPage({
   searchParams,
 }: {

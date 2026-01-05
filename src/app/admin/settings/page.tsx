@@ -3,6 +3,8 @@ import { redirect } from 'next/navigation'
 import { getInventorySettings } from '@/lib/data/queries/settings'
 import { SettingsForm } from '@/components/admin/settings-form'
 
+export const dynamic = 'force-dynamic'
+
 export default async function SettingsPage() {
   const session = await auth()
   if (!session?.user || session.user.role !== 'admin') {

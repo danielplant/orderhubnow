@@ -1,6 +1,6 @@
 /**
  * Sales Rep from Reps table.
- * Note: Password is stored in Users table (Users.RepId → Reps.ID).
+ * Note: Login credentials are stored in Users table (Users.RepId -> Reps.ID).
  */
 export interface Rep {
   id: number // Reps.ID (Int)
@@ -17,11 +17,18 @@ export interface Rep {
 }
 
 /**
- * Rep with login info (password from Users table).
+ * User account status for login.
+ */
+export type UserStatus = 'invited' | 'active' | 'legacy' | 'disabled'
+
+/**
+ * Rep with login status (from Users table).
+ * Note: Password is never exposed to the frontend.
  */
 export interface RepWithLogin extends Rep {
-  password: string | null // From Users.Password (if exists)
-  loginId: string | null // From Users.LoginID (if exists)
+  userId: number | null // Users.ID (if exists)
+  loginEmail: string | null // Users.Email or Users.LoginID
+  status: UserStatus // Users.Status
 }
 
 export interface RepsListResult {

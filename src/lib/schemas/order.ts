@@ -8,7 +8,7 @@ export const orderFormSchema = z.object({
   // Customer info
   storeName: z.string().min(1, 'Store name is required'),
   buyerName: z.string().min(1, 'Buyer name is required'),
-  salesRep: z.string().min(1, 'Sales rep is required'),
+  salesRepId: z.string().min(1, 'Sales rep is required'),
   customerPhone: z.string().min(1, 'Phone is required'),
   customerEmail: z.string().email('Valid email required'),
   website: z.string().url('Must be a valid URL').optional().or(z.literal('')),
