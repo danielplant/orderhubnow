@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useTransition } from 'react'
+import { useState, useEffect, useTransition, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -19,6 +19,17 @@ import {
 import { useOrder } from '@/lib/contexts/order-context'
 import { orderFormSchema, type OrderFormData } from '@/lib/schemas/order'
 import { createOrder, updateOrder } from '@/lib/data/actions/orders'
+import {
+  suggestStoreNames,
+  getCustomerForAutoFill,
+  type StoreSuggestion,
+} from '@/lib/data/actions/customers'
+import { findRepByCustomerCode } from '@/lib/utils/rep-matching'
+import {
+  normalizeStateProvince,
+  normalizeCountry,
+  normalizeWebsite,
+} from '@/lib/utils/form-normalization'
 import { formatCurrency } from '@/lib/utils'
 import type { Currency } from '@/lib/types'
 import type { OrderForEditing } from '@/lib/data/queries/orders'
@@ -64,6 +75,17 @@ export function OrderForm({
   const { clearAll, getPreOrderShipWindow } = useOrder()
   const [isPending, startTransition] = useTransition()
   const [isSubmitting, setIsSubmitting] = useState(false)
+
+  // Store autocomplete state
+  const [storeSuggestions, setStoreSuggestions] = useState<StoreSuggestion[]>([])
+  const [showSuggestions, setShowSuggestions] = useState(false)
+  const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false)
+  const storeInputRef = useRef<HTMLInputElement>(null)
+  const suggestionsRef = useRef<HTMLUListElement>(null)
+
+  // Customer selection state
+  const [selectedCustomerId, setSelectedCustomerId] = useState<number | null>(null)
+  const [isRepLocked, setIsRepLocked] = useState(false)
 
   // Get pre-order ship window from cart metadata (if available)
   const preOrderWindow = isPreOrder ? getPreOrderShipWindow() : null
@@ -127,12 +149,109 @@ export function OrderForm({
         },
   })
 
+  // Watch store name for autocomplete
+  const storeNameValue = watch('storeName')
+
   // Set initial salesRepId for edit mode (Select component doesn't read from defaultValues well)
   useEffect(() => {
     if (editMode && existingOrder?.salesRepId) {
       setValue('salesRepId', existingOrder.salesRepId)
     }
   }, [editMode, existingOrder, setValue])
+
+  // Debounced store name search (only for new orders)
+  useEffect(() => {
+    if (editMode) return // No autocomplete in edit mode
+
+    const timeoutId = setTimeout(async () => {
+      if (storeNameValue && storeNameValue.length >= 3) {
+        setIsLoadingSuggestions(true)
+        try {
+          const suggestions = await suggestStoreNames(storeNameValue)
+          setStoreSuggestions(suggestions)
+          setShowSuggestions(suggestions.length > 0)
+        } catch {
+          setStoreSuggestions([])
+        }
+        setIsLoadingSuggestions(false)
+      } else {
+        setStoreSuggestions([])
+        setShowSuggestions(false)
+      }
+    }, 300)
+
+    return () => clearTimeout(timeoutId)
+  }, [storeNameValue, editMode])
+
+  // Close suggestions when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        storeInputRef.current &&
+        !storeInputRef.current.contains(event.target as Node) &&
+        suggestionsRef.current &&
+        !suggestionsRef.current.contains(event.target as Node)
+      ) {
+        setShowSuggestions(false)
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  // Handle customer selection from autocomplete
+  const handleSelectCustomer = useCallback(async (suggestion: StoreSuggestion) => {
+    setShowSuggestions(false)
+    setValue('storeName', suggestion.storeName)
+    setSelectedCustomerId(suggestion.id)
+
+    // Fetch full customer data for auto-fill
+    const customer = await getCustomerForAutoFill(suggestion.id)
+    if (!customer) return
+
+    // Auto-fill customer fields with normalization
+    if (customer.buyerName) setValue('buyerName', customer.buyerName)
+    if (customer.email) setValue('customerEmail', customer.email)
+    if (customer.phone) setValue('customerPhone', customer.phone)
+    setValue('website', normalizeWebsite(customer.website))
+
+    // Auto-fill billing address (only for new orders, but we're always in new order mode for autocomplete)
+    if (customer.street1) setValue('street1', customer.street1)
+    if (customer.street2) setValue('street2', customer.street2)
+    if (customer.city) setValue('city', customer.city)
+    setValue('stateProvince', normalizeStateProvince(customer.stateProvince))
+    if (customer.zipPostal) setValue('zipPostal', customer.zipPostal)
+    setValue('country', normalizeCountry(customer.country))
+
+    // Auto-fill shipping address
+    if (customer.shippingStreet1) setValue('shippingStreet1', customer.shippingStreet1)
+    if (customer.shippingStreet2) setValue('shippingStreet2', customer.shippingStreet2)
+    if (customer.shippingCity) setValue('shippingCity', customer.shippingCity)
+    setValue('shippingStateProvince', normalizeStateProvince(customer.shippingStateProvince))
+    if (customer.shippingZipPostal) setValue('shippingZipPostal', customer.shippingZipPostal)
+    setValue('shippingCountry', normalizeCountry(customer.shippingCountry))
+
+    // Auto-select and lock rep based on customer's rep code
+    if (customer.rep) {
+      const matchedRep = findRepByCustomerCode(customer.rep, reps)
+      if (matchedRep) {
+        setValue('salesRepId', matchedRep.id)
+        setIsRepLocked(true)
+      }
+    }
+  }, [setValue, reps])
+
+  // Handle store name change - reset customer selection if user types new name
+  const handleStoreNameChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const newValue = e.target.value
+    // If the value changes from a selected customer, reset customer state
+    const currentSuggestion = storeSuggestions.find(s => s.storeName === newValue)
+    if (!currentSuggestion) {
+      setSelectedCustomerId(null)
+      setIsRepLocked(false)
+    }
+  }, [storeSuggestions])
 
   // Watch billing address for "copy to shipping" functionality
   const billingStreet1 = watch('street1')
@@ -188,7 +307,7 @@ export function OrderForm({
             setIsSubmitting(false)
           }
         } else {
-          // Create new order
+          // Create new order with customerId for strong ownership
           const result = await createOrder({
             ...data,
             currency,
@@ -199,6 +318,7 @@ export function OrderForm({
               price: item.price,
             })),
             isPreOrder, // P prefix for pre-orders, A prefix for ATS
+            customerId: selectedCustomerId, // Pass selected customer ID for strong ownership
           })
 
           if (result.success && result.orderId) {
@@ -232,13 +352,42 @@ export function OrderForm({
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
+            <div className="space-y-2 relative">
               <Label htmlFor="storeName">Store Name *</Label>
               <Input
                 id="storeName"
-                {...register('storeName')}
+                {...register('storeName', {
+                  onChange: handleStoreNameChange,
+                })}
+                ref={(e) => {
+                  register('storeName').ref(e)
+                  storeInputRef.current = e
+                }}
                 placeholder="Enter store name"
+                autoComplete="off"
               />
+              {/* Autocomplete dropdown - only shown for new orders */}
+              {!editMode && showSuggestions && storeSuggestions.length > 0 && (
+                <ul
+                  ref={suggestionsRef}
+                  className="absolute z-50 w-full mt-1 bg-popover border rounded-md shadow-lg max-h-60 overflow-auto"
+                >
+                  {storeSuggestions.map((suggestion) => (
+                    <li
+                      key={suggestion.id}
+                      className="px-3 py-2 cursor-pointer hover:bg-accent hover:text-accent-foreground"
+                      onClick={() => handleSelectCustomer(suggestion)}
+                    >
+                      {suggestion.storeName}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {!editMode && isLoadingSuggestions && (
+                <div className="absolute right-3 top-9">
+                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                </div>
+              )}
               {errors.storeName && (
                 <p className="text-sm text-destructive">{errors.storeName.message}</p>
               )}
@@ -257,12 +406,24 @@ export function OrderForm({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="salesRepId">Sales Rep *</Label>
+              <Label htmlFor="salesRepId">
+                Sales Rep *
+                {isRepLocked && (
+                  <span className="ml-2 text-xs text-muted-foreground font-normal">
+                    (Auto-assigned based on customer)
+                  </span>
+                )}
+              </Label>
               <Select
-                defaultValue={editMode && existingOrder?.salesRepId ? existingOrder.salesRepId : undefined}
-                onValueChange={(value) => setValue('salesRepId', value)}
+                value={watch('salesRepId')}
+                onValueChange={(value) => {
+                  if (!isRepLocked) {
+                    setValue('salesRepId', value)
+                  }
+                }}
+                disabled={isRepLocked}
               >
-                <SelectTrigger className="w-full">
+                <SelectTrigger className={`w-full ${isRepLocked ? 'opacity-70' : ''}`}>
                   <SelectValue placeholder="Select a rep" />
                 </SelectTrigger>
                 <SelectContent>
@@ -385,7 +546,7 @@ export function OrderForm({
               <div className="space-y-2">
                 <Label htmlFor="country">Country *</Label>
                 <Select
-                  defaultValue="USA"
+                  value={watch('country')}
                   onValueChange={(value) => setValue('country', value as 'USA' | 'Canada')}
                 >
                   <SelectTrigger className="w-full">
@@ -482,7 +643,7 @@ export function OrderForm({
               <div className="space-y-2">
                 <Label htmlFor="shippingCountry">Country *</Label>
                 <Select
-                  defaultValue="USA"
+                  value={watch('shippingCountry')}
                   onValueChange={(value) => setValue('shippingCountry', value as 'USA' | 'Canada')}
                 >
                   <SelectTrigger className="w-full">

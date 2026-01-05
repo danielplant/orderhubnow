@@ -470,13 +470,17 @@ export async function getOrdersByRep(
   const input = parseOrdersListInput(searchParams);
 
   // 2. Build base where with rep filter
+  // Uses OR to support both new orders (with RepID) and legacy orders (SalesRep string match)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const baseWhere: any = {
-    // Rep filter: SalesRep contains rep's name (case-insensitive)
-    SalesRep: { contains: rep.Name, mode: 'insensitive' },
+    // Rep filter: RepID match (fast, indexed) OR SalesRep contains name (fallback for legacy)
+    OR: [
+      { RepID: repId },
+      { SalesRep: { contains: rep.Name, mode: 'insensitive' } },
+    ],
   };
 
-  // Store search filter
+  // Store search filter (AND with the OR above)
   if (input.q) {
     baseWhere.StoreName = { contains: input.q, mode: 'insensitive' };
   }
@@ -648,9 +652,15 @@ export async function getOrderForEditing(
   });
   const skuDescMap = new Map(skus.map((s) => [s.SkuID, s.Description || '']));
 
-  // Look up rep ID by name (exact match, case-sensitive for SQL Server)
+  // Get rep ID - use stored RepID for new orders, fallback to name lookup for legacy
   let salesRepId: string | null = null;
-  if (order.SalesRep) {
+
+  // Primary: use stored RepID (new orders with strong ownership)
+  if (order.RepID) {
+    salesRepId = String(order.RepID);
+  }
+  // Fallback: look up by name for legacy orders where RepID is null
+  else if (order.SalesRep) {
     const rep = await prisma.reps.findFirst({
       where: { Name: order.SalesRep },
       select: { ID: true },

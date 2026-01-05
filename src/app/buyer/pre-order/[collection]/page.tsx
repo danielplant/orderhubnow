@@ -114,17 +114,6 @@ export default async function PreOrderCollectionPage({ params }: Props) {
             </p>
           </div>
         )}
-
-        {/* Navigation to My Order */}
-        <div className="mt-12 flex justify-center">
-          <Link
-            href="/buyer/my-order?isPreOrder=true"
-            className="inline-flex items-center gap-2 px-6 py-3 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors"
-          >
-            Review Order
-            <ArrowLeft className="h-4 w-4 rotate-180" />
-          </Link>
-        </div>
       </main>
     </div>
   );

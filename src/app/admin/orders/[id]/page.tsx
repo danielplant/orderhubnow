@@ -265,4 +265,3 @@ export default async function AdminOrderDetailsPage(props: { params: Promise<{ i
     </main>
   )
 }
-

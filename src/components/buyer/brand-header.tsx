@@ -1,15 +1,27 @@
 "use client";
 
-import { Compass, Bell, Search, HelpCircle } from "lucide-react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { Compass, Bell, Search, HelpCircle, ShoppingCart } from "lucide-react";
 import { Button, Divider, IndicatorDot, IconBox, Badge } from "@/components/ui";
 import { BRAND_NAME, APP_NAME } from "@/lib/constants/brand";
 import { CurrencyToggle } from "./currency-toggle";
+import { useOrder, useCurrency } from "@/lib/contexts";
+import { formatPrice } from "@/lib/utils";
 
 interface BrandHeaderProps {
   userInitials?: string;
 }
 
 export function BrandHeader({ userInitials = "?" }: BrandHeaderProps) {
+  const pathname = usePathname();
+  const { totalItems, totalPrice } = useOrder();
+  const { currency } = useCurrency();
+
+  // Determine if we're in pre-order flow
+  const isPreOrder = pathname.startsWith("/buyer/pre-order");
+  const myOrderHref = isPreOrder ? "/buyer/my-order?isPreOrder=true" : "/buyer/my-order";
+
   return (
     <header className="w-full h-16 bg-background border-b border-border flex items-center justify-between px-6 sticky top-0 z-50">
       {/* Left: Brand */}
@@ -27,6 +39,28 @@ export function BrandHeader({ userInitials = "?" }: BrandHeaderProps) {
 
       {/* Right: Actions */}
       <div className="flex items-center gap-4">
+        {/* Cart/Order Button */}
+        <Button
+          variant={totalItems > 0 ? "default" : "outline"}
+          size="sm"
+          asChild
+        >
+          <Link href={myOrderHref}>
+            <ShoppingCart className="h-4 w-4" />
+            {totalItems > 0 ? (
+              <>
+                <span>{totalItems}</span>
+                <span className="mx-1 opacity-50">|</span>
+                <span>{formatPrice(totalPrice, currency)}</span>
+              </>
+            ) : (
+              <span>Review Order</span>
+            )}
+          </Link>
+        </Button>
+
+        <Divider orientation="vertical" />
+
         {/* Status Indicator */}
         <div className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-secondary rounded-full border border-border">
           <IndicatorDot status="success" pulse />
