@@ -468,7 +468,7 @@ model Users {
   UserType          String       @db.NVarChar(50)
   RepId             Int?
   Status            String       @default("legacy") @db.NVarChar(20) // invited, active, legacy, disabled
-  MustResetPassword Boolean      @default(true)
+  MustResetPassword Boolean?     @default(true)
   Email             String?      @db.NVarChar(255)
   Reps              Reps?        @relation(fields: [RepId], references: [ID], onDelete: NoAction, onUpdate: NoAction, map: "FK_Users_Reps")
   AuthTokens        AuthTokens[]
