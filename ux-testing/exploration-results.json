@@ -1,0 +1,11 @@
+{
+  "timestamp": "2026-01-05T19:38:41.684Z",
+  "oldSite": {
+    "success": false,
+    "error": "Error: page.goto: net::ERR_TUNNEL_CONNECTION_FAILED at https://inventory.limeapple.ca/USA\nCall log:\n  - navigating to \"https://inventory.limeapple.ca/USA\", waiting until \"networkidle\"\n"
+  },
+  "newSite": {
+    "success": false,
+    "error": "Error: page.goto: net::ERR_TUNNEL_CONNECTION_FAILED at https://www.orderhubnow.com/admin/login\nCall log:\n  - navigating to \"https://www.orderhubnow.com/admin/login\", waiting until \"networkidle\"\n"
+  }
+}
