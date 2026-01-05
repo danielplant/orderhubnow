@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { auth } from '@/lib/auth/providers'
 import AdminSidebar from '@/components/admin/admin-sidebar'
 import { LogoutButton } from '@/components/auth/logout-button'
+import { KeyboardShortcuts } from '@/components/admin/keyboard-shortcuts'
 
 export default async function AdminLayout({ children }: { children: ReactNode }) {
   const session = await auth()
@@ -9,6 +10,7 @@ export default async function AdminLayout({ children }: { children: ReactNode })
 
   return (
     <div className="min-h-screen bg-muted/30">
+      <KeyboardShortcuts />
       <header className="border-b bg-background px-6 py-4">
         <div className="flex items-center justify-between">
           <div className="text-sm font-semibold">MyOrderHub — Admin</div>

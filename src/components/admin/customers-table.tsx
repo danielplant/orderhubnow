@@ -351,9 +351,10 @@ export function CustomersTable({ initialCustomers, total, reps }: CustomersTable
       <div className="rounded-md border border-border bg-background">
         <div className="flex flex-wrap gap-3 p-4 items-center">
           <input
+            data-search-input
             value={q}
             onChange={(e) => setParam('q', e.target.value || null)}
-            placeholder="Search by store name, email, or rep..."
+            placeholder="Search by store name, email, or rep... (⌘K)"
             className="h-10 w-full max-w-md rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
 

@@ -228,7 +228,8 @@ export function RepOrdersTable({ orders, total, statusCounts }: RepOrdersTablePr
       {/* Filters */}
       <div className="flex flex-wrap gap-4 items-center">
         <Input
-          placeholder="Search order #, store, email, buyer..."
+          data-search-input
+          placeholder="Search order #, store, email, buyer... (⌘K)"
           value={storeSearch}
           onChange={(e) => setStoreSearch(e.target.value)}
           onKeyDown={handleKeyDown}
