@@ -31,8 +31,7 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Build application
-        run: npm run build
+      # Build happens on EC2 (requires database connection for static generation)
 
       - name: Deploy to EC2
         uses: appleboy/ssh-action@v1.0.3
