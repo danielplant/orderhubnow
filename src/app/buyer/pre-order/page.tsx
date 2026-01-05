@@ -142,10 +142,20 @@ export default async function PreOrderPage({ searchParams }: Props) {
             ))}
           </div>
         ) : (
-          <div className="text-center py-16">
-            <p className="text-muted-foreground">
-              No pre-order collections available at this time.
+          <div className="text-center py-16 space-y-4">
+            <div className="mx-auto w-16 h-16 rounded-full bg-muted flex items-center justify-center">
+              <Calendar className="w-8 h-8 text-muted-foreground" />
+            </div>
+            <h3 className="text-lg font-medium text-foreground">No Pre-Order Collections</h3>
+            <p className="text-muted-foreground max-w-md mx-auto">
+              There are no pre-order collections available at this time. Please check back later or browse our available inventory.
             </p>
+            <a
+              href={`/buyer/ats${repQuery}`}
+              className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+            >
+              Browse Available Inventory
+            </a>
           </div>
         )}
       </main>

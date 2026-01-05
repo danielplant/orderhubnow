@@ -10,6 +10,7 @@ interface Props {
     editOrder?: string
     returnTo?: string
     repId?: string
+    draft?: string
   }>
 }
 
@@ -22,13 +23,15 @@ interface Props {
  * - editOrder={id}: Edit existing order mode
  * - returnTo={path}: Redirect path after successful edit/create
  * - repId={id}: Rep context for rep-created orders (auto-selects and locks rep dropdown)
+ * - draft={encoded}: Restore cart from shared draft link
  */
 export default async function MyOrderPage({ searchParams }: Props) {
   const params = await searchParams
   const isPreOrder = params.isPreOrder === 'true'
   const editOrderId = params.editOrder
   const returnTo = params.returnTo || '/buyer/select-journey'
-  
+  const draftParam = params.draft || null
+
   // Extract rep context for rep-created orders
   const repContext = params.repId ? { repId: params.repId } : null
 
@@ -74,6 +77,7 @@ export default async function MyOrderPage({ searchParams }: Props) {
       existingOrder={existingOrder}
       returnTo={returnTo}
       repContext={repContext}
+      draftParam={draftParam}
     />
   )
 }

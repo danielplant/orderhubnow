@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useOrder } from '@/lib/contexts/order-context'
 import { useCurrency } from '@/lib/contexts/currency-context'
@@ -8,7 +8,8 @@ import { OrderForm } from '@/components/buyer/order-form'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { formatCurrency } from '@/lib/utils'
-import { Trash2 } from 'lucide-react'
+import { Trash2, Link2, Check } from 'lucide-react'
+import { toast } from 'sonner'
 import type { OrderForEditing } from '@/lib/data/queries/orders'
 
 interface SkuData {
@@ -25,6 +26,7 @@ interface MyOrderClientProps {
   existingOrder?: OrderForEditing | null
   returnTo?: string
   repContext?: { repId: string } | null
+  draftParam?: string | null
 }
 
 export function MyOrderClient({
@@ -34,10 +36,47 @@ export function MyOrderClient({
   existingOrder = null,
   returnTo = '/buyer/select-journey',
   repContext = null,
+  draftParam = null,
 }: MyOrderClientProps) {
   const router = useRouter()
-  const { orders, totalItems, removeItem } = useOrder()
+  const { orders, totalItems, removeItem, restoreFromDraftLink, generateDraftLink } = useOrder()
   const { currency } = useCurrency()
+  const [linkCopied, setLinkCopied] = useState(false)
+
+  // Restore from draft link parameter (runs once when draftParam is set)
+  useEffect(() => {
+    if (draftParam) {
+      const restored = restoreFromDraftLink(draftParam)
+      if (restored) {
+        toast.success('Draft order restored successfully!')
+      } else {
+        toast.error('Failed to restore draft order - link may be invalid or expired')
+      }
+      // Clean up URL by removing draft parameter
+      const url = new URL(window.location.href)
+      url.searchParams.delete('draft')
+      router.replace(url.pathname + url.search)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []) // Empty deps intentional - only run once on mount
+
+  // Copy draft order link handler
+  const handleCopyDraftLink = async () => {
+    const link = generateDraftLink()
+    if (!link) {
+      toast.error('No items in cart to share')
+      return
+    }
+
+    try {
+      await navigator.clipboard.writeText(link)
+      setLinkCopied(true)
+      toast.success('Draft order link copied! Share it to continue this order later.')
+      setTimeout(() => setLinkCopied(false), 2000)
+    } catch {
+      toast.error('Failed to copy link')
+    }
+  }
 
   // Determine if we're in edit mode
   const isEditMode = !!existingOrder
@@ -106,9 +145,18 @@ export function MyOrderClient({
     }
   }, [totalItems, router, isEditMode, repQuery])
 
-  // Don't render form until we've checked cart (only in non-edit mode)
+  // Show redirecting state while cart is empty (only in non-edit mode)
   if (!isEditMode && totalItems === 0) {
-    return null
+    return (
+      <div className="container mx-auto py-16 px-4">
+        <div className="flex flex-col items-center justify-center space-y-4">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+          <p className="text-muted-foreground">
+            {draftParam ? 'Restoring your draft order...' : 'Redirecting to collections...'}
+          </p>
+        </div>
+      </div>
+    )
   }
 
   // In edit mode, show error if order not editable
@@ -191,13 +239,27 @@ export function MyOrderClient({
               </div>
 
               {!isEditMode && (
-                <Button
-                  variant="outline"
-                  className="w-full"
-                  onClick={() => router.push((isPreOrder ? '/buyer/pre-order' : '/buyer/ats') + repQuery)}
-                >
-                  Continue Shopping
-                </Button>
+                <div className="space-y-2">
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => router.push((isPreOrder ? '/buyer/pre-order' : '/buyer/ats') + repQuery)}
+                  >
+                    Continue Shopping
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    className="w-full"
+                    onClick={handleCopyDraftLink}
+                  >
+                    {linkCopied ? (
+                      <Check className="h-4 w-4 text-green-500 mr-2" />
+                    ) : (
+                      <Link2 className="h-4 w-4 mr-2" />
+                    )}
+                    {linkCopied ? 'Link Copied!' : 'Copy Draft Link'}
+                  </Button>
+                </div>
               )}
 
               {isEditMode && (

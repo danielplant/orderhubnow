@@ -16,9 +16,9 @@ This report compares the buyer/customer experience between the legacy inventory.
 |------|--------|-------|
 | Product Browsing | **Functional** | Modern card-based UI, improved visuals |
 | Order Creation | **Functional** | Complete workflow with form validation |
-| Draft Order Persistence | **Partial** | LocalStorage works, but no shareable links |
+| Draft Order Persistence | **Implemented** | LocalStorage + shareable draft links |
 | Currency Switching | **Functional** | Real-time CAD/USD toggle |
-| Customer Autocomplete | **Functional** | Store name search with auto-fill |
+| Customer Autocomplete | **Functional** | Store name search with auto-fill + error feedback |
 | Order Confirmation | **Functional** | PDF download available |
 | Pre-Order Flow | **Functional** | Ship window display, no quantity caps |
 
@@ -67,50 +67,19 @@ This report compares the buyer/customer experience between the legacy inventory.
 | Undo functionality | No | Yes | **Improved** |
 | Clear cart | Yes | Yes | **Parity** |
 | Cross-tab sync | No | Yes | **Improved** |
-| **Copy draft link** | ? | **NOT IMPLEMENTED** | **Gap** |
+| **Copy draft link** | No | **IMPLEMENTED** | **New Feature** |
 
-**Critical Gap: Copy Link for Draft Order**
+**IMPLEMENTED: Copy Link for Draft Order**
 
-The user mentioned that the new site should have the ability to "copy a link for a draft order for the customer to revisit later." This feature is **NOT IMPLEMENTED** in the current codebase.
+The "copy a link for a draft order for the customer to revisit later" feature has been **IMPLEMENTED**.
 
-Current state:
-- Draft orders stored in LocalStorage with key `draft-order`
-- No mechanism to serialize cart state to URL
-- No mechanism to restore cart from URL parameters
-
-**Proposed Implementation:**
-
-```typescript
-// In order-context.tsx or new utility
-
-// Serialize cart to base64 URL-safe string
-function serializeDraftOrder(): string {
-  const data = localStorage.getItem('draft-order');
-  if (!data) return '';
-  return btoa(encodeURIComponent(data));
-}
-
-// Generate shareable link
-function generateDraftLink(): string {
-  const serialized = serializeDraftOrder();
-  return `${window.location.origin}/buyer/my-order?draft=${serialized}`;
-}
-
-// Restore cart from URL parameter
-function restoreDraftFromUrl(draftParam: string): boolean {
-  try {
-    const data = decodeURIComponent(atob(draftParam));
-    localStorage.setItem('draft-order', data);
-    return true;
-  } catch {
-    return false;
-  }
-}
-```
-
-**UI Location:** Add "Copy Draft Link" button to:
-1. `BrandHeader` (when cart has items)
-2. `MyOrderClient` (order review page)
+**Implementation details:**
+- `generateDraftLink()` and `restoreFromDraftLink()` added to `order-context.tsx`
+- Cart state serialized to base64 in URL parameter `?draft=...`
+- "Copy Link" button added to `BrandHeader` (shows when cart has items)
+- "Copy Draft Link" button added to `MyOrderClient` (order review page)
+- Automatic restoration when visiting URL with draft parameter
+- Toast notifications for success/failure feedback
 
 ### 4. Order Form & Submission
 
@@ -178,49 +147,63 @@ function restoreDraftFromUrl(draftParam: string): boolean {
 
 ---
 
-## Critical Issues & Gaps
+## Completed Fixes (This Session)
 
-### High Priority
+### Implemented
 
-1. **Draft Order Link Sharing** (NOT IMPLEMENTED)
-   - User-requested feature for sharing draft orders
-   - Enables customers to save/share their in-progress orders
-   - Implementation path clear (see above)
+1. **Draft Order Link Sharing** - COMPLETED
+   - Added `generateDraftLink()` and `restoreFromDraftLink()` to order-context
+   - Added "Copy Link" button to BrandHeader
+   - Added "Copy Draft Link" button to MyOrderClient
+   - URL parameter handling for draft restoration
+
+2. **Error Feedback for Autocomplete** - COMPLETED
+   - Added toast notifications for store name search failures
+   - Added error handling for customer auto-fill
+
+3. **Improved Empty States** - COMPLETED
+   - ATS collections: Shows helpful message with link to Pre-Order
+   - Pre-Order collections: Shows helpful message with link to ATS
+
+4. **Loading States** - COMPLETED
+   - Added proper loading spinner for cart redirect
+   - Added message for draft restoration
+
+5. **Error Boundary** - COMPLETED
+   - Added `src/app/buyer/error.tsx` for graceful error handling
+
+---
+
+## Remaining Gaps
 
 ### Medium Priority
 
-2. **Product Search UI**
+1. **Product Search UI**
    - Backend ready, needs UI component
    - Would improve UX for large catalogs
 
-3. **Collection Images**
+2. **Collection Images**
    - Currently uses gradient placeholders
    - Shopify images available for some categories
    - Need to populate category image URLs
 
 ### Low Priority
 
-4. **Order History for Returning Customers**
+3. **Order History for Returning Customers**
    - Would require authentication layer
    - Current approach is valid for B2B workflow
 
-5. **Wishlist/Saved Carts**
+4. **Wishlist/Saved Carts**
    - Would require authentication
-   - Draft link sharing partially addresses this need
+   - Draft link sharing now addresses this need
 
 ---
 
 ## Recommendations
 
-### Immediate Actions
+### Next Actions
 
-1. **Implement Draft Order Link Copy Feature**
-   - Add `generateDraftLink()` utility to order-context
-   - Add URL parameter parsing to restore drafts
-   - Add "Copy Link" button to BrandHeader and MyOrderClient
-   - Test cross-browser compatibility
-
-2. **Add Product Search UI**
+1. **Add Product Search UI**
    - Add search input to BrandHeader
    - Connect to existing SKU query infrastructure
    - Add search results display

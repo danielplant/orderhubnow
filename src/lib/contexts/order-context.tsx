@@ -51,6 +51,9 @@ interface OrderContextValue {
   getPreOrderShipWindow: () => { start: string | null; end: string | null } | null;
   // Order line metadata (isOnRoute tracking)
   orderLineMetadata: Record<string, OrderLineMetadata>;
+  // Draft order link sharing
+  generateDraftLink: () => string | null;
+  restoreFromDraftLink: (draftParam: string) => boolean;
 }
 
 const OrderContext = createContext<OrderContextValue | null>(null);
@@ -292,6 +295,54 @@ export function OrderProvider({ children }: { children: ReactNode }) {
     return { start: first.onRouteStart, end: first.onRouteEnd };
   }, [preOrderMetadata]);
 
+  /**
+   * Generate a shareable link containing the current draft order.
+   * Returns null if cart is empty.
+   */
+  const generateDraftLink = useCallback(() => {
+    if (Object.keys(orders).length === 0) return null;
+
+    try {
+      const data = {
+        orders,
+        prices: Object.fromEntries(priceMap),
+        preOrderMeta: preOrderMetadata,
+        lineMeta: orderLineMetadata,
+      };
+      const encoded = btoa(encodeURIComponent(JSON.stringify(data)));
+      const baseUrl = typeof window !== "undefined" ? window.location.origin : "";
+      return `${baseUrl}/buyer/my-order?draft=${encoded}`;
+    } catch {
+      return null;
+    }
+  }, [orders, priceMap, preOrderMetadata, orderLineMetadata]);
+
+  /**
+   * Restore cart state from a draft link parameter.
+   * Returns true if successful, false if invalid.
+   */
+  const restoreFromDraftLink = useCallback((draftParam: string): boolean => {
+    try {
+      const decoded = JSON.parse(decodeURIComponent(atob(draftParam)));
+      if (decoded.orders && typeof decoded.orders === "object") {
+        setOrders(decoded.orders);
+        if (decoded.prices) {
+          setPriceMap(new Map(Object.entries(decoded.prices)));
+        }
+        if (decoded.preOrderMeta) {
+          setPreOrderMetadata(decoded.preOrderMeta);
+        }
+        if (decoded.lineMeta) {
+          setOrderLineMetadata(decoded.lineMeta);
+        }
+        return true;
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  }, []);
+
   const { items: totalItems, price: totalPrice } = calculateTotals(orders, priceMap);
 
   return (
@@ -311,6 +362,8 @@ export function OrderProvider({ children }: { children: ReactNode }) {
         preOrderMetadata,
         getPreOrderShipWindow,
         orderLineMetadata,
+        generateDraftLink,
+        restoreFromDraftLink,
       }}
     >
       {children}

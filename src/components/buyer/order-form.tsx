@@ -31,7 +31,7 @@ import {
   normalizeWebsite,
 } from '@/lib/utils/form-normalization'
 import { formatCurrency } from '@/lib/utils'
-import { isValidReturnTo, isRepPortalReturn } from '@/lib/utils/rep-context'
+import { isRepPortalReturn } from '@/lib/utils/rep-context'
 import type { Currency } from '@/lib/types'
 import type { OrderForEditing } from '@/lib/data/queries/orders'
 
@@ -181,8 +181,13 @@ export function OrderForm({
           const suggestions = await suggestStoreNames(storeNameValue)
           setStoreSuggestions(suggestions)
           setShowSuggestions(suggestions.length > 0)
-        } catch {
+        } catch (error) {
+          console.error('Store name search failed:', error)
           setStoreSuggestions([])
+          // Only show error if user was actively searching
+          if (document.activeElement === storeInputRef.current) {
+            toast.error('Unable to search store names. Please try again.')
+          }
         }
         setIsLoadingSuggestions(false)
       } else {
@@ -218,39 +223,49 @@ export function OrderForm({
     setSelectedCustomerId(suggestion.id)
 
     // Fetch full customer data for auto-fill
-    const customer = await getCustomerForAutoFill(suggestion.id)
-    if (!customer) return
-
-    // Auto-fill customer fields with normalization
-    if (customer.buyerName) setValue('buyerName', customer.buyerName)
-    if (customer.email) setValue('customerEmail', customer.email)
-    if (customer.phone) setValue('customerPhone', customer.phone)
-    setValue('website', normalizeWebsite(customer.website))
-
-    // Auto-fill billing address (only for new orders, but we're always in new order mode for autocomplete)
-    if (customer.street1) setValue('street1', customer.street1)
-    if (customer.street2) setValue('street2', customer.street2)
-    if (customer.city) setValue('city', customer.city)
-    setValue('stateProvince', normalizeStateProvince(customer.stateProvince))
-    if (customer.zipPostal) setValue('zipPostal', customer.zipPostal)
-    setValue('country', normalizeCountry(customer.country))
-
-    // Auto-fill shipping address
-    if (customer.shippingStreet1) setValue('shippingStreet1', customer.shippingStreet1)
-    if (customer.shippingStreet2) setValue('shippingStreet2', customer.shippingStreet2)
-    if (customer.shippingCity) setValue('shippingCity', customer.shippingCity)
-    setValue('shippingStateProvince', normalizeStateProvince(customer.shippingStateProvince))
-    if (customer.shippingZipPostal) setValue('shippingZipPostal', customer.shippingZipPostal)
-    setValue('shippingCountry', normalizeCountry(customer.shippingCountry))
-
-    // Auto-select and lock rep based on customer's rep code
-    // (Only if not in rep context - rep context takes priority)
-    if (!repContext?.repId && customer.rep) {
-      const matchedRep = findRepByCustomerCode(customer.rep, reps)
-      if (matchedRep) {
-        setValue('salesRepId', matchedRep.id)
-        setIsRepLocked(true)
+    try {
+      const customer = await getCustomerForAutoFill(suggestion.id)
+      if (!customer) {
+        toast.error('Could not load customer details. Please fill in manually.')
+        return
       }
+
+      // Auto-fill customer fields with normalization
+      if (customer.buyerName) setValue('buyerName', customer.buyerName)
+      if (customer.email) setValue('customerEmail', customer.email)
+      if (customer.phone) setValue('customerPhone', customer.phone)
+      setValue('website', normalizeWebsite(customer.website))
+
+      // Auto-fill billing address (only for new orders, but we're always in new order mode for autocomplete)
+      if (customer.street1) setValue('street1', customer.street1)
+      if (customer.street2) setValue('street2', customer.street2)
+      if (customer.city) setValue('city', customer.city)
+      setValue('stateProvince', normalizeStateProvince(customer.stateProvince))
+      if (customer.zipPostal) setValue('zipPostal', customer.zipPostal)
+      setValue('country', normalizeCountry(customer.country))
+
+      // Auto-fill shipping address
+      if (customer.shippingStreet1) setValue('shippingStreet1', customer.shippingStreet1)
+      if (customer.shippingStreet2) setValue('shippingStreet2', customer.shippingStreet2)
+      if (customer.shippingCity) setValue('shippingCity', customer.shippingCity)
+      setValue('shippingStateProvince', normalizeStateProvince(customer.shippingStateProvince))
+      if (customer.shippingZipPostal) setValue('shippingZipPostal', customer.shippingZipPostal)
+      setValue('shippingCountry', normalizeCountry(customer.shippingCountry))
+
+      // Auto-select and lock rep based on customer's rep code
+      // (Only if not in rep context - rep context takes priority)
+      if (!repContext?.repId && customer.rep) {
+        const matchedRep = findRepByCustomerCode(customer.rep, reps)
+        if (matchedRep) {
+          setValue('salesRepId', matchedRep.id)
+          setIsRepLocked(true)
+        }
+      }
+
+      toast.success('Customer details loaded')
+    } catch (error) {
+      console.error('Failed to load customer details:', error)
+      toast.error('Failed to load customer details. Please fill in manually.')
     }
   }, [setValue, reps, repContext])
 
