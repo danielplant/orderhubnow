@@ -431,7 +431,7 @@ export function OrderForm({
                 Sales Rep *
                 {isRepLocked && (
                   <span className="ml-2 text-xs text-muted-foreground font-normal">
-                    (Auto-assigned based on customer)
+                    {repContext?.repId ? '(Your account)' : '(Auto-assigned based on customer)'}
                   </span>
                 )}
               </Label>

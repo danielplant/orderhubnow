@@ -147,6 +147,7 @@ export function RepOrdersTable({ orders, total, statusCounts }: RepOrdersTablePr
             href={`/api/orders/${order.id}/pdf`}
             className="text-primary hover:underline font-medium"
             target="_blank"
+            rel="noopener noreferrer"
           >
             {order.orderNumber}
           </Link>
@@ -174,9 +175,19 @@ export function RepOrdersTable({ orders, total, statusCounts }: RepOrdersTablePr
               className="text-primary hover:underline inline-flex items-center gap-1"
             >
               <FileEdit className="size-4" />
-              Edit Items
+              Edit
             </Link>
-          ) : null,
+          ) : (
+            <Link
+              href={`/api/orders/${order.id}/pdf`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-muted-foreground hover:text-primary inline-flex items-center gap-1"
+            >
+              <FileDown className="size-4" />
+              PDF
+            </Link>
+          ),
       },
       {
         id: 'salesRep',
@@ -216,7 +227,7 @@ export function RepOrdersTable({ orders, total, statusCounts }: RepOrdersTablePr
         id: 'category',
         header: 'Category',
         cell: (order) => (
-          <span className="text-muted-foreground text-sm">{order.category}</span>
+          <span className="text-muted-foreground text-sm">{order.category || '—'}</span>
         ),
       },
     ],
@@ -233,6 +244,7 @@ export function RepOrdersTable({ orders, total, statusCounts }: RepOrdersTablePr
           onChange={(e) => setStoreSearch(e.target.value)}
           onKeyDown={handleKeyDown}
           className="max-w-xs"
+          aria-label="Search orders by store name"
         />
         <Select value={status} onValueChange={handleStatusChange}>
           <SelectTrigger className="w-48">
@@ -247,7 +259,7 @@ export function RepOrdersTable({ orders, total, statusCounts }: RepOrdersTablePr
             ))}
           </SelectContent>
         </Select>
-        <Button onClick={handleSearch}>Update Orders Listing</Button>
+        <Button onClick={handleSearch}>Search</Button>
 
         {orders.length > 0 && (
           <Button variant="outline" asChild className="ml-auto gap-2">
