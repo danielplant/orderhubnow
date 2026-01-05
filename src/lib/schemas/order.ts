@@ -69,6 +69,9 @@ export const createOrderInputSchema = orderFormSchema.extend({
   currency: z.enum(['USD', 'CAD']),
   items: z.array(orderItemSchema).min(1, 'Order must have at least one item'),
   isPreOrder: z.boolean(),
+  // Optional customer ID for existing customer - enables strong ownership on order
+  // Nullable to handle client state sending null for new stores
+  customerId: z.number().int().positive().nullable().optional(),
 })
 
 export type CreateOrderInput = z.infer<typeof createOrderInputSchema>

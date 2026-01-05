@@ -4,6 +4,136 @@ import { revalidatePath } from 'next/cache'
 import { prisma } from '@/lib/prisma'
 import type { CustomerInput } from '@/lib/types/customer'
 
+// ============================================================================
+// Customer Lookup (for buyer order form autocomplete)
+// ============================================================================
+
+/**
+ * Suggest store names matching a prefix for autocomplete.
+ * Used in buyer order form to find existing customers.
+ */
+export interface StoreSuggestion {
+  id: number
+  storeName: string
+}
+
+export async function suggestStoreNames(prefix: string): Promise<StoreSuggestion[]> {
+  // Require at least 3 chars to avoid too many results
+  if (!prefix || prefix.trim().length < 3) {
+    return []
+  }
+
+  const trimmedPrefix = prefix.trim()
+
+  const customers = await prisma.customers.findMany({
+    where: {
+      StoreName: {
+        startsWith: trimmedPrefix,
+        // SQL Server collation is case-insensitive by default
+      },
+    },
+    select: {
+      ID: true,
+      StoreName: true,
+    },
+    orderBy: { StoreName: 'asc' },
+    take: 10,
+  })
+
+  return customers.map((c) => ({
+    id: c.ID,
+    storeName: c.StoreName ?? '',
+  }))
+}
+
+/**
+ * Customer data for auto-filling the order form.
+ */
+export interface CustomerAutoFill {
+  id: number
+  storeName: string
+  buyerName: string | null
+  email: string | null
+  phone: string | null
+  website: string | null
+  rep: string | null
+  // Billing address
+  street1: string | null
+  street2: string | null
+  city: string | null
+  stateProvince: string | null
+  zipPostal: string | null
+  country: string | null
+  // Shipping address
+  shippingStreet1: string | null
+  shippingStreet2: string | null
+  shippingCity: string | null
+  shippingStateProvince: string | null
+  shippingZipPostal: string | null
+  shippingCountry: string | null
+}
+
+/**
+ * Get customer details for auto-filling the order form.
+ * Returns null if customer not found.
+ */
+export async function getCustomerForAutoFill(customerId: number): Promise<CustomerAutoFill | null> {
+  const customer = await prisma.customers.findUnique({
+    where: { ID: customerId },
+    select: {
+      ID: true,
+      StoreName: true,
+      CustomerName: true,
+      Email: true,
+      Phone: true,
+      Website: true,
+      Rep: true,
+      Street1: true,
+      Street2: true,
+      City: true,
+      StateProvince: true,
+      ZipPostal: true,
+      Country: true,
+      ShippingStreet1: true,
+      ShippingStreet2: true,
+      ShippingCity: true,
+      ShippingStateProvince: true,
+      ShippingZipPostal: true,
+      ShippingCountry: true,
+    },
+  })
+
+  if (!customer) {
+    return null
+  }
+
+  return {
+    id: customer.ID,
+    storeName: customer.StoreName ?? '',
+    buyerName: customer.CustomerName,
+    email: customer.Email,
+    phone: customer.Phone,
+    website: customer.Website,
+    rep: customer.Rep,
+    street1: customer.Street1,
+    street2: customer.Street2,
+    city: customer.City,
+    stateProvince: customer.StateProvince,
+    zipPostal: customer.ZipPostal,
+    country: customer.Country,
+    shippingStreet1: customer.ShippingStreet1,
+    shippingStreet2: customer.ShippingStreet2,
+    shippingCity: customer.ShippingCity,
+    shippingStateProvince: customer.ShippingStateProvince,
+    shippingZipPostal: customer.ShippingZipPostal,
+    shippingCountry: customer.ShippingCountry,
+  }
+}
+
+// ============================================================================
+// Rep Code Resolution
+// ============================================================================
+
 /**
  * Helper to resolve rep code from repId or fallback to raw rep string.
  * If repId is provided, looks up the code from Reps table.

@@ -236,7 +236,21 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
       const salesRepName = rep.Name ?? ''
       const salesRepCode = rep.Code?.trim() || rep.Name || ''
 
-      // Create order header
+      // Determine customerId for strong ownership
+      // If provided from form (existing customer selected), use it
+      // Otherwise, look up by StoreName (may be null for new stores)
+      let customerId: number | null = data.customerId ?? null
+      if (!customerId) {
+        const existingByName = await tx.customers.findFirst({
+          where: { StoreName: data.storeName },
+          select: { ID: true },
+        })
+        if (existingByName) {
+          customerId = existingByName.ID
+        }
+      }
+
+      // Create order header with RepID and CustomerID for strong ownership
       const newOrder = await tx.customerOrders.create({
         data: {
           OrderNumber: orderNumber,
@@ -256,6 +270,9 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
           IsShipped: false,
           OrderStatus: 'Pending',
           IsTransferredToShopify: false,
+          // Strong ownership fields - enables resilient rep filtering
+          RepID: parseInt(data.salesRepId),
+          CustomerID: customerId, // May be null for new customers initially
         },
       })
 
@@ -305,7 +322,8 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
           },
         })
       } else {
-        await tx.customers.create({
+        // Create new customer and update order with CustomerID
+        const newCustomer = await tx.customers.create({
           data: {
             StoreName: data.storeName,
             CustomerName: data.buyerName,
@@ -329,6 +347,13 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
             LastOrderDate: new Date(),
             OrderCount: 1,
           },
+          select: { ID: true },
+        })
+
+        // Update order with new customer's ID for strong ownership
+        await tx.customerOrders.update({
+          where: { ID: newOrder.ID },
+          data: { CustomerID: newCustomer.ID },
         })
       }
 
