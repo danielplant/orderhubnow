@@ -1,38 +1,19 @@
 name: Deploy to EC2
 
 on:
-  push:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
     branches: [main]
   workflow_dispatch: # Allows manual trigger from GitHub UI
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    # Only deploy if CI passed (or manual trigger)
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Generate Prisma client
-        run: npx prisma generate
-
-      - name: Type check
-        run: npm run type-check
-
-      - name: Lint
-        run: npm run lint
-
-      # Build happens on EC2 (requires database connection for static generation)
-
       - name: Deploy to EC2
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -42,8 +23,9 @@ jobs:
           script: |
             cd /var/www/orderhubnow
 
-            # Pull latest code
-            git pull origin main
+            # Pull latest code (using HTTPS with token for auth)
+            git fetch origin main
+            git reset --hard origin/main
 
             # Install dependencies
             npm ci --production=false
