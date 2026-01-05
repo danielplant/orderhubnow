@@ -15,7 +15,7 @@ export default async function RepLayout({ children }: { children: ReactNode }) {
             <span className="text-sm text-muted-foreground">
               Logged in as <span className="font-medium text-foreground">{repName}</span>
             </span>
-            <LogoutButton />
+            <LogoutButton callbackUrl="/rep/login" />
           </div>
         </div>
       </header>

@@ -4,9 +4,13 @@ import { signOut } from 'next-auth/react'
 import { Button } from '@/components/ui/button'
 import { LogOut } from 'lucide-react'
 
-export function LogoutButton() {
+interface LogoutButtonProps {
+  callbackUrl?: string
+}
+
+export function LogoutButton({ callbackUrl = '/admin/login' }: LogoutButtonProps) {
   const handleLogout = () => {
-    signOut({ callbackUrl: '/rep/login' })
+    signOut({ callbackUrl })
   }
 
   return (
