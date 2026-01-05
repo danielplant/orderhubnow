@@ -17,7 +17,8 @@ import {
   DropdownMenuSeparator,
 } from '@/components/ui'
 import type { Customer } from '@/lib/types/customer'
-import { createCustomer, updateCustomer, deleteCustomer } from '@/lib/data/actions/customers'
+import { createCustomer, updateCustomer, deleteCustomer, bulkDeleteCustomers, bulkAssignRep } from '@/lib/data/actions/customers'
+import { BulkActionsBar } from '@/components/admin/bulk-actions-bar'
 import { cn } from '@/lib/utils'
 import {
   MoreHorizontal,
@@ -28,6 +29,7 @@ import {
   Download,
   Upload,
   CloudDownload,
+  Users,
 } from 'lucide-react'
 import { CustomerImportModal } from './customer-import-modal'
 import { CustomerExcelImportModal } from './customer-excel-import-modal'
@@ -42,7 +44,7 @@ export interface CustomersTableProps {
   reps: Array<{ id: number; name: string; code: string }>
 }
 
-type ModalMode = 'add' | 'edit' | 'delete' | null
+type ModalMode = 'add' | 'edit' | 'delete' | 'bulk-delete' | 'bulk-assign-rep' | null
 
 // ============================================================================
 // Component
@@ -67,6 +69,10 @@ export function CustomersTable({ initialCustomers, total, reps }: CustomersTable
   const [showImportDropdown, setShowImportDropdown] = React.useState(false)
   const [showShopifyImport, setShowShopifyImport] = React.useState(false)
   const [showExcelImport, setShowExcelImport] = React.useState(false)
+
+  // Bulk selection state
+  const [selectedIds, setSelectedIds] = React.useState<string[]>([])
+  const [bulkRepId, setBulkRepId] = React.useState<string>('')
 
   // Form state - repId stores the selected rep's ID (as string)
   const [formData, setFormData] = React.useState({
@@ -173,6 +179,7 @@ export function CustomersTable({ initialCustomers, total, reps }: CustomersTable
     setModalMode(null)
     setSelectedCustomer(null)
     setError(null)
+    setBulkRepId('')
   }
 
   const handleSubmit = async () => {
@@ -224,6 +231,20 @@ export function CustomersTable({ initialCustomers, total, reps }: CustomersTable
           setError(result.error ?? 'Failed to delete customer')
           return
         }
+      } else if (modalMode === 'bulk-delete' && selectedIds.length > 0) {
+        const result = await bulkDeleteCustomers(selectedIds)
+        if (!result.success) {
+          setError(result.error ?? 'Failed to delete customers')
+          return
+        }
+        setSelectedIds([])
+      } else if (modalMode === 'bulk-assign-rep' && selectedIds.length > 0) {
+        const result = await bulkAssignRep(selectedIds, bulkRepId || null)
+        if (!result.success) {
+          setError(result.error ?? 'Failed to assign rep')
+          return
+        }
+        setSelectedIds([])
       }
 
       closeModal()
@@ -386,12 +407,32 @@ export function CustomersTable({ initialCustomers, total, reps }: CustomersTable
         </div>
       </div>
 
+      {/* Bulk Actions Bar */}
+      {selectedIds.length > 0 && (
+        <BulkActionsBar
+          count={selectedIds.length}
+          actions={[
+            {
+              label: 'Assign Rep',
+              onClick: () => setModalMode('bulk-assign-rep'),
+            },
+            {
+              label: 'Delete Selected',
+              onClick: () => setModalMode('bulk-delete'),
+              variant: 'destructive',
+            },
+          ]}
+          onClear={() => setSelectedIds([])}
+        />
+      )}
+
       {/* Data Table */}
       <DataTable
         data={initialCustomers}
         columns={columns}
         getRowId={(r) => String(r.id)}
-        enableRowSelection={false}
+        enableRowSelection
+        onSelectionChange={setSelectedIds}
         pageSize={pageSize}
         manualPagination
         page={page}
@@ -568,6 +609,71 @@ export function CustomersTable({ initialCustomers, total, reps }: CustomersTable
             </Button>
             <Button variant="destructive" onClick={handleSubmit} disabled={isSubmitting}>
               {isSubmitting ? 'Deleting...' : 'Delete'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Delete Confirmation */}
+      <Dialog open={modalMode === 'bulk-delete'} onOpenChange={closeModal}>
+        <DialogContent className="bg-background sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete {selectedIds.length} Customers</DialogTitle>
+          </DialogHeader>
+
+          <p className="text-muted-foreground mt-2">
+            Are you sure you want to delete <strong>{selectedIds.length}</strong> customer{selectedIds.length === 1 ? '' : 's'}? This action cannot be undone.
+          </p>
+
+          {error && <p className="text-sm text-destructive mt-2">{error}</p>}
+
+          <div className="flex gap-2 justify-end mt-4">
+            <Button variant="secondary" onClick={closeModal} disabled={isSubmitting}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleSubmit} disabled={isSubmitting}>
+              {isSubmitting ? 'Deleting...' : `Delete ${selectedIds.length}`}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Assign Rep */}
+      <Dialog open={modalMode === 'bulk-assign-rep'} onOpenChange={closeModal}>
+        <DialogContent className="bg-background sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Assign Rep to {selectedIds.length} Customers</DialogTitle>
+          </DialogHeader>
+
+          <div className="mt-4">
+            <label className="block text-sm font-medium mb-2">Select Rep</label>
+            <select
+              value={bulkRepId}
+              onChange={(e) => setBulkRepId(e.target.value)}
+              className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <option value="">Clear rep assignment</option>
+              {reps.map((r) => (
+                <option key={r.id} value={String(r.id)}>
+                  {r.name}
+                </option>
+              ))}
+            </select>
+            <p className="text-sm text-muted-foreground mt-2">
+              {bulkRepId
+                ? `Will assign "${reps.find((r) => String(r.id) === bulkRepId)?.name}" to ${selectedIds.length} customer${selectedIds.length === 1 ? '' : 's'}.`
+                : `Will remove rep assignment from ${selectedIds.length} customer${selectedIds.length === 1 ? '' : 's'}.`}
+            </p>
+          </div>
+
+          {error && <p className="text-sm text-destructive mt-2">{error}</p>}
+
+          <div className="flex gap-2 justify-end mt-4">
+            <Button variant="secondary" onClick={closeModal} disabled={isSubmitting}>
+              Cancel
+            </Button>
+            <Button onClick={handleSubmit} disabled={isSubmitting}>
+              {isSubmitting ? 'Assigning...' : 'Assign Rep'}
             </Button>
           </div>
         </DialogContent>

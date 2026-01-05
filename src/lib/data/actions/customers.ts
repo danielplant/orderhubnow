@@ -277,3 +277,71 @@ export async function deleteCustomer(id: string): Promise<{ success: boolean; er
     return { success: false, error: 'Failed to delete customer' }
   }
 }
+
+// ============================================================================
+// Bulk Operations
+// ============================================================================
+
+/**
+ * Bulk delete multiple customers.
+ * @param ids - Array of customer IDs to delete
+ */
+export async function bulkDeleteCustomers(
+  ids: string[]
+): Promise<{ success: boolean; deletedCount?: number; error?: string }> {
+  try {
+    if (!ids || ids.length === 0) {
+      return { success: false, error: 'No customers selected' }
+    }
+
+    const customerIds = ids.map((id) => parseInt(id)).filter((id) => !Number.isNaN(id))
+
+    if (customerIds.length === 0) {
+      return { success: false, error: 'Invalid customer IDs' }
+    }
+
+    const result = await prisma.customers.deleteMany({
+      where: { ID: { in: customerIds } },
+    })
+
+    revalidatePath('/admin/customers')
+    return { success: true, deletedCount: result.count }
+  } catch {
+    return { success: false, error: 'Failed to delete customers' }
+  }
+}
+
+/**
+ * Bulk assign rep to multiple customers.
+ * @param ids - Array of customer IDs to update
+ * @param repId - Rep ID to assign (or null to clear rep assignment)
+ */
+export async function bulkAssignRep(
+  ids: string[],
+  repId: string | null
+): Promise<{ success: boolean; updatedCount?: number; error?: string }> {
+  try {
+    if (!ids || ids.length === 0) {
+      return { success: false, error: 'No customers selected' }
+    }
+
+    const customerIds = ids.map((id) => parseInt(id)).filter((id) => !Number.isNaN(id))
+
+    if (customerIds.length === 0) {
+      return { success: false, error: 'Invalid customer IDs' }
+    }
+
+    // Resolve rep code from repId
+    const repCode = await resolveRepCode(repId, null)
+
+    const result = await prisma.customers.updateMany({
+      where: { ID: { in: customerIds } },
+      data: { Rep: repCode },
+    })
+
+    revalidatePath('/admin/customers')
+    return { success: true, updatedCount: result.count }
+  } catch {
+    return { success: false, error: 'Failed to assign rep to customers' }
+  }
+}

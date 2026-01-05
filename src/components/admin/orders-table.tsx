@@ -356,7 +356,7 @@ export function OrdersTable({ initialOrders, total, statusCounts, reps }: Orders
           <input
             value={q}
             onChange={(e) => setParam('q', e.target.value || null)}
-            placeholder="Search store name..."
+            placeholder="Search order #, store, email, buyer, or PO..."
             className="h-10 w-full max-w-md rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
 

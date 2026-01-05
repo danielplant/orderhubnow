@@ -120,46 +120,62 @@ export async function getOrders(
   const input = parseOrdersListInput(searchParams);
 
   // Build base where clause (applies to all queries)
+  // Uses AND array to combine multiple filter conditions
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const baseWhere: any = {};
+  const baseWhere: any = { AND: [] };
 
-  // Store search - matches .NET: StoreName.ToLower().Contains(storeNameSearch)
+  // Enhanced multi-field search - searches across order number, store name, email, buyer name, and PO
   if (input.q) {
-    baseWhere.StoreName = { contains: input.q, mode: 'insensitive' };
+    baseWhere.AND.push({
+      OR: [
+        { OrderNumber: { contains: input.q, mode: 'insensitive' } },
+        { StoreName: { contains: input.q, mode: 'insensitive' } },
+        { CustomerEmail: { contains: input.q, mode: 'insensitive' } },
+        { BuyerName: { contains: input.q, mode: 'insensitive' } },
+        { CustomerPO: { contains: input.q, mode: 'insensitive' } },
+      ],
+    });
   }
 
   // Optional rep filter (enhancement; CustomerOrders.SalesRep is a string)
   if (input.rep) {
-    baseWhere.SalesRep = { contains: input.rep, mode: 'insensitive' };
+    baseWhere.AND.push({ SalesRep: { contains: input.rep, mode: 'insensitive' } });
   }
 
   // CRITICAL: Pending sync filter must handle nullable boolean
   // IsTransferredToShopify = false OR null means "not synced"
   if (input.syncStatus === 'pending') {
-    baseWhere.OR = [
-      { IsTransferredToShopify: false },
-      { IsTransferredToShopify: null },
-    ];
+    baseWhere.AND.push({
+      OR: [
+        { IsTransferredToShopify: false },
+        { IsTransferredToShopify: null },
+      ],
+    });
   }
 
   // Date range filter on OrderDate
   if (input.dateFrom || input.dateTo) {
-    baseWhere.OrderDate = {};
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const dateFilter: any = {};
     if (input.dateFrom) {
       // Start of the day in local timezone
-      baseWhere.OrderDate.gte = new Date(input.dateFrom + 'T00:00:00');
+      dateFilter.gte = new Date(input.dateFrom + 'T00:00:00');
     }
     if (input.dateTo) {
       // End of the day in local timezone (23:59:59.999)
-      baseWhere.OrderDate.lte = new Date(input.dateTo + 'T23:59:59.999');
+      dateFilter.lte = new Date(input.dateTo + 'T23:59:59.999');
     }
+    baseWhere.AND.push({ OrderDate: dateFilter });
   }
+
+  // Clean up empty AND array (Prisma doesn't like empty AND)
+  const finalBaseWhere = baseWhere.AND.length > 0 ? baseWhere : {};
 
   // Build status-specific where (for filtered list)
   const whereWithStatus =
     input.status && input.status !== 'All'
-      ? { ...baseWhere, OrderStatus: input.status }
-      : baseWhere;
+      ? { ...finalBaseWhere, OrderStatus: input.status }
+      : finalBaseWhere;
 
   // Run queries in parallel
   const [total, orders, grouped] = await Promise.all([
@@ -189,10 +205,10 @@ export async function getOrders(
       },
     }),
     
-    // Status counts for tabs (uses baseWhere, not status-filtered)
+    // Status counts for tabs (uses finalBaseWhere, not status-filtered)
     prisma.customerOrders.groupBy({
       by: ['OrderStatus'],
-      where: baseWhere,
+      where: finalBaseWhere,
       _count: { _all: true },
     }),
   ]);
@@ -469,20 +485,30 @@ export async function getOrdersByRep(
 
   const input = parseOrdersListInput(searchParams);
 
-  // 2. Build base where with rep filter
-  // Uses OR to support both new orders (with RepID) and legacy orders (SalesRep string match)
+  // 2. Build base where with rep filter using AND array for combining conditions
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const baseWhere: any = {
-    // Rep filter: RepID match (fast, indexed) OR SalesRep contains name (fallback for legacy)
-    OR: [
-      { RepID: repId },
-      { SalesRep: { contains: rep.Name, mode: 'insensitive' } },
+    AND: [
+      // Rep filter: RepID match (fast, indexed) OR SalesRep contains name (fallback for legacy)
+      {
+        OR: [
+          { RepID: repId },
+          { SalesRep: { contains: rep.Name, mode: 'insensitive' } },
+        ],
+      },
     ],
   };
 
-  // Store search filter (AND with the OR above)
+  // Enhanced multi-field search - searches across order number, store name, email, buyer name
   if (input.q) {
-    baseWhere.StoreName = { contains: input.q, mode: 'insensitive' };
+    baseWhere.AND.push({
+      OR: [
+        { OrderNumber: { contains: input.q, mode: 'insensitive' } },
+        { StoreName: { contains: input.q, mode: 'insensitive' } },
+        { CustomerEmail: { contains: input.q, mode: 'insensitive' } },
+        { BuyerName: { contains: input.q, mode: 'insensitive' } },
+      ],
+    });
   }
 
   // 3. Build status-specific where
