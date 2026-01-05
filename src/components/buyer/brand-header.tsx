@@ -7,7 +7,7 @@ import { Button, Divider, IndicatorDot, IconBox, Badge } from "@/components/ui";
 import { BRAND_NAME, APP_NAME } from "@/lib/constants/brand";
 import { CurrencyToggle } from "./currency-toggle";
 import { useOrder, useCurrency } from "@/lib/contexts";
-import { formatPrice } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
 
 interface BrandHeaderProps {
   userInitials?: string;
@@ -51,7 +51,7 @@ export function BrandHeader({ userInitials = "?" }: BrandHeaderProps) {
               <>
                 <span>{totalItems}</span>
                 <span className="mx-1 opacity-50">|</span>
-                <span>{formatPrice(totalPrice, currency)}</span>
+                <span>{formatCurrency(totalPrice, currency)}</span>
               </>
             ) : (
               <span>Review Order</span>
