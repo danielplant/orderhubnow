@@ -46,7 +46,12 @@ export function BrandHeader({ userInitials = "?" }: BrandHeaderProps) {
   const handleCopyDraftLink = async () => {
     const link = generateDraftLink();
     if (!link) {
-      toast.error("No items in cart to share");
+      // generateDraftLink returns null for empty cart or if URL would be too long
+      if (totalItems === 0) {
+        toast.error("No items in cart to share");
+      } else {
+        toast.error("Cart is too large to share as a link. Please reduce items or submit the order.");
+      }
       return;
     }
 

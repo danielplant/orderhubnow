@@ -297,7 +297,8 @@ export function OrderProvider({ children }: { children: ReactNode }) {
 
   /**
    * Generate a shareable link containing the current draft order.
-   * Returns null if cart is empty.
+   * Returns null if cart is empty or if the generated URL would be too long.
+   * Most browsers safely support URLs up to 2000 characters, modern browsers support 8000+.
    */
   const generateDraftLink = useCallback(() => {
     if (Object.keys(orders).length === 0) return null;
@@ -311,7 +312,17 @@ export function OrderProvider({ children }: { children: ReactNode }) {
       };
       const encoded = btoa(encodeURIComponent(JSON.stringify(data)));
       const baseUrl = typeof window !== "undefined" ? window.location.origin : "";
-      return `${baseUrl}/buyer/my-order?draft=${encoded}`;
+      const url = `${baseUrl}/buyer/my-order?draft=${encoded}`;
+
+      // Check URL length - use 8000 as a safe limit for modern browsers
+      // Very large carts (100+ items) may exceed this
+      const MAX_URL_LENGTH = 8000;
+      if (url.length > MAX_URL_LENGTH) {
+        console.warn(`Draft link too long (${url.length} chars). Cart may be too large to share.`);
+        return null;
+      }
+
+      return url;
     } catch {
       return null;
     }

@@ -80,6 +80,8 @@ The "copy a link for a draft order for the customer to revisit later" feature ha
 - "Copy Draft Link" button added to `MyOrderClient` (order review page)
 - Automatic restoration when visiting URL with draft parameter
 - Toast notifications for success/failure feedback
+- URL length validation (max 8000 chars) with user-friendly error message for very large carts
+- Unit tests added for draft link encoding/decoding (`src/__tests__/draft-link.test.ts`)
 
 ### 4. Order Form & Submission
 
@@ -247,13 +249,19 @@ The "copy a link for a draft order for the customer to revisit later" feature ha
 - [ ] Form validation errors
 - [ ] Network error handling
 
-### Missing Feature Tests (Once Implemented)
+### Draft Link Feature Tests (Unit Tested)
 
-- [ ] Generate draft link
-- [ ] Copy draft link to clipboard
-- [ ] Open draft link in new browser
-- [ ] Restore cart from draft link
-- [ ] Invalid draft link handling
+The following have been verified through unit tests in `src/__tests__/draft-link.test.ts`:
+
+- [x] Generate draft link (encode cart data to base64)
+- [x] Decode draft link back to original data
+- [x] Handle special characters in product names
+- [x] Handle large quantities and decimal prices
+- [x] Invalid base64 handling
+- [x] Invalid JSON handling
+- [x] Missing/malformed orders property handling
+- [x] Empty cart handling
+- [x] Large cart roundtrip (50+ products)
 
 ---
 
