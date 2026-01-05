@@ -409,6 +409,11 @@ export function OrderForm({
                   <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
                 </div>
               )}
+              {editMode && (
+                <p className="text-xs text-muted-foreground">
+                  Store cannot be changed when editing an order.
+                </p>
+              )}
               {errors.storeName && (
                 <p className="text-sm text-destructive">{errors.storeName.message}</p>
               )}
@@ -444,7 +449,9 @@ export function OrderForm({
                 }}
                 disabled={isRepLocked}
               >
-                <SelectTrigger className={`w-full ${isRepLocked ? 'opacity-70' : ''}`}>
+                <SelectTrigger
+                  className={`w-full ${isRepLocked ? 'bg-muted cursor-not-allowed' : ''}`}
+                >
                   <SelectValue placeholder="Select a rep" />
                 </SelectTrigger>
                 <SelectContent>
@@ -501,6 +508,18 @@ export function OrderForm({
           </div>
         </CardContent>
       </Card>
+
+      {/* Address note for edit mode */}
+      {editMode && (
+        <Card className="bg-muted/50">
+          <CardContent className="py-4">
+            <p className="text-sm text-muted-foreground">
+              <span className="font-medium">Note:</span> Billing and shipping addresses cannot be modified when editing an order.
+              Only order items, shipping dates, and notes can be changed.
+            </p>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Billing Address - Only show for new orders */}
       {!editMode && (

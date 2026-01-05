@@ -1,14 +1,16 @@
 'use client'
 
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { toast } from 'sonner'
 import { useOrder } from '@/lib/contexts/order-context'
 import { useCurrency } from '@/lib/contexts/currency-context'
 import { OrderForm } from '@/components/buyer/order-form'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import { formatCurrency } from '@/lib/utils'
-import { Trash2 } from 'lucide-react'
+import { Trash2, AlertCircle, Lock } from 'lucide-react'
 import type { OrderForEditing } from '@/lib/data/queries/orders'
 
 interface SkuData {
@@ -42,6 +44,9 @@ export function MyOrderClient({
   // Determine if we're in edit mode
   const isEditMode = !!existingOrder
 
+  // Track missing SKUs for warning
+  const [missingSKUs, setMissingSKUs] = useState<string[]>([])
+
   // In edit mode, use existing order items; otherwise use cart
   const cartItems = useMemo(() => {
     if (isEditMode && existingOrder) {
@@ -65,25 +70,37 @@ export function MyOrderClient({
       price: number
       description: string
     }> = []
+    const missing: string[] = []
 
     Object.entries(orders).forEach(([productId, skuQuantities]) => {
       Object.entries(skuQuantities).forEach(([sku, quantity]) => {
         const skuData = skuMap[sku]
-        if (skuData && quantity > 0) {
-          items.push({
-            productId,
-            sku,
-            skuVariantId: skuData.skuVariantId,
-            quantity,
-            price: currency === 'CAD' ? skuData.priceCAD : skuData.priceUSD,
-            description: skuData.description,
-          })
+        if (quantity > 0) {
+          if (skuData) {
+            items.push({
+              productId,
+              sku,
+              skuVariantId: skuData.skuVariantId,
+              quantity,
+              price: currency === 'CAD' ? skuData.priceCAD : skuData.priceUSD,
+              description: skuData.description,
+            })
+          } else {
+            missing.push(sku)
+          }
         }
       })
     })
 
+    // Update missing SKUs state
+    if (missing.length > 0) {
+      setMissingSKUs(missing)
+    } else if (missingSKUs.length > 0) {
+      setMissingSKUs([])
+    }
+
     return items
-  }, [orders, skuMap, currency, isEditMode, existingOrder])
+  }, [orders, skuMap, currency, isEditMode, existingOrder, missingSKUs.length])
 
   // For edit mode, use the order's currency; otherwise use context
   const effectiveCurrency = isEditMode && existingOrder ? existingOrder.currency : currency
@@ -102,6 +119,7 @@ export function MyOrderClient({
   // Redirect to collections if cart is empty (only in non-edit mode)
   useEffect(() => {
     if (!isEditMode && totalItems === 0) {
+      toast.info('Your cart is empty. Redirecting to browse products...')
       router.replace(`/buyer/select-journey${repQuery}`)
     }
   }, [totalItems, router, isEditMode, repQuery])
@@ -131,6 +149,17 @@ export function MyOrderClient({
       <h1 className="text-2xl font-bold mb-6">
         {isEditMode ? `Edit Order ${existingOrder?.orderNumber}` : 'Review Your Order'}
       </h1>
+
+      {/* Missing SKU warning */}
+      {missingSKUs.length > 0 && (
+        <Alert variant="destructive" className="mb-6">
+          <AlertCircle className="size-4" />
+          <AlertDescription>
+            Some items in your cart are no longer available and have been removed:{' '}
+            {missingSKUs.join(', ')}
+          </AlertDescription>
+        </Alert>
+      )}
 
       <div className="grid lg:grid-cols-3 gap-8">
         {/* Order Summary - Right side on desktop */}
@@ -182,6 +211,14 @@ export function MyOrderClient({
                   </div>
                 ))}
               </div>
+
+              {/* Edit mode note about locked items */}
+              {isEditMode && (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground bg-muted/50 rounded px-3 py-2">
+                  <Lock className="size-3 shrink-0" />
+                  <span>Items cannot be removed when editing. Update quantities in the product catalog.</span>
+                </div>
+              )}
 
               <div className="border-t pt-4">
                 <div className="flex justify-between items-center text-lg font-semibold">

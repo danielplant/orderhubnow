@@ -3,6 +3,7 @@
 import * as React from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
+import { useTransition } from 'react'
 import {
   Button,
   DataTable,
@@ -19,7 +20,7 @@ import {
 } from '@/components/ui/select'
 import type { OrderStatus } from '@/lib/types/order'
 import type { RepOrderRow, RepOrdersListResult } from '@/lib/data/queries/orders'
-import { FileDown, FileEdit } from 'lucide-react'
+import { FileDown, FileEdit, Search, Loader2 } from 'lucide-react'
 
 // ============================================================================
 // Types
@@ -68,16 +69,21 @@ function getStatusBadgeStatus(status: OrderStatus) {
 export function RepOrdersTable({ orders, total, statusCounts }: RepOrdersTableProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
+  const [isPending, startTransition] = useTransition()
 
   // Parse current filter state from URL
   const status = (searchParams.get('status') || 'All') as 'All' | OrderStatus
   const q = searchParams.get('q') || ''
+  const dateFrom = searchParams.get('dateFrom') || ''
+  const dateTo = searchParams.get('dateTo') || ''
   const page = Number(searchParams.get('page') || '1')
   const pageSize = Number(searchParams.get('pageSize') || '50')
   const sort = searchParams.get('sort') || 'orderDate'
   const dir = (searchParams.get('dir') || 'desc') as 'asc' | 'desc'
 
   const [storeSearch, setStoreSearch] = React.useState(q)
+  const [fromDate, setFromDate] = React.useState(dateFrom)
+  const [toDate, setToDate] = React.useState(dateTo)
 
   // URL param helpers
   const setParam = React.useCallback(
@@ -98,8 +104,34 @@ export function RepOrdersTable({ orders, total, statusCounts }: RepOrdersTablePr
   )
 
   const handleSearch = React.useCallback(() => {
-    setParam('q', storeSearch.trim() || null)
-  }, [setParam, storeSearch])
+    startTransition(() => {
+      const params = new URLSearchParams(searchParams.toString())
+
+      // Set or remove search query
+      if (storeSearch.trim()) {
+        params.set('q', storeSearch.trim())
+      } else {
+        params.delete('q')
+      }
+
+      // Set or remove date filters
+      if (fromDate) {
+        params.set('dateFrom', fromDate)
+      } else {
+        params.delete('dateFrom')
+      }
+      if (toDate) {
+        params.set('dateTo', toDate)
+      } else {
+        params.delete('dateTo')
+      }
+
+      // Reset pagination
+      params.delete('page')
+
+      router.push(`?${params.toString()}`, { scroll: false })
+    })
+  }, [searchParams, storeSearch, fromDate, toDate, router, startTransition])
 
   const handleKeyDown = React.useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -164,6 +196,23 @@ export function RepOrdersTable({ orders, total, statusCounts }: RepOrdersTablePr
         id: 'storeName',
         header: 'Store Name',
         cell: (order) => <span>{order.storeName}</span>,
+      },
+      {
+        id: 'buyerName',
+        header: 'Buyer',
+        cell: (order) => (
+          <div className="flex flex-col">
+            <span className="text-sm">{order.buyerName || '—'}</span>
+            {order.customerEmail && (
+              <a
+                href={`mailto:${order.customerEmail}`}
+                className="text-xs text-muted-foreground hover:text-primary"
+              >
+                {order.customerEmail}
+              </a>
+            )}
+          </div>
+        ),
       },
       {
         id: 'action',
@@ -237,29 +286,62 @@ export function RepOrdersTable({ orders, total, statusCounts }: RepOrdersTablePr
   return (
     <div className="space-y-4">
       {/* Filters */}
-      <div className="flex flex-wrap gap-4 items-center">
-        <Input
-          placeholder="Search by store name..."
-          value={storeSearch}
-          onChange={(e) => setStoreSearch(e.target.value)}
-          onKeyDown={handleKeyDown}
-          className="max-w-xs"
-          aria-label="Search orders by store name"
-        />
-        <Select value={status} onValueChange={handleStatusChange}>
-          <SelectTrigger className="w-48">
-            <SelectValue placeholder="Order Status" />
-          </SelectTrigger>
-          <SelectContent>
-            {ORDER_STATUS_OPTIONS.map((opt) => (
-              <SelectItem key={opt.value} value={opt.value}>
-                {opt.label}
-                {opt.value !== 'All' && ` (${statusCounts[opt.value]})`}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Button onClick={handleSearch}>Search</Button>
+      <div className="flex flex-wrap gap-3 items-end">
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-muted-foreground">Store Name</label>
+          <Input
+            placeholder="Search..."
+            value={storeSearch}
+            onChange={(e) => setStoreSearch(e.target.value)}
+            onKeyDown={handleKeyDown}
+            className="w-48"
+            aria-label="Search orders by store name"
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-muted-foreground">Status</label>
+          <Select value={status} onValueChange={handleStatusChange}>
+            <SelectTrigger className="w-40">
+              <SelectValue placeholder="Any" />
+            </SelectTrigger>
+            <SelectContent>
+              {ORDER_STATUS_OPTIONS.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value}>
+                  {opt.label}
+                  {opt.value !== 'All' && ` (${statusCounts[opt.value]})`}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-muted-foreground">From Date</label>
+          <Input
+            type="date"
+            value={fromDate}
+            onChange={(e) => setFromDate(e.target.value)}
+            className="w-36"
+            aria-label="Filter orders from date"
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-muted-foreground">To Date</label>
+          <Input
+            type="date"
+            value={toDate}
+            onChange={(e) => setToDate(e.target.value)}
+            className="w-36"
+            aria-label="Filter orders to date"
+          />
+        </div>
+        <Button onClick={handleSearch} disabled={isPending} className="gap-2">
+          {isPending ? (
+            <Loader2 className="size-4 animate-spin" />
+          ) : (
+            <Search className="size-4" />
+          )}
+          {isPending ? 'Searching...' : 'Search'}
+        </Button>
 
         {orders.length > 0 && (
           <Button variant="outline" asChild className="ml-auto gap-2">

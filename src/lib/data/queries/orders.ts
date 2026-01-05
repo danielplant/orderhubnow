@@ -485,6 +485,20 @@ export async function getOrdersByRep(
     baseWhere.StoreName = { contains: input.q, mode: 'insensitive' };
   }
 
+  // Date range filters
+  if (input.dateFrom || input.dateTo) {
+    baseWhere.OrderDate = {};
+    if (input.dateFrom) {
+      baseWhere.OrderDate.gte = new Date(input.dateFrom);
+    }
+    if (input.dateTo) {
+      // Include the entire end date by setting to end of day
+      const endDate = new Date(input.dateTo);
+      endDate.setHours(23, 59, 59, 999);
+      baseWhere.OrderDate.lte = endDate;
+    }
+  }
+
   // 3. Build status-specific where
   const whereWithStatus =
     input.status && input.status !== 'All'

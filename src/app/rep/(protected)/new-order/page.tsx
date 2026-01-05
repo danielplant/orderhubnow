@@ -5,7 +5,8 @@ export default async function NewOrderPage() {
   const session = await auth()
 
   if (!session?.user?.repId) {
-    redirect('/rep')
+    // Rep ID not configured for this user - redirect with error
+    redirect('/rep/orders?error=rep_not_configured')
   }
 
   const repId = session.user.repId
