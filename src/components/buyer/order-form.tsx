@@ -792,7 +792,12 @@ export function OrderForm({
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={() => router.push(returnTo)}
+                  onClick={() => {
+                    // Confirm before discarding changes
+                    if (window.confirm('Discard changes and go back?')) {
+                      router.push(returnTo)
+                    }
+                  }}
                 >
                   Cancel
                 </Button>
