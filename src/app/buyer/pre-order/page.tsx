@@ -41,12 +41,14 @@ function PreOrderCollectionCard({
   name,
   count,
   href,
+  imageUrl,
   shipWindowStart,
   shipWindowEnd,
 }: {
   name: string;
   count: number;
   href: string;
+  imageUrl?: string | null;
   shipWindowStart: string | null;
   shipWindowEnd: string | null;
 }) {
@@ -57,10 +59,16 @@ function PreOrderCollectionCard({
       {/* Gradient Placeholder */}
       <div
         className={cn(
-          "aspect-[4/3] w-full overflow-hidden rounded-sm bg-gradient-to-br mb-6 transition-transform motion-slow group-hover:scale-[1.02]",
+          "relative aspect-[4/3] w-full overflow-hidden rounded-sm bg-gradient-to-br mb-6 transition-transform motion-slow group-hover:scale-[1.02]",
           getCategoryGradient(name)
         )}
       >
+        {imageUrl ? (
+          <div
+            className="absolute inset-0 bg-center bg-cover"
+            style={{ backgroundImage: `url(${imageUrl})` }}
+          />
+        ) : null}
         <div className="w-full h-full opacity-0 group-hover:opacity-10 transition-opacity motion-slow bg-background" />
       </div>
 
@@ -127,6 +135,7 @@ export default async function PreOrderPage({ searchParams }: Props) {
                 name={category.name}
                 count={category.productCount}
                 href={`/buyer/pre-order/${category.id}${repQuery}`}
+                imageUrl={category.imageUrl}
                 shipWindowStart={category.onRouteStartDate}
                 shipWindowEnd={category.onRouteEndDate}
               />

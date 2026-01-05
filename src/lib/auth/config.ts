@@ -42,30 +42,43 @@ export const authConfig: NextAuthConfig = {
           return null
         }
 
-        // Status-based blocking
-        // These throw specific error messages that the login form can handle
-        if (user.Status === 'invited') {
-          throw new Error(AUTH_ERROR_CODES.INVITED)
-        }
+        // Admin users use legacy plaintext Password column (matches .NET BLL.cs behavior)
+        // Skip Status/MustResetPassword/PasswordHash gates for admin
+        const isAdmin = user.UserType?.toLowerCase() === 'admin'
 
-        if (user.Status === 'disabled') {
-          throw new Error(AUTH_ERROR_CODES.DISABLED)
-        }
+        if (isAdmin) {
+          // Admin requires plaintext Password column
+          if (!user.Password) {
+            return null // Fail if Password is NULL (no reset prompt for admin)
+          }
+          if (user.Password !== password) {
+            return null
+          }
+          // Admin authenticated successfully - skip to role mapping
+        } else {
+          // Rep/other users: Status-based blocking + bcrypt verification
+          if (user.Status === 'invited') {
+            throw new Error(AUTH_ERROR_CODES.INVITED)
+          }
 
-        if (user.Status === 'legacy' || user.MustResetPassword) {
-          throw new Error(AUTH_ERROR_CODES.RESET_REQUIRED)
-        }
+          if (user.Status === 'disabled') {
+            throw new Error(AUTH_ERROR_CODES.DISABLED)
+          }
 
-        // Active users must have PasswordHash
-        if (!user.PasswordHash) {
-          // This shouldn't happen for active users, but handle gracefully
-          throw new Error(AUTH_ERROR_CODES.RESET_REQUIRED)
-        }
+          if (user.Status === 'legacy' || user.MustResetPassword) {
+            throw new Error(AUTH_ERROR_CODES.RESET_REQUIRED)
+          }
 
-        // Verify password against hash
-        const passwordValid = await verifyPassword(password, user.PasswordHash)
-        if (!passwordValid) {
-          return null
+          // Active users must have PasswordHash
+          if (!user.PasswordHash) {
+            throw new Error(AUTH_ERROR_CODES.RESET_REQUIRED)
+          }
+
+          // Verify password against hash
+          const passwordValid = await verifyPassword(password, user.PasswordHash)
+          if (!passwordValid) {
+            return null
+          }
         }
 
         // Map role - reject if unknown

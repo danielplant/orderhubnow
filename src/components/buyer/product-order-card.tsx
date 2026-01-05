@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import Image from "next/image";
 import { motion } from "framer-motion";
 import type { Product, ProductVariant, Currency } from "@/lib/types";
@@ -8,7 +8,6 @@ import { cn, formatPrice } from "@/lib/utils";
 import { STOCK_THRESHOLDS } from "@/lib/constants/inventory";
 import { FEATURES } from "@/lib/constants/features";
 import { ColorSwatch, Text } from "@/components/ui";
-import { SizeChip } from "./size-chip";
 import { useOrder, useAnnouncement, useCurrency } from "@/lib/contexts";
 
 function getPrice(item: { priceCad: number; priceUsd: number }, currency: Currency): number {
@@ -23,13 +22,13 @@ interface ProductOrderCardProps {
 
 /**
  * Get max orderable quantity for a variant.
- * .NET: ATS caps at max(available, onRoute), PreOrder has no cap
+ * .NET: ATS caps at available quantity, PreOrder has no cap
  */
 function getMaxOrderable(variant: ProductVariant, isPreOrder: boolean): number {
   if (isPreOrder) {
     return 9999; // No cap for PreOrder per .NET behavior
   }
-  return Math.max(variant.available, variant.onRoute);
+  return variant.available;
 }
 
 /**
@@ -42,17 +41,17 @@ function isVariantOrderable(variant: ProductVariant): boolean {
 
 /**
  * Determine if an order line should be marked as OnRoute.
- * .NET: ATS uses "governing cap" rule (onRoute > available), PreOrder always true
+ * .NET: PreOrder lines are OnRoute, ATS lines are not
  */
 function getIsOnRoute(variant: ProductVariant, isPreOrder: boolean): boolean {
   if (isPreOrder) {
     return true; // All PreOrder lines are OnRoute
   }
-  return variant.onRoute > variant.available;
+  return false;
 }
 
 export function ProductOrderCard({ product, isPreOrder = false }: ProductOrderCardProps) {
-  const { orders, addItem, setQuantity, getProductTotal } = useOrder();
+  const { orders, setQuantity, getProductTotal } = useOrder();
   const { announce } = useAnnouncement();
   const { currency } = useCurrency();
 
@@ -66,47 +65,57 @@ export function ProductOrderCard({ product, isPreOrder = false }: ProductOrderCa
   const price = getPrice(product, currency);
   const msrp = currency === "CAD" ? product.msrpCad : product.msrpUsd;
 
-  const handleChipTap = useCallback(
-    (variant: ProductVariant) => {
-      const maxOrderable = getMaxOrderable(variant, isPreOrder);
-      if (maxOrderable === 0) return;
-
-      const currentQty = productOrders[variant.sku] || 0;
-      if (currentQty >= maxOrderable) return;
-
-      const variantPrice = getPrice(variant, currency);
-      const isOnRoute = getIsOnRoute(variant, isPreOrder);
-      addItem(product.id, variant.sku, 1, variantPrice, undefined, { isOnRoute });
-
-      // Announce change for screen readers
-      const newTotal = totalItems + 1;
-      const newPrice = totalPrice + variantPrice;
-      announce(`${product.title}: ${newTotal} ${newTotal === 1 ? "unit" : "units"}, ${formatPrice(newPrice)}`);
-    },
-    [product, productOrders, totalItems, totalPrice, addItem, announce, currency, isPreOrder]
-  );
-
-  const handleQuantityChange = useCallback(
-    (variant: ProductVariant, delta: number) => {
-      const currentQty = productOrders[variant.sku] || 0;
-      const maxOrderable = getMaxOrderable(variant, isPreOrder);
-      const newQty = Math.max(0, Math.min(currentQty + delta, maxOrderable));
-
-      const variantPrice = getPrice(variant, currency);
-      const isOnRoute = getIsOnRoute(variant, isPreOrder);
-      setQuantity(product.id, variant.sku, newQty, variantPrice, { isOnRoute });
-
-      // Announce change for screen readers
-      const qtyDiff = newQty - currentQty;
-      const newTotal = totalItems + qtyDiff;
-      const newPrice = totalPrice + qtyDiff * variantPrice;
-      announce(`${product.title}: ${newTotal} ${newTotal === 1 ? "unit" : "units"}, ${formatPrice(newPrice)}`);
-    },
-    [product, productOrders, totalItems, totalPrice, setQuantity, announce, currency, isPreOrder]
-  );
-
   // Filter: Show variants where available > 0 OR onRoute > 0 (.NET parity)
   const orderableVariants = product.variants.filter(isVariantOrderable);
+
+  const [draftBySku, setDraftBySku] = useState<Record<string, string>>({});
+  const [qtyError, setQtyError] = useState<string | null>(null);
+
+  const commitQuantity = useCallback(
+    (variant: ProductVariant) => {
+      const raw = draftBySku[variant.sku] ?? "";
+      const parsed = raw.trim() === "" ? 0 : parseInt(raw, 10);
+      const requestedQty = Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
+
+      const maxOrderable = getMaxOrderable(variant, isPreOrder);
+      const currentQty = productOrders[variant.sku] || 0;
+      const committedQty = Math.min(requestedQty, maxOrderable);
+
+      if (requestedQty > maxOrderable) {
+        setQtyError("Order quantity cannot be greater than Available quantity.");
+        window.setTimeout(() => setQtyError(null), 3000);
+      }
+
+      const variantPrice = getPrice(variant, currency);
+      const isOnRoute = getIsOnRoute(variant, isPreOrder);
+      setQuantity(product.id, variant.sku, committedQty, variantPrice, { isOnRoute });
+      setDraftBySku((prev) => ({
+        ...prev,
+        [variant.sku]: committedQty > 0 ? String(committedQty) : "",
+      }));
+
+      const qtyDiff = committedQty - currentQty;
+      if (qtyDiff !== 0) {
+        const newTotal = totalItems + qtyDiff;
+        const newPrice = totalPrice + qtyDiff * variantPrice;
+        announce(
+          `${product.title}: ${newTotal} ${newTotal === 1 ? "unit" : "units"}, ${formatPrice(newPrice)}`
+        );
+      }
+    },
+    [
+      announce,
+      currency,
+      draftBySku,
+      isPreOrder,
+      product.id,
+      product.title,
+      productOrders,
+      setQuantity,
+      totalItems,
+      totalPrice,
+    ]
+  );
   
   // Card-level low stock indicator: considers max(available, onRoute) per .NET
   const hasLowStock = orderableVariants.some((v) => {
@@ -203,32 +212,99 @@ export function ProductOrderCard({ product, isPreOrder = false }: ProductOrderCa
         )}
       </div>
 
-      {/* Size Chips */}
-      <div className="h-24 border-t border-border shrink-0">
-        <div className="h-full px-3 py-2 flex items-center gap-2 overflow-x-auto scrollbar-none">
+      {/* Size Grid (direct order entry) */}
+      <div className="border-t border-border shrink-0">
+        <div className="px-3 py-3 overflow-x-auto scrollbar-none">
           {orderableVariants.length === 0 ? (
-            <span className="text-sm text-muted-foreground italic">
-              No sizes available
-            </span>
+            <span className="text-sm text-muted-foreground italic">No sizes available</span>
           ) : (
-            orderableVariants.map((variant) => {
-              const orderedQty = productOrders[variant.sku] || 0;
-              const maxOrderable = getMaxOrderable(variant, isPreOrder);
+            <div
+              className="grid rounded-md overflow-hidden border border-border bg-background"
+              style={{
+                gridTemplateColumns: `6rem repeat(${orderableVariants.length}, minmax(var(--size-chip-min), 1fr))`,
+              }}
+            >
+              <div className="bg-muted px-2 py-2 text-xs font-semibold border-b border-border">
+                Size
+              </div>
+              {orderableVariants.map((variant) => (
+                <div
+                  key={`size-${variant.sku}`}
+                  className="px-2 py-2 text-xs font-semibold text-center border-b border-border"
+                >
+                  {variant.size || "OS"}
+                </div>
+              ))}
 
-              return (
-                <SizeChip
-                  key={variant.sku}
-                  size={variant.size}
-                  available={variant.available}
-                  onRoute={variant.onRoute}
-                  maxOrderable={maxOrderable}
-                  orderedQty={orderedQty}
-                  onTap={() => handleChipTap(variant)}
-                  onQuantityChange={(delta) => handleQuantityChange(variant, delta)}
-                />
-              );
-            })
+              <div className="bg-muted px-2 py-2 text-xs font-semibold border-b border-border">
+                Available
+              </div>
+              {orderableVariants.map((variant) => (
+                <div
+                  key={`avail-${variant.sku}`}
+                  className="px-2 py-2 text-xs text-center tabular-nums border-b border-border"
+                >
+                  {variant.available}
+                </div>
+              ))}
+
+              <div className="bg-muted px-2 py-2 text-xs font-semibold border-b border-border">
+                On Route
+              </div>
+              {orderableVariants.map((variant) => (
+                <div
+                  key={`route-${variant.sku}`}
+                  className="px-2 py-2 text-xs text-center tabular-nums border-b border-border"
+                >
+                  {variant.onRoute > 0 ? variant.onRoute : ""}
+                </div>
+              ))}
+
+              <div className="bg-muted px-2 py-2 text-xs font-semibold">Order</div>
+              {orderableVariants.map((variant) => {
+                const maxOrderable = getMaxOrderable(variant, isPreOrder);
+                const orderedQty = productOrders[variant.sku] || 0;
+                return (
+                  <div key={`order-${variant.sku}`} className="px-2 py-2">
+                    <input
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      className={cn(
+                        "w-full h-9 rounded-sm border border-input bg-background text-center text-sm tabular-nums",
+                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      )}
+                      aria-label={`Order quantity for size ${variant.size || "OS"}`}
+                      value={draftBySku[variant.sku] ?? (orderedQty > 0 ? String(orderedQty) : "")}
+                      onFocus={() => {
+                        setDraftBySku((prev) => {
+                          if (prev[variant.sku] !== undefined) return prev;
+                          return {
+                            ...prev,
+                            [variant.sku]: orderedQty > 0 ? String(orderedQty) : "",
+                          };
+                        });
+                      }}
+                      onChange={(e) => {
+                        const digitsOnly = e.target.value.replace(/[^\d]/g, "");
+                        setDraftBySku((prev) => ({ ...prev, [variant.sku]: digitsOnly }));
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.currentTarget.blur();
+                        }
+                      }}
+                      onBlur={() => commitQuantity(variant)}
+                      disabled={maxOrderable === 0}
+                    />
+                  </div>
+                );
+              })}
+            </div>
           )}
+
+          {qtyError ? (
+            <div className="mt-2 text-xs text-destructive">{qtyError}</div>
+          ) : null}
         </div>
       </div>
 

@@ -9,7 +9,7 @@ export default function Home() {
           Select your portal to sign in
         </p>
 
-        <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-3">
           <Link
             href="/admin"
             className="flex h-12 items-center justify-center rounded-md bg-foreground px-6 text-background font-medium transition-colors hover:bg-foreground/90"
@@ -22,10 +22,23 @@ export default function Home() {
           >
             Sales Rep Portal
           </Link>
+          <div className="border-t border-border my-2" />
+          <Link
+            href="/buyer/select-journey"
+            className="flex h-12 items-center justify-center rounded-md bg-primary px-6 text-primary-foreground font-medium transition-colors hover:bg-primary/90"
+          >
+            Shop as Customer
+          </Link>
+          <Link
+            href="/rep/login?callbackUrl=/rep/new-order"
+            className="flex h-12 items-center justify-center rounded-md border border-input bg-background px-6 font-medium transition-colors hover:bg-muted"
+          >
+            Rep: Order for Customer
+          </Link>
         </div>
 
-        <p className="text-xs text-muted-foreground mt-8">
-          You&apos;ll be prompted to sign in if needed.
+        <p className="text-xs text-muted-foreground mt-6">
+          Admin and Rep portals require sign in.
         </p>
       </main>
     </div>

@@ -5,6 +5,7 @@ import { auth } from '@/lib/auth/providers'
 import { getOrdersByRep } from '@/lib/data/queries/orders'
 import { RepOrdersTable } from '@/components/rep/rep-orders-table'
 import { Button } from '@/components/ui/button'
+import { OrderSubmittedToast } from '@/components/rep/order-submitted-toast'
 
 interface Props {
   searchParams: Promise<Record<string, string | string[] | undefined>>
@@ -28,11 +29,18 @@ export default async function RepOrdersPage({ searchParams }: Props) {
     params
   )
 
+  // Check for order submission callback
+  const submittedOrder = typeof params.submitted === 'string' ? params.submitted : null
+  const customerName = typeof params.customer === 'string' ? params.customer : null
+
   // Build "New Order" link with rep context
   const newOrderHref = `/buyer/select-journey?repId=${session.user.repId}&returnTo=${encodeURIComponent('/rep/orders')}`
 
   return (
     <div className="p-6 lg:p-10 bg-muted/30">
+      {submittedOrder && (
+        <OrderSubmittedToast orderNumber={submittedOrder} customerName={customerName} />
+      )}
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-3xl font-bold text-foreground">My Orders</h1>

@@ -52,6 +52,7 @@ export default async function ATSPage({ searchParams }: Props) {
                 name={category.name}
                 count={category.productCount}
                 href={`/buyer/ats/${category.id}${repQuery}`}
+                imageUrl={`/SkuImages/${category.id}.jpg`}
               />
             ))}
           </div>

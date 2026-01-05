@@ -77,6 +77,10 @@ export default async function ConfirmationPage({ params }: Props) {
                 <strong>{order.CustomerEmail}</strong>.
               </p>
 
+              <p className="text-sm text-muted-foreground bg-muted/50 p-3 rounded-md">
+                Your order has been saved. Admin can view this order in the Admin Portal under Orders.
+              </p>
+
               <div className="border-t border-b py-4 my-4">
                 <p className="text-lg">
                   Order Total:{' '}

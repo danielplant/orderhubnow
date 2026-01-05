@@ -6,18 +6,26 @@ interface CollectionCardProps {
   name: string;
   count: number;
   href: string;
+  /** Optional category image URL (e.g. /SkuImages/{categoryId}.jpg) */
+  imageUrl?: string | null;
 }
 
-export function CollectionCard({ name, count, href }: CollectionCardProps) {
+export function CollectionCard({ name, count, href, imageUrl }: CollectionCardProps) {
   return (
     <Link href={href} className="group block cursor-pointer">
       {/* Gradient Placeholder - Future: real collection images */}
       <div
         className={cn(
-          "aspect-[4/3] w-full overflow-hidden rounded-sm bg-gradient-to-br mb-6 transition-transform motion-slow group-hover:scale-[1.02]",
+          "relative aspect-[4/3] w-full overflow-hidden rounded-sm bg-gradient-to-br mb-6 transition-transform motion-slow group-hover:scale-[1.02]",
           getCategoryGradient(name)
         )}
       >
+        {imageUrl ? (
+          <div
+            className="absolute inset-0 bg-center bg-cover"
+            style={{ backgroundImage: `url(${imageUrl})` }}
+          />
+        ) : null}
         <div className="w-full h-full opacity-0 group-hover:opacity-10 transition-opacity motion-slow bg-background" />
       </div>
 

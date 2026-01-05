@@ -155,14 +155,16 @@ export function LoginForm({ requiredRole, defaultRedirect }: LoginFormProps) {
         {loading ? 'Signing in...' : 'Sign In'}
       </Button>
 
-      <div className="text-center">
-        <Link
-          href="/reset-password"
-          className="text-sm text-muted-foreground hover:text-foreground"
-        >
-          Forgot password?
-        </Link>
-      </div>
+      {requiredRole !== 'admin' && (
+        <div className="text-center">
+          <Link
+            href="/reset-password"
+            className="text-sm text-muted-foreground hover:text-foreground"
+          >
+            Forgot password?
+          </Link>
+        </div>
+      )}
     </form>
   )
 }
