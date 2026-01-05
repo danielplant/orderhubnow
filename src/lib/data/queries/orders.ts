@@ -186,6 +186,12 @@ export async function getOrders(
         ShipEndDate: true,
         OrderDate: true,
         IsTransferredToShopify: true,
+        // New shipping/adjustment fields
+        ShippedAmount: true,
+        ShippingCost: true,
+        TrackingNumber: true,
+        ShipDate: true,
+        InvoiceNumber: true,
       },
     }),
     
@@ -218,26 +224,35 @@ export async function getOrders(
   return {
     total,
     statusCounts,
-    orders: orders.map((o) => ({
-      id: String(o.ID),
-      orderNumber: o.OrderNumber,
-      status: o.OrderStatus as OrderStatus,
-      storeName: o.StoreName,
-      buyerName: o.BuyerName,
-      salesRep: o.SalesRep,
-      customerEmail: o.CustomerEmail,
-      country: o.Country,
-      orderAmount: o.OrderAmount,
-      orderAmountFormatted: formatCurrency(
-        o.OrderAmount,
-        o.Country?.toUpperCase().includes('US') ? 'USD' : 'CAD'
-      ),
-      shipStartDate: o.ShipStartDate ? o.ShipStartDate.toISOString().slice(0, 10) : null,
-      shipEndDate: o.ShipEndDate ? o.ShipEndDate.toISOString().slice(0, 10) : null,
-      orderDate: o.OrderDate.toISOString().slice(0, 10),
-      inShopify: !!o.IsTransferredToShopify,
-      isTransferredToShopify: o.IsTransferredToShopify,
-    })),
+    orders: orders.map((o) => {
+      const currency = o.Country?.toUpperCase().includes('US') ? 'USD' : 'CAD';
+      return {
+        id: String(o.ID),
+        orderNumber: o.OrderNumber,
+        status: o.OrderStatus as OrderStatus,
+        storeName: o.StoreName,
+        buyerName: o.BuyerName,
+        salesRep: o.SalesRep,
+        customerEmail: o.CustomerEmail,
+        country: o.Country,
+        orderAmount: o.OrderAmount,
+        orderAmountFormatted: formatCurrency(o.OrderAmount, currency),
+        // Shipped/adjusted values
+        shippedAmount: o.ShippedAmount,
+        shippedAmountFormatted: o.ShippedAmount != null
+          ? formatCurrency(o.ShippedAmount, currency)
+          : null,
+        shippingCost: o.ShippingCost,
+        trackingNumber: o.TrackingNumber,
+        invoiceNumber: o.InvoiceNumber,
+        shipStartDate: o.ShipStartDate ? o.ShipStartDate.toISOString().slice(0, 10) : null,
+        shipEndDate: o.ShipEndDate ? o.ShipEndDate.toISOString().slice(0, 10) : null,
+        shipDate: o.ShipDate ? o.ShipDate.toISOString().slice(0, 10) : null,
+        orderDate: o.OrderDate.toISOString().slice(0, 10),
+        inShopify: !!o.IsTransferredToShopify,
+        isTransferredToShopify: o.IsTransferredToShopify,
+      };
+    }),
   };
 }
 
@@ -312,12 +327,20 @@ export async function getOrderById(orderId: string): Promise<AdminOrderRow | nul
       ShipEndDate: true,
       OrderDate: true,
       IsTransferredToShopify: true,
+      // New shipping/adjustment fields
+      ShippedAmount: true,
+      ShippingCost: true,
+      TrackingNumber: true,
+      ShipDate: true,
+      InvoiceNumber: true,
     },
   });
 
   if (!order) {
     return null;
   }
+
+  const currency = order.Country?.toUpperCase().includes('US') ? 'USD' : 'CAD';
 
   return {
     id: String(order.ID),
@@ -329,12 +352,18 @@ export async function getOrderById(orderId: string): Promise<AdminOrderRow | nul
     customerEmail: order.CustomerEmail,
     country: order.Country,
     orderAmount: order.OrderAmount,
-    orderAmountFormatted: formatCurrency(
-      order.OrderAmount,
-      order.Country?.toUpperCase().includes('US') ? 'USD' : 'CAD'
-    ),
+    orderAmountFormatted: formatCurrency(order.OrderAmount, currency),
+    // Shipped/adjusted values
+    shippedAmount: order.ShippedAmount,
+    shippedAmountFormatted: order.ShippedAmount != null
+      ? formatCurrency(order.ShippedAmount, currency)
+      : null,
+    shippingCost: order.ShippingCost,
+    trackingNumber: order.TrackingNumber,
+    invoiceNumber: order.InvoiceNumber,
     shipStartDate: order.ShipStartDate ? order.ShipStartDate.toISOString().slice(0, 10) : null,
     shipEndDate: order.ShipEndDate ? order.ShipEndDate.toISOString().slice(0, 10) : null,
+    shipDate: order.ShipDate ? order.ShipDate.toISOString().slice(0, 10) : null,
     orderDate: order.OrderDate.toISOString().slice(0, 10),
     inShopify: !!order.IsTransferredToShopify,
     isTransferredToShopify: order.IsTransferredToShopify,
@@ -513,6 +542,12 @@ export async function getOrdersByRep(
         ShipEndDate: true,
         OrderDate: true,
         IsTransferredToShopify: true,
+        // New shipping/adjustment fields
+        ShippedAmount: true,
+        ShippingCost: true,
+        TrackingNumber: true,
+        ShipDate: true,
+        InvoiceNumber: true,
       },
     }),
     prisma.customerOrders.groupBy({
@@ -547,31 +582,40 @@ export async function getOrdersByRep(
   return {
     total,
     statusCounts,
-    orders: orders.map((o) => ({
-      id: String(o.ID),
-      orderNumber: o.OrderNumber,
-      status: o.OrderStatus as OrderStatus,
-      storeName: o.StoreName,
-      buyerName: o.BuyerName,
-      salesRep: o.SalesRep,
-      customerEmail: o.CustomerEmail,
-      country: o.Country,
-      orderAmount: o.OrderAmount,
-      orderAmountFormatted: formatCurrency(
-        o.OrderAmount,
-        o.Country?.toUpperCase().includes('US') ? 'USD' : 'CAD'
-      ),
-      shipStartDate: o.ShipStartDate
-        ? o.ShipStartDate.toISOString().slice(0, 10)
-        : null,
-      shipEndDate: o.ShipEndDate
-        ? o.ShipEndDate.toISOString().slice(0, 10)
-        : null,
-      orderDate: o.OrderDate.toISOString().slice(0, 10),
-      inShopify: !!o.IsTransferredToShopify,
-      isTransferredToShopify: o.IsTransferredToShopify,
-      category: categoryMap.get(o.OrderNumber) ?? '',
-    })),
+    orders: orders.map((o) => {
+      const currency = o.Country?.toUpperCase().includes('US') ? 'USD' : 'CAD';
+      return {
+        id: String(o.ID),
+        orderNumber: o.OrderNumber,
+        status: o.OrderStatus as OrderStatus,
+        storeName: o.StoreName,
+        buyerName: o.BuyerName,
+        salesRep: o.SalesRep,
+        customerEmail: o.CustomerEmail,
+        country: o.Country,
+        orderAmount: o.OrderAmount,
+        orderAmountFormatted: formatCurrency(o.OrderAmount, currency),
+        // Shipped/adjusted values
+        shippedAmount: o.ShippedAmount,
+        shippedAmountFormatted: o.ShippedAmount != null
+          ? formatCurrency(o.ShippedAmount, currency)
+          : null,
+        shippingCost: o.ShippingCost,
+        trackingNumber: o.TrackingNumber,
+        invoiceNumber: o.InvoiceNumber,
+        shipStartDate: o.ShipStartDate
+          ? o.ShipStartDate.toISOString().slice(0, 10)
+          : null,
+        shipEndDate: o.ShipEndDate
+          ? o.ShipEndDate.toISOString().slice(0, 10)
+          : null,
+        shipDate: o.ShipDate ? o.ShipDate.toISOString().slice(0, 10) : null,
+        orderDate: o.OrderDate.toISOString().slice(0, 10),
+        inShopify: !!o.IsTransferredToShopify,
+        isTransferredToShopify: o.IsTransferredToShopify,
+        category: categoryMap.get(o.OrderNumber) ?? '',
+      };
+    }),
   };
 }
 

@@ -4,6 +4,7 @@ import { auth } from '@/lib/auth/providers'
 import { prisma } from '@/lib/prisma'
 import { formatCurrency } from '@/lib/utils'
 import { Card, CardContent, CardHeader, CardTitle, Button, StatusBadge } from '@/components/ui'
+import { OrderEditForm } from '@/components/admin/order-edit-form'
 import type { OrderStatus } from '@/lib/types/order'
 
 function getStatusBadgeStatus(status: OrderStatus) {
@@ -54,6 +55,12 @@ export default async function AdminOrderDetailsPage(props: { params: Promise<{ i
       OrderDate: true,
       Website: true,
       IsTransferredToShopify: true,
+      // Shipping/adjustment fields
+      ShippingCost: true,
+      TrackingNumber: true,
+      ShipDate: true,
+      InvoiceNumber: true,
+      ShippedAmount: true,
     },
   })
 
@@ -70,6 +77,7 @@ export default async function AdminOrderDetailsPage(props: { params: Promise<{ i
         Quantity: true,
         Price: true,
         PriceCurrency: true,
+        ShippedQuantity: true,
       },
       orderBy: { SKU: 'asc' },
     }),
@@ -88,7 +96,11 @@ export default async function AdminOrderDetailsPage(props: { params: Promise<{ i
   const currency: 'USD' | 'CAD' = order.Country?.toUpperCase().includes('CAD') ? 'CAD' : 'USD'
   const status = order.OrderStatus as OrderStatus
 
-  const itemsTotal = items.reduce((sum, i) => sum + (i.Price || 0) * (i.Quantity || 0), 0)
+  const itemsTotal = items.reduce((sum: number, i) => sum + (i.Price || 0) * (i.Quantity || 0), 0)
+  const shippedTotal = order.ShippedAmount ?? itemsTotal
+
+  // Calculate difference between order and shipped
+  const difference = order.OrderAmount - shippedTotal
 
   return (
     <main className="p-10 bg-muted/30 min-h-screen">
@@ -125,6 +137,7 @@ export default async function AdminOrderDetailsPage(props: { params: Promise<{ i
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
+        {/* Order Info */}
         <Card>
           <CardHeader>
             <CardTitle>Order Info</CardTitle>
@@ -180,10 +193,57 @@ export default async function AdminOrderDetailsPage(props: { params: Promise<{ i
               <span className="text-muted-foreground">Order Total</span>
               <span className="font-semibold">{formatCurrency(order.OrderAmount, currency)}</span>
             </div>
+            {order.ShippedAmount != null && (
+              <>
+                <div className="flex justify-between gap-4">
+                  <span className="text-muted-foreground">Shipped Total</span>
+                  <span className="font-semibold">{formatCurrency(order.ShippedAmount, currency)}</span>
+                </div>
+                {Math.abs(difference) > 0.01 && (
+                  <div className="flex justify-between gap-4">
+                    <span className="text-muted-foreground">Difference</span>
+                    <span className={`font-medium ${difference > 0 ? 'text-destructive' : 'text-success'}`}>
+                      {difference > 0 ? '-' : '+'}
+                      {formatCurrency(Math.abs(difference), currency)}
+                    </span>
+                  </div>
+                )}
+              </>
+            )}
           </CardContent>
         </Card>
 
+        {/* Shipping Info */}
         <Card>
+          <CardHeader>
+            <CardTitle>Shipping Info</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 text-sm">
+            <div className="flex justify-between gap-4">
+              <span className="text-muted-foreground">Shipping Cost</span>
+              <span className="font-medium">
+                {order.ShippingCost != null ? formatCurrency(order.ShippingCost, currency) : '—'}
+              </span>
+            </div>
+            <div className="flex justify-between gap-4">
+              <span className="text-muted-foreground">Tracking Number</span>
+              <span className="font-medium">{order.TrackingNumber || '—'}</span>
+            </div>
+            <div className="flex justify-between gap-4">
+              <span className="text-muted-foreground">Ship Date</span>
+              <span className="font-medium">
+                {order.ShipDate ? order.ShipDate.toISOString().slice(0, 10) : '—'}
+              </span>
+            </div>
+            <div className="flex justify-between gap-4">
+              <span className="text-muted-foreground">Invoice Number</span>
+              <span className="font-medium">{order.InvoiceNumber || '—'}</span>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Notes */}
+        <Card className="lg:col-span-2">
           <CardHeader>
             <CardTitle>Notes</CardTitle>
           </CardHeader>
@@ -192,6 +252,7 @@ export default async function AdminOrderDetailsPage(props: { params: Promise<{ i
           </CardContent>
         </Card>
 
+        {/* Line Items - Read Only */}
         <Card className="lg:col-span-2">
           <CardHeader>
             <CardTitle>Line Items</CardTitle>
@@ -205,18 +266,29 @@ export default async function AdminOrderDetailsPage(props: { params: Promise<{ i
                   <thead>
                     <tr className="text-left text-muted-foreground border-b border-border">
                       <th className="py-2 pr-4">SKU</th>
-                      <th className="py-2 pr-4 text-right">Qty</th>
+                      <th className="py-2 pr-4 text-right">Ordered</th>
+                      <th className="py-2 pr-4 text-right">Shipped</th>
                       <th className="py-2 pr-4 text-right">Unit</th>
                       <th className="py-2 pr-4 text-right">Total</th>
                     </tr>
                   </thead>
                   <tbody>
                     {items.map((i) => {
-                      const lineTotal = (i.Price || 0) * (i.Quantity || 0)
+                      const shippedQty = i.ShippedQuantity ?? i.Quantity
+                      const lineTotal = (i.Price || 0) * shippedQty
+                      const qtyDiff = (i.Quantity || 0) - shippedQty
                       return (
                         <tr key={String(i.ID)} className="border-b border-border">
                           <td className="py-2 pr-4 font-medium">{i.SKU}</td>
                           <td className="py-2 pr-4 text-right">{i.Quantity}</td>
+                          <td className="py-2 pr-4 text-right">
+                            {shippedQty}
+                            {qtyDiff !== 0 && (
+                              <span className={`ml-1 text-xs ${qtyDiff > 0 ? 'text-destructive' : 'text-success'}`}>
+                                ({qtyDiff > 0 ? '-' : '+'}{Math.abs(qtyDiff)})
+                              </span>
+                            )}
+                          </td>
                           <td className="py-2 pr-4 text-right">
                             {formatCurrency(i.Price || 0, (i.PriceCurrency as 'USD' | 'CAD') || currency)}
                           </td>
@@ -227,6 +299,7 @@ export default async function AdminOrderDetailsPage(props: { params: Promise<{ i
                       )
                     })}
                     <tr>
+                      <td className="py-3 pr-4" />
                       <td className="py-3 pr-4" />
                       <td className="py-3 pr-4" />
                       <td className="py-3 pr-4 text-right text-muted-foreground">Items total</td>
@@ -241,6 +314,28 @@ export default async function AdminOrderDetailsPage(props: { params: Promise<{ i
           </CardContent>
         </Card>
 
+        {/* Edit Form - Shipping & Adjustments */}
+        <div className="lg:col-span-2">
+          <OrderEditForm
+            orderId={id}
+            currency={currency}
+            orderAmount={order.OrderAmount}
+            shippingCost={order.ShippingCost}
+            trackingNumber={order.TrackingNumber}
+            shipDate={order.ShipDate ? order.ShipDate.toISOString().slice(0, 10) : null}
+            invoiceNumber={order.InvoiceNumber}
+            items={items.map((i) => ({
+              id: String(i.ID),
+              sku: i.SKU,
+              quantity: i.Quantity,
+              shippedQuantity: i.ShippedQuantity,
+              price: i.Price,
+              currency,
+            }))}
+          />
+        </div>
+
+        {/* Comments */}
         <Card className="lg:col-span-2">
           <CardHeader>
             <CardTitle>Comments</CardTitle>

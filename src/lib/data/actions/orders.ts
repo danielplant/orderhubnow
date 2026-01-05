@@ -554,6 +554,159 @@ export async function updateOrder(
 }
 
 // ============================================================================
+// Order Adjustment Actions (Shipping, Tracking, etc.)
+// ============================================================================
+
+/**
+ * Input for updating shipping/tracking info on an order.
+ */
+export interface UpdateOrderShippingInput {
+  orderId: string
+  shippingCost?: number
+  trackingNumber?: string
+  shipDate?: string
+  invoiceNumber?: string
+}
+
+/**
+ * Update shipping information on an order.
+ * Used when admin enters shipping costs, tracking number, etc.
+ */
+export async function updateOrderShipping(
+  input: UpdateOrderShippingInput
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    await requireAdmin()
+
+    const updateData: Record<string, unknown> = {}
+
+    if (input.shippingCost !== undefined) {
+      updateData.ShippingCost = input.shippingCost
+    }
+    if (input.trackingNumber !== undefined) {
+      updateData.TrackingNumber = input.trackingNumber
+    }
+    if (input.shipDate !== undefined) {
+      updateData.ShipDate = input.shipDate ? new Date(input.shipDate) : null
+    }
+    if (input.invoiceNumber !== undefined) {
+      updateData.InvoiceNumber = input.invoiceNumber
+    }
+
+    await prisma.customerOrders.update({
+      where: { ID: BigInt(input.orderId) },
+      data: updateData,
+    })
+
+    revalidatePath('/admin/orders')
+    revalidatePath(`/admin/orders/${input.orderId}`)
+    return { success: true }
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'Failed to update shipping'
+    return { success: false, error: message }
+  }
+}
+
+/**
+ * Input for adjusting order items (shipped quantities).
+ */
+export interface AdjustOrderItemsInput {
+  orderId: string
+  items: Array<{
+    id: string
+    shippedQuantity: number
+  }>
+}
+
+/**
+ * Adjust shipped quantities on order items.
+ * Recalculates ShippedAmount based on shipped quantities.
+ */
+export async function adjustOrderItems(
+  input: AdjustOrderItemsInput
+): Promise<{ success: boolean; shippedAmount?: number; error?: string }> {
+  try {
+    await requireAdmin()
+
+    // Update items and calculate new shipped total
+    const result = await prisma.$transaction(async (tx) => {
+      // Get current items for price lookup
+      const items = await tx.customerOrdersItems.findMany({
+        where: { CustomerOrderID: BigInt(input.orderId) },
+        select: { ID: true, Price: true, Quantity: true },
+      })
+
+      const itemMap = new Map(items.map((i) => [String(i.ID), i]))
+
+      let shippedTotal = 0
+
+      // Update each item's shipped quantity
+      for (const adjustment of input.items) {
+        const item = itemMap.get(adjustment.id)
+        if (item) {
+          await tx.customerOrdersItems.update({
+            where: { ID: BigInt(adjustment.id) },
+            data: { ShippedQuantity: adjustment.shippedQuantity },
+          })
+          shippedTotal += adjustment.shippedQuantity * item.Price
+        }
+      }
+
+      // Update order's shipped amount
+      await tx.customerOrders.update({
+        where: { ID: BigInt(input.orderId) },
+        data: { ShippedAmount: shippedTotal },
+      })
+
+      return shippedTotal
+    })
+
+    revalidatePath('/admin/orders')
+    revalidatePath(`/admin/orders/${input.orderId}`)
+    return { success: true, shippedAmount: result }
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'Failed to adjust items'
+    return { success: false, error: message }
+  }
+}
+
+/**
+ * Recalculate shipped amount from current shipped quantities.
+ * Use after making item-level adjustments.
+ */
+export async function recalculateShippedAmount(
+  orderId: string
+): Promise<{ success: boolean; shippedAmount?: number; error?: string }> {
+  try {
+    await requireAdmin()
+
+    const items = await prisma.customerOrdersItems.findMany({
+      where: { CustomerOrderID: BigInt(orderId) },
+      select: { Price: true, Quantity: true, ShippedQuantity: true },
+    })
+
+    // Calculate shipped total from shipped quantities
+    // If no shipped quantity set, use original quantity
+    const shippedTotal = items.reduce((sum, item) => {
+      const qty = item.ShippedQuantity ?? item.Quantity
+      return sum + qty * item.Price
+    }, 0)
+
+    await prisma.customerOrders.update({
+      where: { ID: BigInt(orderId) },
+      data: { ShippedAmount: shippedTotal },
+    })
+
+    revalidatePath('/admin/orders')
+    revalidatePath(`/admin/orders/${orderId}`)
+    return { success: true, shippedAmount: shippedTotal }
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'Failed to recalculate'
+    return { success: false, error: message }
+  }
+}
+
+// ============================================================================
 // Stub Actions (Defer to later briefs)
 // ============================================================================
 

@@ -54,8 +54,15 @@ export interface AdminOrderRow {
   country: string;
   orderAmount: number;
   orderAmountFormatted: string;
+  // Shipped/adjusted values
+  shippedAmount: number | null;
+  shippedAmountFormatted: string | null;
+  shippingCost: number | null;
+  trackingNumber: string | null;
+  invoiceNumber: string | null;
   shipStartDate: string | null;
   shipEndDate: string | null;
+  shipDate: string | null;
   orderDate: string;
   inShopify: boolean;
   isTransferredToShopify: boolean | null;

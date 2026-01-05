@@ -47,6 +47,12 @@ model CustomerOrders {
   IsTransferredToShopify Boolean?
   CustomerID             Int?
   RepID                  Int?
+  // Shipping and adjustment fields
+  ShippingCost           Float?                   @default(0)
+  TrackingNumber         String?                  @db.NVarChar(200)
+  ShippedAmount          Float?
+  ShipDate               DateTime?                @db.DateTime
+  InvoiceNumber          String?                  @db.NVarChar(100)
   CustomerOrdersComments CustomerOrdersComments[]
 
   @@index([CustomerID], map: "IX_CustomerOrders_CustomerID")
@@ -64,15 +70,16 @@ model CustomerOrdersComments {
 }
 
 model CustomerOrdersItems {
-  ID              BigInt @id(map: "PK_CustomerOrdersItems") @default(autoincrement())
+  ID              BigInt  @id(map: "PK_CustomerOrdersItems") @default(autoincrement())
   CustomerOrderID BigInt
-  OrderNumber     String @db.NVarChar(50)
-  SKU             String @db.NVarChar(50)
+  OrderNumber     String  @db.NVarChar(50)
+  SKU             String  @db.NVarChar(50)
   SKUVariantID    BigInt
   Quantity        Int
   Price           Float
-  PriceCurrency   String @db.NVarChar(50)
-  Notes           String @db.NVarChar(Max)
+  PriceCurrency   String  @db.NVarChar(50)
+  Notes           String  @db.NVarChar(Max)
+  ShippedQuantity Int?    // Actual quantity shipped (may differ from Quantity ordered)
 }
 
 model Customers {

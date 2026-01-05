@@ -238,8 +238,37 @@ export function OrdersTable({ initialOrders, total, statusCounts, reps }: Orders
       },
       {
         id: 'orderAmount',
-        header: 'Total',
+        header: 'Order Total',
         cell: (o) => <span className="font-medium">{o.orderAmountFormatted}</span>,
+      },
+      {
+        id: 'shippedAmount',
+        header: 'Shipped Total',
+        cell: (o) => {
+          if (o.shippedAmount == null) {
+            return <span className="text-muted-foreground">—</span>;
+          }
+          const diff = o.orderAmount - o.shippedAmount;
+          return (
+            <div className="space-y-0.5">
+              <span className="font-medium">{o.shippedAmountFormatted}</span>
+              {Math.abs(diff) > 0.01 && (
+                <div className={cn('text-xs', diff > 0 ? 'text-destructive' : 'text-success')}>
+                  {diff > 0 ? '-' : '+'}${Math.abs(diff).toFixed(2)}
+                </div>
+              )}
+            </div>
+          );
+        },
+      },
+      {
+        id: 'trackingNumber',
+        header: 'Tracking',
+        cell: (o) => (
+          <span className="text-muted-foreground text-sm truncate max-w-[120px] block">
+            {o.trackingNumber || '—'}
+          </span>
+        ),
       },
       {
         id: 'inShopify',
