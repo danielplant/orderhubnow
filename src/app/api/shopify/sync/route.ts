@@ -8,40 +8,103 @@ import {
   createSyncRun,
   getLatestSyncRun,
   cleanupOrphanedRuns,
+  getSyncHealthStats,
 } from '@/lib/shopify/sync'
 
 // ============================================================================
-// Shopify GraphQL Helper
+// Shopify GraphQL Helper with Retry Logic
 // ============================================================================
 
-async function shopifyGraphQL(query: string): Promise<{ data?: unknown; error?: string }> {
+/**
+ * Sleep for the specified number of milliseconds.
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/**
+ * Calculate exponential backoff delay.
+ */
+function getBackoffDelay(attempt: number, baseDelayMs = 2000): number {
+  const exponentialDelay = baseDelayMs * Math.pow(2, attempt)
+  const jitter = Math.random() * 500
+  return exponentialDelay + jitter
+}
+
+/**
+ * Check if an error is retryable.
+ */
+function isRetryableError(status: number, errorMessage?: string): boolean {
+  if (!status || status === 0) return true
+  if (status === 429) return true
+  if (status >= 500 && status < 600) return true
+  if (errorMessage && (errorMessage.includes('timeout') || errorMessage.includes('ETIMEDOUT') || errorMessage.includes('ECONNRESET'))) {
+    return true
+  }
+  return false
+}
+
+interface GraphQLResult {
+  data?: unknown
+  error?: string
+  retries?: number
+}
+
+async function shopifyGraphQL(query: string, maxRetries = 3): Promise<GraphQLResult> {
   const storeDomain = process.env.SHOPIFY_STORE_DOMAIN!
   const accessToken = process.env.SHOPIFY_ACCESS_TOKEN!
   const apiVersion = process.env.SHOPIFY_API_VERSION || '2024-01'
 
-  try {
-    const response = await fetch(
-      `https://${storeDomain}/admin/api/${apiVersion}/graphql.json`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Shopify-Access-Token': accessToken,
-        },
-        body: JSON.stringify({ query }),
+  let lastError: string | undefined
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await fetch(
+        `https://${storeDomain}/admin/api/${apiVersion}/graphql.json`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Shopify-Access-Token': accessToken,
+          },
+          body: JSON.stringify({ query }),
+        }
+      )
+
+      const result = await response.json()
+
+      if (result.errors) {
+        const errorMsg = result.errors[0]?.message || 'GraphQL error'
+
+        // Check if we should retry
+        if (attempt < maxRetries && isRetryableError(response.status, errorMsg)) {
+          const delay = getBackoffDelay(attempt)
+          console.warn(`Shopify GraphQL error (attempt ${attempt + 1}/${maxRetries + 1}): ${errorMsg}. Retrying in ${Math.round(delay)}ms...`)
+          await sleep(delay)
+          lastError = errorMsg
+          continue
+        }
+
+        return { error: errorMsg, retries: attempt }
       }
-    )
 
-    const result = await response.json()
+      return { data: result.data, retries: attempt }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Fetch failed'
+      lastError = errorMessage
 
-    if (result.errors) {
-      return { error: result.errors[0]?.message || 'GraphQL error' }
+      if (attempt < maxRetries && isRetryableError(0, errorMessage)) {
+        const delay = getBackoffDelay(attempt)
+        console.warn(`Shopify GraphQL network error (attempt ${attempt + 1}/${maxRetries + 1}): ${errorMessage}. Retrying in ${Math.round(delay)}ms...`)
+        await sleep(delay)
+        continue
+      }
+
+      return { error: errorMessage, retries: attempt }
     }
-
-    return { data: result.data }
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : 'Fetch failed' }
   }
+
+  return { error: lastError || 'Max retries exceeded', retries: maxRetries }
 }
 
 // ============================================================================
@@ -62,6 +125,9 @@ export async function GET() {
     // Get latest sync run for "in progress" / "last run" info
     const latestRun = await getLatestSyncRun()
 
+    // Get sync health stats for dashboard widget
+    const healthStats = await getSyncHealthStats()
+
     return NextResponse.json({
       ...status,
       lastRun: latestRun
@@ -78,6 +144,19 @@ export async function GET() {
       syncInProgress:
         latestRun?.status === 'started' &&
         new Date().getTime() - latestRun.startedAt.getTime() < 15 * 60 * 1000,
+      // New: Sync health statistics
+      health: {
+        isHealthy: healthStats.isHealthy,
+        successRate: healthStats.recentSuccessRate,
+        lastSuccessfulSync: healthStats.lastSuccessfulSync?.toISOString() ?? null,
+        runsLast24h: {
+          total: healthStats.totalRunsLast24h,
+          successful: healthStats.successfulRunsLast24h,
+          failed: healthStats.failedRunsLast24h,
+        },
+        averageDurationMs: healthStats.averageSyncDurationMs,
+        warnings: healthStats.healthWarnings,
+      },
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error'

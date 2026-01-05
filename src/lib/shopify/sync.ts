@@ -413,3 +413,147 @@ export async function processJsonlLines(
 
   return { processed, errors }
 }
+
+// ============================================================================
+// Sync Health Statistics
+// ============================================================================
+
+export interface SyncHealthStats {
+  lastSuccessfulSync: Date | null
+  lastSyncAttempt: Date | null
+  recentSuccessRate: number // 0-100
+  totalRunsLast24h: number
+  successfulRunsLast24h: number
+  failedRunsLast24h: number
+  averageSyncDurationMs: number | null
+  isHealthy: boolean
+  healthWarnings: string[]
+}
+
+/**
+ * Get sync health statistics for the past 24 hours.
+ * Useful for dashboard widgets and monitoring.
+ */
+export async function getSyncHealthStats(): Promise<SyncHealthStats> {
+  const now = new Date()
+  const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+
+  // Get all runs in the last 24 hours
+  const recentRuns = await prisma.shopifySyncRun.findMany({
+    where: {
+      StartedAt: { gte: oneDayAgo },
+    },
+    orderBy: { StartedAt: 'desc' },
+  })
+
+  // Get last successful sync
+  const lastSuccessful = await prisma.shopifySyncRun.findFirst({
+    where: { Status: 'completed' },
+    orderBy: { CompletedAt: 'desc' },
+  })
+
+  // Get last sync attempt
+  const lastAttempt = await prisma.shopifySyncRun.findFirst({
+    orderBy: { StartedAt: 'desc' },
+  })
+
+  // Calculate stats
+  const successfulRuns = recentRuns.filter((r) => r.Status === 'completed')
+  const failedRuns = recentRuns.filter((r) => ['failed', 'timeout', 'cancelled'].includes(r.Status))
+  const totalRuns = recentRuns.length
+
+  // Calculate success rate (0-100)
+  const successRate = totalRuns > 0 ? Math.round((successfulRuns.length / totalRuns) * 100) : 100
+
+  // Calculate average sync duration for successful runs
+  const durationsMs = successfulRuns
+    .filter((r) => r.CompletedAt)
+    .map((r) => r.CompletedAt!.getTime() - r.StartedAt.getTime())
+  const avgDuration = durationsMs.length > 0
+    ? Math.round(durationsMs.reduce((a, b) => a + b, 0) / durationsMs.length)
+    : null
+
+  // Build health warnings
+  const warnings: string[] = []
+
+  // Warning if no successful sync in 24 hours
+  if (!lastSuccessful || lastSuccessful.CompletedAt! < oneDayAgo) {
+    warnings.push('No successful sync in the past 24 hours')
+  }
+
+  // Warning if success rate is below 80%
+  if (successRate < 80 && totalRuns > 0) {
+    warnings.push(`Low success rate: ${successRate}% (${successfulRuns.length}/${totalRuns})`)
+  }
+
+  // Warning if there are consecutive failures
+  const lastThreeRuns = recentRuns.slice(0, 3)
+  const consecutiveFailures = lastThreeRuns.filter((r) =>
+    ['failed', 'timeout', 'cancelled'].includes(r.Status)
+  ).length
+  if (consecutiveFailures >= 3) {
+    warnings.push('Last 3 sync attempts failed')
+  }
+
+  // Determine overall health
+  const isHealthy = warnings.length === 0
+
+  return {
+    lastSuccessfulSync: lastSuccessful?.CompletedAt ?? null,
+    lastSyncAttempt: lastAttempt?.StartedAt ?? null,
+    recentSuccessRate: successRate,
+    totalRunsLast24h: totalRuns,
+    successfulRunsLast24h: successfulRuns.length,
+    failedRunsLast24h: failedRuns.length,
+    averageSyncDurationMs: avgDuration,
+    isHealthy,
+    healthWarnings: warnings,
+  }
+}
+
+/**
+ * Check if sync is unhealthy and return notification data if so.
+ * Can be called by a scheduled job to send alerts.
+ */
+export async function checkSyncHealthAndAlert(): Promise<{
+  shouldAlert: boolean
+  alertType?: 'no_sync' | 'failures' | 'low_success_rate'
+  message?: string
+  stats?: SyncHealthStats
+}> {
+  const stats = await getSyncHealthStats()
+
+  if (stats.isHealthy) {
+    return { shouldAlert: false }
+  }
+
+  // Determine the most critical alert type
+  if (stats.healthWarnings.some((w) => w.includes('No successful sync'))) {
+    return {
+      shouldAlert: true,
+      alertType: 'no_sync',
+      message: `Shopify sync alert: No successful sync in the past 24 hours. Last sync attempt: ${stats.lastSyncAttempt?.toISOString() ?? 'never'}`,
+      stats,
+    }
+  }
+
+  if (stats.healthWarnings.some((w) => w.includes('Last 3 sync attempts failed'))) {
+    return {
+      shouldAlert: true,
+      alertType: 'failures',
+      message: `Shopify sync alert: Last 3 sync attempts have failed. Please check Shopify configuration and connectivity.`,
+      stats,
+    }
+  }
+
+  if (stats.healthWarnings.some((w) => w.includes('Low success rate'))) {
+    return {
+      shouldAlert: true,
+      alertType: 'low_success_rate',
+      message: `Shopify sync alert: Low success rate (${stats.recentSuccessRate}%) in the past 24 hours.`,
+      stats,
+    }
+  }
+
+  return { shouldAlert: false }
+}

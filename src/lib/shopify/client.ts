@@ -119,43 +119,122 @@ export function isShopifyConfigured(): boolean {
 }
 
 // ============================================================================
-// HTTP Client
+// HTTP Client with Retry Logic
 // ============================================================================
+
+/**
+ * Sleep for the specified number of milliseconds.
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/**
+ * Calculate exponential backoff delay.
+ * @param attempt - Zero-based attempt number
+ * @param baseDelayMs - Base delay in milliseconds (default 2000)
+ * @returns Delay in milliseconds
+ */
+function getBackoffDelay(attempt: number, baseDelayMs = 2000): number {
+  // 2s, 4s, 8s, 16s with some jitter
+  const exponentialDelay = baseDelayMs * Math.pow(2, attempt)
+  const jitter = Math.random() * 500 // Add up to 500ms jitter
+  return exponentialDelay + jitter
+}
+
+/**
+ * Check if an error is retryable (network errors, 429, 5xx).
+ */
+function isRetryableError(status: number, error?: string): boolean {
+  // Network errors (status 0 or undefined)
+  if (!status || status === 0) return true
+  // Rate limiting
+  if (status === 429) return true
+  // Server errors
+  if (status >= 500 && status < 600) return true
+  // Timeout errors in error message
+  if (error && (error.includes('timeout') || error.includes('ETIMEDOUT') || error.includes('ECONNRESET'))) {
+    return true
+  }
+  return false
+}
+
+interface ShopifyFetchOptions extends RequestInit {
+  maxRetries?: number
+  retryDelayMs?: number
+}
 
 async function shopifyFetch<T>(
   endpoint: string,
-  options: RequestInit = {}
-): Promise<{ data: T | null; error?: string; status: number }> {
+  options: ShopifyFetchOptions = {}
+): Promise<{ data: T | null; error?: string; status: number; retries?: number }> {
+  const { maxRetries = 3, retryDelayMs = 2000, ...fetchOptions } = options
   const config = getConfig()
   const baseUrl = `https://${config.storeDomain}/admin/api/${config.apiVersion}`
   const url = `${baseUrl}${endpoint}`
 
-  const response = await fetch(url, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Shopify-Access-Token': config.accessToken,
-      ...options.headers,
-    },
-  })
+  let lastError: string | undefined
+  let lastStatus = 0
 
-  const text = await response.text()
-  let data: T | null = null
-  
-  try {
-    data = text ? JSON.parse(text) : null
-  } catch {
-    // Response was not JSON
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await fetch(url, {
+        ...fetchOptions,
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Shopify-Access-Token': config.accessToken,
+          ...fetchOptions.headers,
+        },
+      })
+
+      const text = await response.text()
+      let data: T | null = null
+
+      try {
+        data = text ? JSON.parse(text) : null
+      } catch {
+        // Response was not JSON
+      }
+
+      lastStatus = response.status
+
+      if (!response.ok) {
+        const errorMessage = typeof data === 'object' && data !== null && 'errors' in data
+          ? JSON.stringify((data as { errors: unknown }).errors)
+          : text || `HTTP ${response.status}`
+
+        // Check if we should retry
+        if (attempt < maxRetries && isRetryableError(response.status, errorMessage)) {
+          const delay = getBackoffDelay(attempt, retryDelayMs)
+          console.warn(`Shopify API error (attempt ${attempt + 1}/${maxRetries + 1}): ${errorMessage}. Retrying in ${Math.round(delay)}ms...`)
+          await sleep(delay)
+          lastError = errorMessage
+          continue
+        }
+
+        return { data: null, error: errorMessage, status: response.status, retries: attempt }
+      }
+
+      return { data, status: response.status, retries: attempt }
+    } catch (err) {
+      // Network error
+      const errorMessage = err instanceof Error ? err.message : 'Network error'
+      lastError = errorMessage
+      lastStatus = 0
+
+      if (attempt < maxRetries && isRetryableError(0, errorMessage)) {
+        const delay = getBackoffDelay(attempt, retryDelayMs)
+        console.warn(`Shopify network error (attempt ${attempt + 1}/${maxRetries + 1}): ${errorMessage}. Retrying in ${Math.round(delay)}ms...`)
+        await sleep(delay)
+        continue
+      }
+
+      return { data: null, error: errorMessage, status: 0, retries: attempt }
+    }
   }
 
-  if (!response.ok) {
-    const errorMessage = typeof data === 'object' && data !== null && 'errors' in data
-      ? JSON.stringify((data as { errors: unknown }).errors)
-      : text || `HTTP ${response.status}`
-    return { data: null, error: errorMessage, status: response.status }
-  }
-
-  return { data, status: response.status }
+  // Should not reach here, but just in case
+  return { data: null, error: lastError || 'Max retries exceeded', status: lastStatus, retries: maxRetries }
 }
 
 // ============================================================================
