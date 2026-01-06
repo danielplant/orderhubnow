@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/prisma'
 import { parsePrice, parseSkuId } from '@/lib/utils'
+import { sortBySize } from '@/lib/utils/size-sort'
 import type { Product, ProductVariant } from '@/lib/types'
 
 /**
@@ -40,14 +41,17 @@ export async function getSkusByCategory(categoryId: number): Promise<Product[]> 
   for (const [baseSku, skuGroup] of grouped) {
     const first = skuGroup[0]
     
-    const variants: ProductVariant[] = skuGroup.map(sku => ({
-      size: sku.parsedSize,
-      sku: sku.SkuID,
-      available: sku.Quantity ?? 0,
-      onRoute: sku.OnRoute ?? 0,
-      priceCad: parsePrice(sku.PriceCAD),
-      priceUsd: parsePrice(sku.PriceUSD),
-    }))
+    // Map variants and sort by size using Limeapple's specific size sequence
+    const variants: ProductVariant[] = sortBySize(
+      skuGroup.map(sku => ({
+        size: sku.parsedSize,
+        sku: sku.SkuID,
+        available: sku.Quantity ?? 0,
+        onRoute: sku.OnRoute ?? 0,
+        priceCad: parsePrice(sku.PriceCAD),
+        priceUsd: parsePrice(sku.PriceUSD),
+      }))
+    )
 
     products.push({
       id: baseSku,
