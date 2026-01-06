@@ -75,9 +75,11 @@ export function OrderForm({
   repContext = null,
 }: OrderFormProps) {
   const router = useRouter()
-  const { clearAll, getPreOrderShipWindow } = useOrder()
+  const { clearAll, getPreOrderShipWindow, formData: draftFormData, setFormData } = useOrder()
   const [isPending, startTransition] = useTransition()
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const formSyncRef = useRef<NodeJS.Timeout | null>(null)
+  const isInitializedRef = useRef(false)
 
   // Store autocomplete state
   const [storeSuggestions, setStoreSuggestions] = useState<StoreSuggestion[]>([])
@@ -117,6 +119,7 @@ export function OrderForm({
     handleSubmit,
     setValue,
     watch,
+    reset,
     formState: { errors },
   } = useForm<OrderFormData>({
     resolver: zodResolver(orderFormSchema),
@@ -145,10 +148,29 @@ export function OrderForm({
           orderNotes: existingOrder.orderNotes || '',
         }
       : {
-          country: 'USA',
-          shippingCountry: 'USA',
-          shipStartDate: defaultStartDate,
-          shipEndDate: defaultEndDate,
+          // Use draft form data if available, otherwise defaults
+          storeName: draftFormData.storeName || '',
+          buyerName: draftFormData.buyerName || '',
+          salesRepId: draftFormData.salesRepId || '',
+          customerPhone: draftFormData.customerPhone || '',
+          customerEmail: draftFormData.customerEmail || '',
+          website: draftFormData.website || '',
+          street1: draftFormData.street1 || '',
+          street2: draftFormData.street2 || '',
+          city: draftFormData.city || '',
+          stateProvince: draftFormData.stateProvince || '',
+          zipPostal: draftFormData.zipPostal || '',
+          country: (draftFormData.country === 'Canada' ? 'Canada' : 'USA') as 'USA' | 'Canada',
+          shippingStreet1: draftFormData.shippingStreet1 || '',
+          shippingStreet2: draftFormData.shippingStreet2 || '',
+          shippingCity: draftFormData.shippingCity || '',
+          shippingStateProvince: draftFormData.shippingStateProvince || '',
+          shippingZipPostal: draftFormData.shippingZipPostal || '',
+          shippingCountry: (draftFormData.shippingCountry === 'Canada' ? 'Canada' : 'USA') as 'USA' | 'Canada',
+          shipStartDate: draftFormData.shipStartDate || defaultStartDate,
+          shipEndDate: draftFormData.shipEndDate || defaultEndDate,
+          customerPO: draftFormData.customerPO || '',
+          orderNotes: draftFormData.orderNotes || '',
         },
   })
 
@@ -169,6 +191,89 @@ export function OrderForm({
       setIsRepLocked(true)
     }
   }, [repContext, setValue])
+
+  // Initialize form from draft data when it changes (e.g., loading a shared draft)
+  useEffect(() => {
+    if (editMode || isInitializedRef.current) return
+    
+    // Check if draft has meaningful data
+    const hasDraftData = draftFormData.storeName || draftFormData.buyerName || 
+      draftFormData.customerEmail || draftFormData.street1
+    
+    if (hasDraftData) {
+      reset({
+        storeName: draftFormData.storeName || '',
+        buyerName: draftFormData.buyerName || '',
+        salesRepId: draftFormData.salesRepId || '',
+        customerPhone: draftFormData.customerPhone || '',
+        customerEmail: draftFormData.customerEmail || '',
+        website: draftFormData.website || '',
+        street1: draftFormData.street1 || '',
+        street2: draftFormData.street2 || '',
+        city: draftFormData.city || '',
+        stateProvince: draftFormData.stateProvince || '',
+        zipPostal: draftFormData.zipPostal || '',
+        country: (draftFormData.country === 'Canada' ? 'Canada' : 'USA') as 'USA' | 'Canada',
+        shippingStreet1: draftFormData.shippingStreet1 || '',
+        shippingStreet2: draftFormData.shippingStreet2 || '',
+        shippingCity: draftFormData.shippingCity || '',
+        shippingStateProvince: draftFormData.shippingStateProvince || '',
+        shippingZipPostal: draftFormData.shippingZipPostal || '',
+        shippingCountry: (draftFormData.shippingCountry === 'Canada' ? 'Canada' : 'USA') as 'USA' | 'Canada',
+        shipStartDate: draftFormData.shipStartDate || defaultStartDate,
+        shipEndDate: draftFormData.shipEndDate || defaultEndDate,
+        customerPO: draftFormData.customerPO || '',
+        orderNotes: draftFormData.orderNotes || '',
+      })
+      isInitializedRef.current = true
+    }
+  }, [draftFormData, editMode, reset, defaultStartDate, defaultEndDate])
+
+  // Sync form changes to draft context (debounced)
+  const allFormValues = watch()
+  useEffect(() => {
+    if (editMode) return // Don't sync in edit mode
+    
+    // Clear any existing timeout
+    if (formSyncRef.current) {
+      clearTimeout(formSyncRef.current)
+    }
+    
+    // Debounce sync to avoid excessive updates
+    formSyncRef.current = setTimeout(() => {
+      setFormData({
+        storeName: allFormValues.storeName,
+        buyerName: allFormValues.buyerName,
+        salesRepId: allFormValues.salesRepId,
+        customerPhone: allFormValues.customerPhone,
+        customerEmail: allFormValues.customerEmail,
+        website: allFormValues.website,
+        street1: allFormValues.street1,
+        street2: allFormValues.street2,
+        city: allFormValues.city,
+        stateProvince: allFormValues.stateProvince,
+        zipPostal: allFormValues.zipPostal,
+        country: allFormValues.country,
+        shippingStreet1: allFormValues.shippingStreet1,
+        shippingStreet2: allFormValues.shippingStreet2,
+        shippingCity: allFormValues.shippingCity,
+        shippingStateProvince: allFormValues.shippingStateProvince,
+        shippingZipPostal: allFormValues.shippingZipPostal,
+        shippingCountry: allFormValues.shippingCountry,
+        shipStartDate: allFormValues.shipStartDate,
+        shipEndDate: allFormValues.shipEndDate,
+        customerPO: allFormValues.customerPO,
+        orderNotes: allFormValues.orderNotes,
+        currency: currency,
+      })
+    }, 500)
+    
+    return () => {
+      if (formSyncRef.current) {
+        clearTimeout(formSyncRef.current)
+      }
+    }
+  }, [allFormValues, editMode, setFormData, currency])
 
   // Debounced store name search (only for new orders)
   useEffect(() => {
