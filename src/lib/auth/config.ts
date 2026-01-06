@@ -39,21 +39,37 @@ export const authConfig: NextAuthConfig = {
         })
 
         if (!user) {
+          console.log('[AUTH] User not found for loginId:', loginId)
           return null
         }
+
+        console.log('[AUTH] Found user:', {
+          ID: user.ID,
+          LoginID: user.LoginID,
+          UserType: user.UserType,
+          HasPassword: !!user.Password,
+          PasswordLength: user.Password?.length,
+          HasPasswordHash: !!user.PasswordHash,
+          Status: user.Status
+        })
 
         // Admin users use legacy plaintext Password column (matches .NET BLL.cs behavior)
         // Skip Status/MustResetPassword/PasswordHash gates for admin
         const isAdmin = user.UserType?.toLowerCase() === 'admin'
+        console.log('[AUTH] isAdmin:', isAdmin)
 
         if (isAdmin) {
           // Admin requires plaintext Password column
           if (!user.Password) {
+            console.log('[AUTH] Admin has no Password field')
             return null // Fail if Password is NULL (no reset prompt for admin)
           }
+          console.log('[AUTH] Comparing passwords - DB:', user.Password, 'Input:', password, 'Match:', user.Password === password)
           if (user.Password !== password) {
+            console.log('[AUTH] Password mismatch for admin')
             return null
           }
+          console.log('[AUTH] Admin password matched!')
           // Admin authenticated successfully - skip to role mapping
         } else {
           // Rep/other users: Status-based blocking + bcrypt verification
@@ -93,8 +109,9 @@ export const authConfig: NextAuthConfig = {
           return null
         }
 
+        console.log('[AUTH] Login successful, returning user object')
         return {
-          id: user.ID,
+          id: String(user.ID), // NextAuth expects string id
           loginId: user.Email || user.LoginID,
           role,
           repId: user.RepId,
@@ -106,7 +123,7 @@ export const authConfig: NextAuthConfig = {
   callbacks: {
     async jwt({ token, user }) {
       if (user) {
-        token.id = user.id as number
+        token.id = Number(user.id) // Convert string back to number
         token.loginId = user.loginId
         token.role = user.role
         token.repId = user.repId
