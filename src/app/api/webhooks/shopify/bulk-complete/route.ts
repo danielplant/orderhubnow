@@ -1,7 +1,12 @@
 import { NextResponse } from 'next/server'
 import crypto from 'crypto'
 import { prisma } from '@/lib/prisma'
-import { completeSyncRun, processJsonlStream, transformToSkuTable } from '@/lib/shopify/sync'
+import {
+  completeSyncRun,
+  processJsonlStream,
+  transformToSkuTable,
+  getBulkOperationUrl,
+} from '@/lib/shopify/sync'
 
 // ============================================================================
 // Webhook Signature Verification
@@ -129,19 +134,27 @@ export async function POST(request: Request) {
       })
     }
 
-    // Download and process results
-    if (!url) {
-      await completeSyncRun(opId, 'failed', 0, 'No result URL provided')
-      return NextResponse.json({
-        received: true,
-        status: 'failed',
-        error: 'No result URL',
-      })
+    // Get download URL from Shopify (webhook doesn't include it)
+    // We need to query the bulk operation to get the actual URL
+    let downloadUrl = url
+    if (!downloadUrl) {
+      console.log('No URL in webhook payload, fetching from Shopify API...')
+      const opDetails = await getBulkOperationUrl(opId)
+      if (!opDetails?.url) {
+        await completeSyncRun(opId, 'failed', 0, 'Could not retrieve result URL from Shopify')
+        return NextResponse.json({
+          received: true,
+          status: 'failed',
+          error: 'Could not retrieve result URL',
+        })
+      }
+      downloadUrl = opDetails.url
+      console.log(`Retrieved URL from Shopify API: ${downloadUrl.substring(0, 80)}...`)
     }
 
-    console.log(`Downloading and streaming bulk operation results from: ${url}`)
+    console.log(`Downloading and streaming bulk operation results...`)
 
-    const dataResponse = await fetch(url)
+    const dataResponse = await fetch(downloadUrl)
     if (!dataResponse.ok) {
       const errorMsg = `Failed to download results: HTTP ${dataResponse.status}`
       await completeSyncRun(opId, 'failed', 0, errorMsg)

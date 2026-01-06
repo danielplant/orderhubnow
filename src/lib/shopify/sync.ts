@@ -35,6 +35,81 @@ export function getGidResourceType(gid: string): string | null {
 // ============================================================================
 
 /**
+ * Query to get bulk operation status and download URL.
+ */
+const BULK_OPERATION_STATUS_QUERY = `
+  query($id: ID!) {
+    node(id: $id) {
+      ... on BulkOperation {
+        id
+        status
+        errorCode
+        objectCount
+        fileSize
+        url
+      }
+    }
+  }
+`
+
+/**
+ * Poll Shopify for bulk operation URL after webhook indicates completion.
+ * The webhook doesn't include the URL - we need to fetch it.
+ */
+export async function getBulkOperationUrl(
+  operationId: string
+): Promise<{ url: string; objectCount: number } | null> {
+  const storeDomain = process.env.SHOPIFY_STORE_DOMAIN
+  const accessToken = process.env.SHOPIFY_ACCESS_TOKEN
+  const apiVersion = process.env.SHOPIFY_API_VERSION || '2024-01'
+
+  if (!storeDomain || !accessToken) {
+    console.error('Shopify credentials not configured')
+    return null
+  }
+
+  try {
+    const response = await fetch(
+      `https://${storeDomain}/admin/api/${apiVersion}/graphql.json`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Shopify-Access-Token': accessToken,
+        },
+        body: JSON.stringify({
+          query: BULK_OPERATION_STATUS_QUERY,
+          variables: { id: operationId },
+        }),
+      }
+    )
+
+    const result = await response.json()
+    const op = result.data?.node
+
+    if (!op) {
+      console.error('Bulk operation not found:', operationId)
+      return null
+    }
+
+    if (op.status !== 'COMPLETED') {
+      console.error('Bulk operation not completed:', op.status)
+      return null
+    }
+
+    if (!op.url) {
+      console.error('Bulk operation has no URL')
+      return null
+    }
+
+    return { url: op.url, objectCount: op.objectCount || 0 }
+  } catch (err) {
+    console.error('Error fetching bulk operation URL:', err)
+    return null
+  }
+}
+
+/**
  * GraphQL mutation to start a bulk operation for product variants.
  * Includes all metafields needed for sync (from .NET SyncController.cs).
  */
