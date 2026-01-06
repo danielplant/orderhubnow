@@ -223,7 +223,7 @@ export function generateOrderConfirmationHtml(input: OrderConfirmationInput): st
       }
 
       .order-number {
-        font-size: 16pt;
+        font-size: 14pt;
         font-weight: 600;
         color: #171717;
       }
@@ -322,20 +322,22 @@ export function generateOrderConfirmationHtml(input: OrderConfirmationInput): st
       .items-table th {
         background: #f1f5f9;
         font-weight: 600;
-        font-size: 9pt;
+        font-size: 8pt;
         text-align: left;
-        padding: 10px 12px;
+        padding: 8px 10px;
         border-bottom: 2px solid #e2e8f0;
       }
 
       .items-table td {
-        padding: 10px 12px;
-        font-size: 9pt;
+        padding: 6px 10px;
+        font-size: 8pt;
         border-bottom: 1px solid #e2e8f0;
       }
 
       .items-table .item-sku {
         font-weight: 500;
+        font-size: 8pt;
+        white-space: nowrap;
       }
 
       .items-table .text-center { text-align: center; }
@@ -355,12 +357,12 @@ export function generateOrderConfirmationHtml(input: OrderConfirmationInput): st
       }
 
       .total-label {
-        font-size: 12pt;
+        font-size: 10pt;
         font-weight: 500;
       }
 
       .total-value {
-        font-size: 18pt;
+        font-size: 14pt;
         font-weight: 700;
         color: #171717;
       }

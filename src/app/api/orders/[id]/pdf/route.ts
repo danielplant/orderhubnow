@@ -19,9 +19,12 @@ export async function GET(
   context: RouteContext
 ): Promise<NextResponse> {
   const { id } = await context.params
+  const debugMode = request.nextUrl.searchParams.get('debug')
 
   // Validate order ID
   const orderId = parseInt(id, 10)
+  console.log('PDF Request for order:', orderId)
+
   if (isNaN(orderId) || orderId <= 0) {
     return NextResponse.json(
       { error: 'Invalid order ID' },
@@ -35,6 +38,8 @@ export async function GET(
       where: { ID: BigInt(orderId) },
     })
 
+    console.log('Order found:', order ? 'yes' : 'no')
+
     if (!order) {
       return NextResponse.json(
         { error: 'Order not found' },
@@ -46,6 +51,8 @@ export async function GET(
     const orderItems = await prisma.customerOrdersItems.findMany({
       where: { CustomerOrderID: BigInt(orderId) },
     })
+
+    console.log('Order items count:', orderItems.length)
 
     // Determine currency from Country field (legacy behavior)
     const currency = order.Country?.toUpperCase().includes('CAD') ? 'CAD' : 'USD'
@@ -83,6 +90,15 @@ export async function GET(
       order: orderData,
       items,
     })
+
+    console.log('HTML length:', html.length)
+
+    // DEBUG MODE: Return raw HTML instead of PDF
+    if (debugMode === 'html') {
+      return new NextResponse(html, {
+        headers: { 'Content-Type': 'text/html; charset=utf-8' },
+      })
+    }
 
     // Generate PDF (portrait orientation for confirmation)
     const pdfBuffer = await generatePdf(html, {

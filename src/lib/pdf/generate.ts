@@ -56,19 +56,32 @@ export async function generatePdf(
 ): Promise<Uint8Array> {
   const mergedOptions = { ...DEFAULT_OPTIONS, ...options }
 
+  // Get Chromium executable path
+  const execPath = await chromium.executablePath()
+  console.log('Chromium executable path:', execPath)
+
+  if (!execPath) {
+    throw new Error('Chromium executable not found')
+  }
+
   const browser = await puppeteer.launch({
     args: chromium.args,
-    executablePath: await chromium.executablePath(),
+    executablePath: execPath,
     headless: true,
   })
 
+  console.log('Browser launched successfully')
+
   try {
     const page = await browser.newPage()
+    console.log('New page created')
 
     // Set content with wait for network idle
     await page.setContent(html, {
       waitUntil: 'networkidle0',
     })
+
+    console.log('Content set, generating PDF...')
 
     // Generate PDF
     const pdf = await page.pdf({
@@ -81,9 +94,12 @@ export async function generatePdf(
       footerTemplate: mergedOptions.footerTemplate,
     })
 
+    console.log('PDF generated, size:', pdf.length, 'bytes')
+
     return pdf
   } finally {
     await browser.close()
+    console.log('Browser closed')
   }
 }
 
