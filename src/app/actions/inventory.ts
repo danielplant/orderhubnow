@@ -566,27 +566,12 @@ export async function getProductsByCategory(category: string): Promise<Product[]
 // PreOrder Shopify Types
 // ============================================================================
 
-interface ShopifyInventoryQuantity {
-  name: string;
-  quantity: number;
-}
-
-interface ShopifyInventoryLevel {
-  node: {
-    quantities: ShopifyInventoryQuantity[];
-  };
-}
-
+// Simplified variant node (no inventoryLevels to stay under Shopify cost limit)
 interface ShopifyPreOrderVariantNode {
   sku: string;
   title: string;
   price: string;
   inventoryQuantity: number;
-  inventoryItem: {
-    inventoryLevels: {
-      edges: ShopifyInventoryLevel[];
-    };
-  };
 }
 
 interface ShopifyPreOrderProductNode {
@@ -606,19 +591,17 @@ interface ShopifyPreOrderProductNode {
   };
 }
 
-// Helper to fetch PreOrder products with inventory levels
-async function fetchPreOrderProductPage(
-  cursor: string | null,
+// Helper to fetch PreOrder products (single batch, no inventoryLevels to stay under cost limit)
+// NOTE: This is a simplified version for validation. Future phase will use SQL sync.
+async function fetchPreOrderProducts(
   endpoint: string,
   token: string,
   retries = 3
-): Promise<{
-  edges: { node: ShopifyPreOrderProductNode }[];
-  pageInfo: { hasNextPage: boolean; endCursor: string | null };
-}> {
+): Promise<{ node: ShopifyPreOrderProductNode }[]> {
+  // Fetch 100 products - stays well under Shopify's query cost limit
   const query = `
     {
-      products(first: 250${cursor ? `, after: "${cursor}"` : ""}) {
+      products(first: 100) {
         edges {
           node {
             id
@@ -650,33 +633,17 @@ async function fetchPreOrderProductPage(
             metafieldMsrpUsd: metafield(namespace: "custom", key: "msrp_us") {
               value
             }
-            variants(first: 100) {
+            variants(first: 50) {
               edges {
                 node {
                   sku
                   title
                   price
                   inventoryQuantity
-                  inventoryItem {
-                    inventoryLevels(first: 10) {
-                      edges {
-                        node {
-                          quantities(names: ["incoming", "committed"]) {
-                            name
-                            quantity
-                          }
-                        }
-                      }
-                    }
-                  }
                 }
               }
             }
           }
-        }
-        pageInfo {
-          hasNextPage
-          endCursor
         }
       }
     }
@@ -699,10 +666,10 @@ async function fetchPreOrderProductPage(
     if (retries > 0) {
       console.log(`Shopify rate limited. Waiting 2s before retry... (${retries} retries left)`);
       await delay(2000);
-      return fetchPreOrderProductPage(cursor, endpoint, token, retries - 1);
+      return fetchPreOrderProducts(endpoint, token, retries - 1);
     }
     console.error("Shopify rate limit exceeded after retries");
-    return { edges: [], pageInfo: { hasNextPage: false, endCursor: null } };
+    return [];
   }
 
   if (!response.ok) {
@@ -711,30 +678,10 @@ async function fetchPreOrderProductPage(
 
   if (!json.data?.products) {
     console.error("Invalid Shopify response:", JSON.stringify(json).slice(0, 500));
-    return { edges: [], pageInfo: { hasNextPage: false, endCursor: null } };
+    return [];
   }
 
-  return json.data.products;
-}
-
-// Helper to calculate onRoute from inventory levels
-// onRoute = incoming - committed (clamped to 0)
-function calculateOnRoute(variant: ShopifyPreOrderVariantNode): number {
-  let incoming = 0;
-  let committed = 0;
-
-  const levels = variant.inventoryItem?.inventoryLevels?.edges || [];
-  for (const level of levels) {
-    for (const qty of level.node.quantities) {
-      if (qty.name === "incoming") {
-        incoming += qty.quantity;
-      } else if (qty.name === "committed") {
-        committed += qty.quantity;
-      }
-    }
-  }
-
-  return Math.max(0, incoming - committed);
+  return json.data.products.edges;
 }
 
 /**
@@ -743,8 +690,10 @@ function calculateOnRoute(variant: ShopifyPreOrderVariantNode): number {
  * This mirrors getProductsByCategory() but:
  * - Filters for PreOrder products (where metafield order_entry_collection contains "PreOrder")
  * - Includes products with available <= 0 (PreOrder shows items not yet in stock)
- * - Calculates onRoute from Shopify inventory levels (incoming - committed)
  * - Uses label_title metafield for product titles
+ * - SKUs are clean (no DU3/DU9 prefix)
+ *
+ * NOTE: Single batch fetch for validation. Future phase will use SQL sync for full data.
  */
 export async function getPreOrderProductsByCategory(category: string): Promise<Product[]> {
   const { SHOPIFY_ACCESS_TOKEN, SHOPIFY_STORE_DOMAIN, SHOPIFY_API_VERSION } = process.env;
@@ -755,43 +704,36 @@ export async function getPreOrderProductsByCategory(category: string): Promise<P
 
   const endpoint = `https://${SHOPIFY_STORE_DOMAIN}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`;
 
-  // Step 1: Collect all variants with their parent product metadata
+  // Fetch single batch of products from Shopify
+  const edges = await fetchPreOrderProducts(endpoint, SHOPIFY_ACCESS_TOKEN);
+
+  // Collect variants matching category
   type VariantWithParent = {
     variant: ShopifyPreOrderVariantNode;
     parent: ShopifyPreOrderProductNode;
   };
   const allVariants: VariantWithParent[] = [];
 
-  let hasNextPage = true;
-  let cursor: string | null = null;
+  edges.forEach(({ node }) => {
+    const rawCollection = node.metafieldCollection?.value;
+    if (!rawCollection) return;
 
-  while (hasNextPage) {
-    const { edges, pageInfo } = await fetchPreOrderProductPage(cursor, endpoint, SHOPIFY_ACCESS_TOKEN);
+    // Must be a PreOrder product
+    const isPreOrder = rawCollection.includes("PreOrder");
+    if (!isPreOrder) return;
 
-    edges.forEach(({ node }) => {
-      const rawCollection = node.metafieldCollection?.value;
-      if (!rawCollection) return;
+    // Parse categories and check if matches requested category
+    const categories = parseCategories(rawCollection);
+    if (!categories.includes(category)) return;
 
-      // Must be a PreOrder product
-      const isPreOrder = rawCollection.includes("PreOrder");
-      if (!isPreOrder) return;
-
-      // Parse categories and check if matches requested category
-      const categories = parseCategories(rawCollection);
-      if (!categories.includes(category)) return;
-
-      // Add each variant with its parent product reference
-      // Unlike ATS, we include ALL variants (even with 0 or negative stock)
-      node.variants.edges.forEach(({ node: v }) => {
-        if (v.sku) {
-          allVariants.push({ variant: v, parent: node });
-        }
-      });
+    // Add each variant with its parent product reference
+    // Unlike ATS, we include ALL variants (even with 0 or negative stock)
+    node.variants.edges.forEach(({ node: v }) => {
+      if (v.sku) {
+        allVariants.push({ variant: v, parent: node });
+      }
     });
-
-    hasNextPage = pageInfo.hasNextPage;
-    cursor = pageInfo.endCursor;
-  }
+  });
 
   // Step 2: Group variants by base SKU
   const groupedByBaseSku = new Map<string, VariantWithParent[]>();
@@ -838,14 +780,12 @@ export async function getPreOrderProductsByCategory(category: string): Promise<P
       const skuParts = variant.sku.split("-");
       const sizeFromSku = skuParts.length > 1 ? skuParts[skuParts.length - 1] : "OS";
 
-      // Calculate onRoute from inventory levels
-      const onRoute = calculateOnRoute(variant);
-
+      // onRoute set to 0 for now - future SQL sync will provide this data
       variants.push({
         size: sizeFromSku,
         sku: variant.sku,
         available: Math.max(0, variant.inventoryQuantity),
-        onRoute,
+        onRoute: 0,
         priceCad,
         priceUsd,
       });
