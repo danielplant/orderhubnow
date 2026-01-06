@@ -13,7 +13,7 @@ declare module 'next-auth' {
   }
 
   interface User extends DefaultUser {
-    id: number
+    id: string // NextAuth requires string id from authorize()
     loginId: string
     role: 'admin' | 'rep'
     repId: number | null

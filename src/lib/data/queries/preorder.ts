@@ -59,15 +59,17 @@ export async function getPreOrderCategories(): Promise<PreOrderCategory[]> {
     },
   })
 
-  return categories.map((cat) => ({
-    id: cat.ID,
-    name: cat.Name,
-    productCount: cat._count.Sku,
-    sortOrder: cat.SortOrder ?? 10000,
-    onRouteStartDate: cat.OnRouteAvailableDate?.toISOString() ?? null,
-    onRouteEndDate: cat.OnRouteAvailableDateEnd?.toISOString() ?? null,
-    imageUrl: `/SkuImages/${cat.ID}.jpg`,
-  }))
+  return categories
+    .map((cat) => ({
+      id: cat.ID,
+      name: cat.Name,
+      productCount: cat._count.Sku,
+      sortOrder: cat.SortOrder ?? 10000,
+      onRouteStartDate: cat.OnRouteAvailableDate?.toISOString() ?? null,
+      onRouteEndDate: cat.OnRouteAvailableDateEnd?.toISOString() ?? null,
+      imageUrl: `/SkuImages/${cat.ID}.jpg`,
+    }))
+    .filter((cat) => cat.productCount > 0)
 }
 
 /**

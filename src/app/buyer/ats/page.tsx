@@ -20,7 +20,8 @@ export default async function ATSPage({ searchParams }: Props) {
   const repQuery = buildRepQueryStringFromObject(params);
   
   // Filter to ATS categories (not pre-order) and with products
-  const atsCategories = categories.filter(cat => !cat.isPreOrder);
+  // Matches .NET behavior: only show categories with stock
+  const atsCategories = categories.filter(cat => !cat.isPreOrder && cat.productCount > 0);
 
   return (
     <div className="min-h-screen bg-background text-foreground">
