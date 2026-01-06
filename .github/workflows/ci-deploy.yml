@@ -1,0 +1,97 @@
+name: CI & Deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build & Validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - run: npx prisma generate
+
+      - name: Type check
+        run: npm run type-check
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      - name: Upload build artifact
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        uses: actions/upload-artifact@v4
+        with:
+          name: nextjs-build
+          retention-days: 1
+          path: |
+            .next
+            public
+            package.json
+            package-lock.json
+            prisma
+            next.config.ts
+
+  deploy:
+    name: Deploy to EC2
+    needs: build
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: nextjs-build
+          path: ./deploy
+
+      - name: Deploy to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: "deploy/*"
+          target: "/var/www/orderhubnow-new"
+          strip_components: 1
+
+      - name: Activate deployment
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            cd /var/www/orderhubnow-new
+            npm ci --omit=dev
+            npx prisma generate
+            
+            # Atomic swap
+            rm -rf /var/www/orderhubnow-old
+            mv /var/www/orderhubnow /var/www/orderhubnow-old 2>/dev/null || true
+            mv /var/www/orderhubnow-new /var/www/orderhubnow
+            
+            cd /var/www/orderhubnow
+            pm2 restart orderhubnow || pm2 start npm --name "orderhubnow" -- start
+            
+            # Smoke tests
+            sleep 5
+            curl -sf http://localhost:3000/buyer/ats > /dev/null || exit 1
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/admin)
+            [ "$STATUS" = "302" ] || [ "$STATUS" = "307" ] || exit 1
+            echo "Deploy successful!"

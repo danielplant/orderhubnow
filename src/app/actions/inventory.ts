@@ -591,98 +591,119 @@ interface ShopifyPreOrderProductNode {
   };
 }
 
-// Helper to fetch PreOrder products (single batch, no inventoryLevels to stay under cost limit)
-// NOTE: This is a simplified version for validation. Future phase will use SQL sync.
+// Helper to fetch PreOrder products with pagination
+// Fetches all products and filters for those with PreOrder in metafield
 async function fetchPreOrderProducts(
   endpoint: string,
-  token: string,
-  retries = 3
+  token: string
 ): Promise<{ node: ShopifyPreOrderProductNode }[]> {
-  // Fetch products - try general search for PreOrder
-  // Note: If products don't have PreOrder in searchable fields, this returns empty
-  const query = `
-    {
-      products(first: 250) {
-        edges {
-          node {
-            id
-            title
-            featuredImage {
-              url
-            }
-            metafieldCollection: metafield(namespace: "custom", key: "order_entry_collection") {
-              value
-            }
-            metafieldLabel: metafield(namespace: "custom", key: "label_title") {
-              value
-            }
-            metafieldFabric: metafield(namespace: "custom", key: "fabric") {
-              value
-            }
-            metafieldColor: metafield(namespace: "custom", key: "color") {
-              value
-            }
-            metafieldPriceCad: metafield(namespace: "custom", key: "cad_ws_price") {
-              value
-            }
-            metafieldPriceUsd: metafield(namespace: "custom", key: "us_ws_price") {
-              value
-            }
-            metafieldMsrpCad: metafield(namespace: "custom", key: "msrp_cad") {
-              value
-            }
-            metafieldMsrpUsd: metafield(namespace: "custom", key: "msrp_us") {
-              value
-            }
-            variants(first: 50) {
-              edges {
-                node {
-                  sku
-                  title
-                  price
-                  inventoryQuantity
+  const allEdges: { node: ShopifyPreOrderProductNode }[] = [];
+  let hasNextPage = true;
+  let cursor: string | null = null;
+  let pageCount = 0;
+  const maxPages = 20; // Safety limit: 20 pages * 250 = 5000 products max
+
+  while (hasNextPage && pageCount < maxPages) {
+    pageCount++;
+    const query: string = `
+      {
+        products(first: 250${cursor ? `, after: "${cursor}"` : ""}) {
+          edges {
+            node {
+              id
+              title
+              featuredImage {
+                url
+              }
+              metafieldCollection: metafield(namespace: "custom", key: "order_entry_collection") {
+                value
+              }
+              metafieldLabel: metafield(namespace: "custom", key: "label_title") {
+                value
+              }
+              metafieldFabric: metafield(namespace: "custom", key: "fabric") {
+                value
+              }
+              metafieldColor: metafield(namespace: "custom", key: "color") {
+                value
+              }
+              metafieldPriceCad: metafield(namespace: "custom", key: "cad_ws_price") {
+                value
+              }
+              metafieldPriceUsd: metafield(namespace: "custom", key: "us_ws_price") {
+                value
+              }
+              metafieldMsrpCad: metafield(namespace: "custom", key: "msrp_cad") {
+                value
+              }
+              metafieldMsrpUsd: metafield(namespace: "custom", key: "msrp_us") {
+                value
+              }
+              variants(first: 50) {
+                edges {
+                  node {
+                    sku
+                    title
+                    price
+                    inventoryQuantity
+                  }
                 }
               }
             }
           }
+          pageInfo {
+            hasNextPage
+            endCursor
+          }
         }
       }
-    }
-  `;
+    `;
 
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Shopify-Access-Token": token,
-    },
-    body: JSON.stringify({ query }),
-    next: { revalidate: 300 },
-  });
+    const response: Response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Shopify-Access-Token": token,
+      },
+      body: JSON.stringify({ query }),
+      next: { revalidate: 300 },
+    });
 
-  const json = await response.json();
+    const json: { data?: { products?: { edges: Array<{ node: ShopifyPreOrderProductNode }>; pageInfo: { hasNextPage: boolean; endCursor: string | null } } }; errors?: Array<{ extensions?: { code?: string } }> } = await response.json();
 
-  // Handle rate limiting with retry
-  if (json.errors?.some((e: { extensions?: { code?: string } }) => e.extensions?.code === "THROTTLED")) {
-    if (retries > 0) {
-      console.log(`Shopify rate limited. Waiting 2s before retry... (${retries} retries left)`);
+    // Handle rate limiting with retry
+    if (json.errors?.some((e: { extensions?: { code?: string } }) => e.extensions?.code === "THROTTLED")) {
+      console.log(`Shopify rate limited on page ${pageCount}. Waiting 2s...`);
       await delay(2000);
-      return fetchPreOrderProducts(endpoint, token, retries - 1);
+      pageCount--; // Retry same page
+      continue;
     }
-    console.error("Shopify rate limit exceeded after retries");
-    return [];
+
+    if (!response.ok) {
+      throw new Error(`Shopify API Error: ${response.statusText}`);
+    }
+
+    if (!json.data?.products) {
+      console.error("Invalid Shopify response:", JSON.stringify(json).slice(0, 500));
+      break;
+    }
+
+    const { edges, pageInfo } = json.data.products;
+    allEdges.push(...edges);
+
+    // Check if we found any PreOrder products in this batch
+    const preOrderInBatch = edges.filter(
+      (e: { node: ShopifyPreOrderProductNode }) => e.node.metafieldCollection?.value?.includes("PreOrder")
+    ).length;
+
+    console.log(`[PreOrder] Page ${pageCount}: ${edges.length} products, ${preOrderInBatch} PreOrder`);
+
+    hasNextPage = pageInfo.hasNextPage;
+    cursor = pageInfo.endCursor;
   }
 
-  if (!response.ok) {
-    throw new Error(`Shopify API Error: ${response.statusText}`);
-  }
-
-  if (!json.data?.products) {
-    console.error("Invalid Shopify response:", JSON.stringify(json).slice(0, 500));
-    return [];
-  }
-
-  return json.data.products.edges;
+  console.log(`[PreOrder] Total fetched: ${allEdges.length} products across ${pageCount} pages`);
+  return allEdges;
 }
 
 // Helper to extract core category keyword from SQL category name
