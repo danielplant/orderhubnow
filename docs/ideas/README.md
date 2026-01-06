@@ -17,6 +17,15 @@ Backlog of potential improvements to revisit once core functionality is stable.
 
 ## Backlog
 
+### Needs Investigation
+| Item | Status | Effort | Priority | File |
+|------|--------|--------|----------|------|
+| Old order SKU compatibility | 🔵 Investigate | 1-2 hrs | **High** | [old-order-sku-compatibility.md](./old-order-sku-compatibility.md) |
+| PDF download showing blank | 🔵 Investigate | 1-3 hrs | Medium | [pdf-blank-issue.md](./pdf-blank-issue.md) |
+| Wrong product titles/images | 🔵 Investigate | 15 min - 2 hrs | Medium | [wrong-titles-images.md](./wrong-titles-images.md) |
+| PreOrder showing only 3 sizes | 🔵 Investigate | 30-60 min | Low | [preorder-missing-sizes.md](./preorder-missing-sizes.md) |
+
+### Enhancements
 | Item | Status | Effort | Priority | File |
 |------|--------|--------|----------|------|
 | Automated deploy pipeline | 🔵 Idea | 2-4 hrs | High | [build-deploy-pipeline.md](./build-deploy-pipeline.md) |

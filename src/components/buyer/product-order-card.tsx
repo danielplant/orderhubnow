@@ -135,8 +135,11 @@ export function ProductOrderCard({ product, isPreOrder = false }: ProductOrderCa
   const price = getPrice(product, currency);
   const msrp = currency === "CAD" ? product.msrpCad : product.msrpUsd;
 
-  // Filter: Show variants where available > 0 OR onRoute > 0 (.NET parity)
-  const orderableVariants = product.variants.filter(isVariantOrderable);
+  // Filter: For ATS, show variants where available > 0 OR onRoute > 0 (.NET parity)
+  // For PreOrder, show ALL variants - buyers order for future delivery regardless of current inventory
+  const orderableVariants = isPreOrder
+    ? product.variants
+    : product.variants.filter(isVariantOrderable);
 
   const [draftBySku, setDraftBySku] = useState<Record<string, string>>({});
   const [qtyError, setQtyError] = useState<string | null>(null);

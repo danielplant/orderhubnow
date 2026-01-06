@@ -13,7 +13,7 @@
 
 import { prisma } from '@/lib/prisma'
 import type { Product, ProductVariant } from '@/lib/types/inventory'
-import { sortBySize } from '@/lib/utils/size-sort'
+import { sortBySize, extractSize } from '@/lib/utils/size-sort'
 
 // ============================================================================
 // Types
@@ -182,9 +182,9 @@ export async function getPreOrderProductsWithVariants(
       return isNaN(num) ? 0 : num
     }
 
-    // Build variants
+    // Build variants - extract clean size from variant title (removes color suffix)
     const variants: ProductVariant[] = variantSkus.map((sku) => ({
-      size: sku.Size || '',
+      size: extractSize(sku.Size || ''),
       sku: sku.SkuID,
       available: sku.Quantity ?? 0,
       onRoute: sku.OnRoute ?? 0,
