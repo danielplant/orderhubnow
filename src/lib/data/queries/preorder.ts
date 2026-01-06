@@ -1,23 +1,20 @@
 /**
  * Pre-Order Queries
- * 
+ *
  * .NET Reference: PreOrder.aspx.cs
- * 
- * Pre-order categories: IsPreOrder=true
- * Pre-order SKU filter: ShowInPreOrder=true OR Quantity < 1
+ *
+ * Pre-order categories: IsPreOrder=true (from SQL)
+ * Pre-order products: Fetched from Shopify API (clean SKUs, no DU3/DU9 prefix)
  * Excludes: "Defective" categories
- * 
+ *
  * NOTE: Returns Product type (same as ATS) for unified ProductOrderCard usage.
- * Field mapping from .NET:
- * - baseSku → skuBase
- * - description → title
- * - fabricContent → fabric
+ * Categories remain SQL-based, but products are fetched from Shopify directly.
  */
 
 import { prisma } from '@/lib/prisma'
-import { parseSkuId, parsePrice } from '@/lib/utils'
-import { isPrepackCategory, getPPSizeDisplayBatch } from '@/lib/utils/ppsize'
-import type { Product, ProductVariant } from '@/lib/types/inventory'
+import { getPreOrderProductsByCategory } from '@/app/actions/inventory'
+import type { Product } from '@/lib/types/inventory'
+import { sortBySize } from '@/lib/utils/size-sort'
 
 // ============================================================================
 // Types
@@ -106,142 +103,39 @@ export async function getPreOrderCategoryById(
 
 /**
  * Get pre-order products with variants for a category.
- * 
+ *
+ * Fetches products directly from Shopify API (clean SKUs without DU3/DU9 prefix).
  * Returns Product[] type (same as ATS) for unified ProductOrderCard usage.
- * Field mapping: baseSku → skuBase, description → title, fabricContent → fabric
- * 
- * SKU filter: ShowInPreOrder=true OR Quantity < 1
- * Uses PPSize for categories 399, 401.
+ *
+ * This function:
+ * 1. Looks up the category name from SQL by ID
+ * 2. Calls the Shopify API to get products for that category
  */
 export async function getPreOrderProductsWithVariants(
   categoryId: number
 ): Promise<Product[]> {
-  // Fetch SKUs matching pre-order criteria
-  const skus = await prisma.sku.findMany({
-    where: {
-      CategoryID: categoryId,
-      OR: [
-        { ShowInPreOrder: true },
-        { Quantity: { lt: 1 } },
-      ],
-    },
-    orderBy: [{ DisplayPriority: 'asc' }, { SkuID: 'asc' }],
-    select: {
-      SkuID: true,
-      Description: true,
-      OrderEntryDescription: true,
-      Quantity: true,
-      OnRoute: true,
-      PriceCAD: true,
-      PriceUSD: true,
-      MSRPCAD: true,
-      MSRPUSD: true,
-      ShopifyProductVariantId: true,
-      ShopifyImageURL: true,
-      DisplayPriority: true,
-      FabricContent: true,
-      SkuColor: true,
-    },
+  // Get category name from SQL database
+  const category = await prisma.skuCategories.findUnique({
+    where: { ID: categoryId },
+    select: { Name: true, IsPreOrder: true },
   })
 
-  if (skus.length === 0) return []
-
-  // For prepack categories (399, 401), get PPSize display names
-  const usePrepackSizing = isPrepackCategory(categoryId)
-  let ppSizeMap: Map<string, string> | null = null
-  
-  if (usePrepackSizing) {
-    ppSizeMap = await getPPSizeDisplayBatch(
-      skus.map((s) => s.SkuID),
-      categoryId
-    )
+  if (!category || !category.IsPreOrder) {
+    console.log(`Category ${categoryId} not found or not a PreOrder category`)
+    return []
   }
 
-  // Group by base SKU
-  const productMap = new Map<
-    string,
-    {
-      title: string // mapped from description
-      imageUrl: string | null
-      displayPriority: number
-      fabric: string // mapped from fabricContent
-      color: string
-      priceCad: number
-      priceUsd: number
-      msrpCad: number
-      msrpUsd: number
-      variants: ProductVariant[]
-    }
-  >()
+  // Fetch products from Shopify API using category name
+  try {
+    const products = await getPreOrderProductsByCategory(category.Name)
 
-  for (const sku of skus) {
-    const { baseSku, parsedSize } = parseSkuId(sku.SkuID)
-    if (!baseSku) continue
-
-    // Determine size display
-    let size: string
-    if (usePrepackSizing && ppSizeMap) {
-      size = ppSizeMap.get(sku.SkuID) ?? parsedSize
-    } else {
-      size = parsedSize || 'O/S'
-    }
-
-    const variant: ProductVariant = {
-      sku: sku.SkuID,
-      size,
-      available: sku.Quantity ?? 0,
-      onRoute: sku.OnRoute ?? 0,
-      priceUsd: parsePrice(sku.PriceUSD),
-      priceCad: parsePrice(sku.PriceCAD),
-    }
-
-    if (!productMap.has(baseSku)) {
-      productMap.set(baseSku, {
-        title: sku.OrderEntryDescription ?? sku.Description ?? baseSku,
-        imageUrl: sku.ShopifyImageURL ?? null,
-        displayPriority: sku.DisplayPriority ?? 10000,
-        fabric: sku.FabricContent ?? '',
-        color: sku.SkuColor ?? '',
-        priceCad: parsePrice(sku.PriceCAD),
-        priceUsd: parsePrice(sku.PriceUSD),
-        msrpCad: sku.MSRPCAD ? parsePrice(sku.MSRPCAD) : 0,
-        msrpUsd: sku.MSRPUSD ? parsePrice(sku.MSRPUSD) : 0,
-        variants: [variant],
-      })
-    } else {
-      productMap.get(baseSku)!.variants.push(variant)
-    }
-  }
-
-  // Convert to Product[] array and sort
-  const products: Product[] = Array.from(productMap.entries())
-    .map(([baseSku, data]) => ({
-      id: baseSku,
-      skuBase: baseSku, // mapped from baseSku
-      title: data.title, // mapped from description
-      fabric: data.fabric, // mapped from fabricContent
-      color: data.color,
-      imageUrl: data.imageUrl ?? '',
-      priceCad: data.priceCad,
-      priceUsd: data.priceUsd,
-      msrpCad: data.msrpCad,
-      msrpUsd: data.msrpUsd,
-      popularityRank: data.displayPriority, // mapped from displayPriority
-      variants: data.variants.sort((a, b) => {
-        // Sort sizes: numeric first, then alpha
-        const aNum = parseInt(a.size, 10)
-        const bNum = parseInt(b.size, 10)
-        if (!isNaN(aNum) && !isNaN(bNum)) return aNum - bNum
-        if (!isNaN(aNum)) return -1
-        if (!isNaN(bNum)) return 1
-        return a.size.localeCompare(b.size)
-      }),
+    // Sort variants by size using Limeapple's specific size sequence
+    return products.map((product) => ({
+      ...product,
+      variants: sortBySize(product.variants),
     }))
-    .sort(
-      (a, b) =>
-        (a.popularityRank ?? 10000) - (b.popularityRank ?? 10000) ||
-        a.skuBase.localeCompare(b.skuBase)
-    )
-
-  return products
+  } catch (error) {
+    console.error(`Error fetching PreOrder products for category ${category.Name}:`, error)
+    return []
+  }
 }

@@ -256,7 +256,7 @@ export function ProductOrderCard({ product, isPreOrder = false }: ProductOrderCa
                   key={`avail-${variant.sku}`}
                   className="px-2 py-2 text-xs text-center tabular-nums border-b border-border"
                 >
-                  {variant.available}
+                  {isPreOrder ? Math.max(0, variant.available) : variant.available}
                 </div>
               ))}
 

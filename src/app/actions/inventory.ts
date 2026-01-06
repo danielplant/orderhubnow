@@ -9,6 +9,7 @@ export type {
 } from "@/lib/types";
 
 import type { Product, ProductVariant, DashboardMetrics } from "@/lib/types";
+import { sortBySize } from "@/lib/utils/size-sort";
 
 // Internal Shopify API types (not exported)
 interface ShopifyProductEdge {
@@ -554,5 +555,324 @@ export async function getProductsByCategory(category: string): Promise<Product[]
   console.log(`Found ${products.length} products (grouped by base SKU)`);
   console.log("-----------------------------------\n");
 
-  return products;
+  // Sort variants by size using Limeapple's specific size sequence
+  return products.map((product) => ({
+    ...product,
+    variants: sortBySize(product.variants),
+  }));
+}
+
+// ============================================================================
+// PreOrder Shopify Types
+// ============================================================================
+
+interface ShopifyInventoryQuantity {
+  name: string;
+  quantity: number;
+}
+
+interface ShopifyInventoryLevel {
+  node: {
+    quantities: ShopifyInventoryQuantity[];
+  };
+}
+
+interface ShopifyPreOrderVariantNode {
+  sku: string;
+  title: string;
+  price: string;
+  inventoryQuantity: number;
+  inventoryItem: {
+    inventoryLevels: {
+      edges: ShopifyInventoryLevel[];
+    };
+  };
+}
+
+interface ShopifyPreOrderProductNode {
+  id: string;
+  title: string;
+  featuredImage: { url: string } | null;
+  metafieldCollection: { value: string } | null;
+  metafieldLabel: { value: string } | null;
+  metafieldFabric: { value: string } | null;
+  metafieldColor: { value: string } | null;
+  metafieldPriceCad: { value: string } | null;
+  metafieldPriceUsd: { value: string } | null;
+  metafieldMsrpCad: { value: string } | null;
+  metafieldMsrpUsd: { value: string } | null;
+  variants: {
+    edges: { node: ShopifyPreOrderVariantNode }[];
+  };
+}
+
+// Helper to fetch PreOrder products with inventory levels
+async function fetchPreOrderProductPage(
+  cursor: string | null,
+  endpoint: string,
+  token: string,
+  retries = 3
+): Promise<{
+  edges: { node: ShopifyPreOrderProductNode }[];
+  pageInfo: { hasNextPage: boolean; endCursor: string | null };
+}> {
+  const query = `
+    {
+      products(first: 250${cursor ? `, after: "${cursor}"` : ""}) {
+        edges {
+          node {
+            id
+            title
+            featuredImage {
+              url
+            }
+            metafieldCollection: metafield(namespace: "custom", key: "order_entry_collection") {
+              value
+            }
+            metafieldLabel: metafield(namespace: "custom", key: "label_title") {
+              value
+            }
+            metafieldFabric: metafield(namespace: "custom", key: "fabric") {
+              value
+            }
+            metafieldColor: metafield(namespace: "custom", key: "color") {
+              value
+            }
+            metafieldPriceCad: metafield(namespace: "custom", key: "cad_ws_price") {
+              value
+            }
+            metafieldPriceUsd: metafield(namespace: "custom", key: "us_ws_price") {
+              value
+            }
+            metafieldMsrpCad: metafield(namespace: "custom", key: "msrp_cad") {
+              value
+            }
+            metafieldMsrpUsd: metafield(namespace: "custom", key: "msrp_us") {
+              value
+            }
+            variants(first: 100) {
+              edges {
+                node {
+                  sku
+                  title
+                  price
+                  inventoryQuantity
+                  inventoryItem {
+                    inventoryLevels(first: 10) {
+                      edges {
+                        node {
+                          quantities(names: ["incoming", "committed"]) {
+                            name
+                            quantity
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+      }
+    }
+  `;
+
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Shopify-Access-Token": token,
+    },
+    body: JSON.stringify({ query }),
+    next: { revalidate: 300 },
+  });
+
+  const json = await response.json();
+
+  // Handle rate limiting with retry
+  if (json.errors?.some((e: { extensions?: { code?: string } }) => e.extensions?.code === "THROTTLED")) {
+    if (retries > 0) {
+      console.log(`Shopify rate limited. Waiting 2s before retry... (${retries} retries left)`);
+      await delay(2000);
+      return fetchPreOrderProductPage(cursor, endpoint, token, retries - 1);
+    }
+    console.error("Shopify rate limit exceeded after retries");
+    return { edges: [], pageInfo: { hasNextPage: false, endCursor: null } };
+  }
+
+  if (!response.ok) {
+    throw new Error(`Shopify API Error: ${response.statusText}`);
+  }
+
+  if (!json.data?.products) {
+    console.error("Invalid Shopify response:", JSON.stringify(json).slice(0, 500));
+    return { edges: [], pageInfo: { hasNextPage: false, endCursor: null } };
+  }
+
+  return json.data.products;
+}
+
+// Helper to calculate onRoute from inventory levels
+// onRoute = incoming - committed (clamped to 0)
+function calculateOnRoute(variant: ShopifyPreOrderVariantNode): number {
+  let incoming = 0;
+  let committed = 0;
+
+  const levels = variant.inventoryItem?.inventoryLevels?.edges || [];
+  for (const level of levels) {
+    for (const qty of level.node.quantities) {
+      if (qty.name === "incoming") {
+        incoming += qty.quantity;
+      } else if (qty.name === "committed") {
+        committed += qty.quantity;
+      }
+    }
+  }
+
+  return Math.max(0, incoming - committed);
+}
+
+/**
+ * Get PreOrder products by category from Shopify API.
+ *
+ * This mirrors getProductsByCategory() but:
+ * - Filters for PreOrder products (where metafield order_entry_collection contains "PreOrder")
+ * - Includes products with available <= 0 (PreOrder shows items not yet in stock)
+ * - Calculates onRoute from Shopify inventory levels (incoming - committed)
+ * - Uses label_title metafield for product titles
+ */
+export async function getPreOrderProductsByCategory(category: string): Promise<Product[]> {
+  const { SHOPIFY_ACCESS_TOKEN, SHOPIFY_STORE_DOMAIN, SHOPIFY_API_VERSION } = process.env;
+
+  if (!SHOPIFY_ACCESS_TOKEN || !SHOPIFY_STORE_DOMAIN) {
+    throw new Error("Missing Shopify credentials");
+  }
+
+  const endpoint = `https://${SHOPIFY_STORE_DOMAIN}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`;
+
+  // Step 1: Collect all variants with their parent product metadata
+  type VariantWithParent = {
+    variant: ShopifyPreOrderVariantNode;
+    parent: ShopifyPreOrderProductNode;
+  };
+  const allVariants: VariantWithParent[] = [];
+
+  let hasNextPage = true;
+  let cursor: string | null = null;
+
+  while (hasNextPage) {
+    const { edges, pageInfo } = await fetchPreOrderProductPage(cursor, endpoint, SHOPIFY_ACCESS_TOKEN);
+
+    edges.forEach(({ node }) => {
+      const rawCollection = node.metafieldCollection?.value;
+      if (!rawCollection) return;
+
+      // Must be a PreOrder product
+      const isPreOrder = rawCollection.includes("PreOrder");
+      if (!isPreOrder) return;
+
+      // Parse categories and check if matches requested category
+      const categories = parseCategories(rawCollection);
+      if (!categories.includes(category)) return;
+
+      // Add each variant with its parent product reference
+      // Unlike ATS, we include ALL variants (even with 0 or negative stock)
+      node.variants.edges.forEach(({ node: v }) => {
+        if (v.sku) {
+          allVariants.push({ variant: v, parent: node });
+        }
+      });
+    });
+
+    hasNextPage = pageInfo.hasNextPage;
+    cursor = pageInfo.endCursor;
+  }
+
+  // Step 2: Group variants by base SKU
+  const groupedByBaseSku = new Map<string, VariantWithParent[]>();
+
+  allVariants.forEach((item) => {
+    const baseSku = extractBaseSku(item.variant.sku);
+    if (!groupedByBaseSku.has(baseSku)) {
+      groupedByBaseSku.set(baseSku, []);
+    }
+    groupedByBaseSku.get(baseSku)!.push(item);
+  });
+
+  // Step 3: Create one Product per base SKU group
+  const products: Product[] = [];
+
+  groupedByBaseSku.forEach((items, baseSku) => {
+    // For PreOrder, include ALL variants (not just those with stock)
+    if (items.length === 0) return;
+
+    const firstItem = items[0];
+    const parent = firstItem.parent;
+
+    // Extract color code from SKU
+    const skuParts = baseSku.split("-");
+    const colorCode = skuParts[skuParts.length - 1];
+    const colorName = parseStringArray(parent.metafieldColor?.value) || colorCode;
+
+    // Parse prices from parent metafields
+    const variantPrice = parsePrice(firstItem.variant.price);
+    const priceCad = parsePrice(parent.metafieldPriceCad?.value) || variantPrice;
+    const priceUsd = parsePrice(parent.metafieldPriceUsd?.value) || variantPrice;
+    const msrpCad = parsePrice(parent.metafieldMsrpCad?.value);
+    const msrpUsd = parsePrice(parent.metafieldMsrpUsd?.value);
+
+    // Transform variants - include all, deduplicate by SKU
+    const seenSkus = new Set<string>();
+    const variants: ProductVariant[] = [];
+
+    items.forEach(({ variant }) => {
+      if (seenSkus.has(variant.sku)) return;
+      seenSkus.add(variant.sku);
+
+      // Extract size from SKU suffix
+      const skuParts = variant.sku.split("-");
+      const sizeFromSku = skuParts.length > 1 ? skuParts[skuParts.length - 1] : "OS";
+
+      // Calculate onRoute from inventory levels
+      const onRoute = calculateOnRoute(variant);
+
+      variants.push({
+        size: sizeFromSku,
+        sku: variant.sku,
+        available: Math.max(0, variant.inventoryQuantity),
+        onRoute,
+        priceCad,
+        priceUsd,
+      });
+    });
+
+    products.push({
+      id: `${parent.id}-${baseSku}`,
+      skuBase: baseSku,
+      title: parent.metafieldLabel?.value || parent.title,
+      fabric: parent.metafieldFabric?.value || "",
+      color: colorName,
+      priceCad,
+      priceUsd,
+      msrpCad,
+      msrpUsd,
+      imageUrl: parent.featuredImage?.url || "",
+      variants,
+    });
+  });
+
+  console.log(`\n--- PREORDER CATEGORY PRODUCTS: ${category} ---`);
+  console.log(`Found ${products.length} products (grouped by base SKU)`);
+  console.log("----------------------------------------------\n");
+
+  // Sort variants by size using Limeapple's specific size sequence
+  return products.map((product) => ({
+    ...product,
+    variants: sortBySize(product.variants),
+  }));
 }
