@@ -153,7 +153,7 @@ export const BULK_OPERATION_QUERY = `
                 mfColor: metafield(namespace: "custom", key: "color") {
                   value
                 }
-                mfCADWSPrice: metafield(namespace: "custom", key: "cad_ws_price") {
+                mfCADWSPrice: metafield(namespace: "custom", key: "test_number_") {
                   value
                 }
                 mfUSDWSPrice: metafield(namespace: "custom", key: "us_ws_price") {
