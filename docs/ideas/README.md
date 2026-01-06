@@ -14,6 +14,8 @@ Backlog of potential improvements to revisit once core functionality is stable.
 |------|--------|--------|----------|------|
 | Real-time inventory sync via webhooks | 🔵 Idea | 2-4 hrs | Medium | [real-time-sync.md](./real-time-sync.md) |
 | Lightbox accessibility improvements | 🔵 Idea | 30 mins | Low | [lightbox-accessibility.md](./lightbox-accessibility.md) |
+| Color swatch fallback from SKU suffix | 🔵 Idea | 45 mins | Low | [color-from-sku-fallback.md](./color-from-sku-fallback.md) |
+| Fabric type visual indicator | 🔵 Idea | 1-2 hrs | Low | [fabric-type-indicator.md](./fabric-type-indicator.md) |
 
 ## Adding New Ideas
 
