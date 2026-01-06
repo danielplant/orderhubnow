@@ -72,7 +72,7 @@ export const authConfig: NextAuthConfig = {
           console.log('[AUTH] Admin password matched!')
           // Admin authenticated successfully - skip to role mapping
         } else {
-          // Rep/other users: Status-based blocking + bcrypt verification
+          // Non-admin (Rep) authentication
           if (user.Status === 'invited') {
             throw new Error(AUTH_ERROR_CODES.INVITED)
           }
@@ -81,19 +81,28 @@ export const authConfig: NextAuthConfig = {
             throw new Error(AUTH_ERROR_CODES.DISABLED)
           }
 
-          if (user.Status === 'legacy' || user.MustResetPassword) {
-            throw new Error(AUTH_ERROR_CODES.RESET_REQUIRED)
-          }
-
-          // Active users must have PasswordHash
-          if (!user.PasswordHash) {
-            throw new Error(AUTH_ERROR_CODES.RESET_REQUIRED)
-          }
-
-          // Verify password against hash
-          const passwordValid = await verifyPassword(password, user.PasswordHash)
-          if (!passwordValid) {
-            return null
+          if (user.Status === 'legacy') {
+            // Legacy reps use plaintext Password (matches .NET system)
+            console.log('[AUTH] Legacy rep - checking plaintext password')
+            if (!user.Password || user.Password !== password) {
+              console.log('[AUTH] Legacy rep password mismatch')
+              return null
+            }
+            console.log('[AUTH] Legacy rep password matched!')
+            // Password matched - continue to role mapping below
+          } else {
+            // Active users with PasswordHash
+            if (user.MustResetPassword) {
+              throw new Error(AUTH_ERROR_CODES.RESET_REQUIRED)
+            }
+            if (!user.PasswordHash) {
+              throw new Error(AUTH_ERROR_CODES.RESET_REQUIRED)
+            }
+            // Verify password against hash
+            const passwordValid = await verifyPassword(password, user.PasswordHash)
+            if (!passwordValid) {
+              return null
+            }
           }
         }
 
