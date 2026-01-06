@@ -69,6 +69,9 @@ jobs:
           source: "deploy/*"
           target: "/var/www/orderhubnow-new"
           strip_components: 1
+          timeout: 120s
+          command_timeout: 30m
+          debug: true
 
       - name: Activate deployment
         uses: appleboy/ssh-action@v1.0.3

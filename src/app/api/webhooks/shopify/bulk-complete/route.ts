@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import crypto from 'crypto'
 import { prisma } from '@/lib/prisma'
-import { completeSyncRun, processJsonlStream } from '@/lib/shopify/sync'
+import { completeSyncRun, processJsonlStream, transformToSkuTable } from '@/lib/shopify/sync'
 
 // ============================================================================
 // Webhook Signature Verification
@@ -150,6 +150,16 @@ export async function POST(request: Request) {
       console.log(`Processed ${count} variants...`)
     })
 
+    console.log(`JSONL processing complete: ${processed} items, ${errors} errors`)
+
+    // Transform: RawSkusFromShopify → Sku table
+    // This is the TypeScript equivalent of .NET's TransformShopifySkus stored procedure
+    console.log('Starting transform to Sku table...')
+    const transformResult = await transformToSkuTable()
+    console.log(
+      `Transform complete: ${transformResult.processed} processed, ${transformResult.errors} errors, ${transformResult.skipped} skipped`
+    )
+
     // Mark run as completed
     await completeSyncRun(opId, 'completed', processed)
 
@@ -161,6 +171,11 @@ export async function POST(request: Request) {
       itemCount: processed,
       errorCount: errors,
       shopifyObjectCount: objectCount,
+      transform: {
+        processed: transformResult.processed,
+        errors: transformResult.errors,
+        skipped: transformResult.skipped,
+      },
     })
   } catch (error) {
     console.error('Webhook processing error:', error)

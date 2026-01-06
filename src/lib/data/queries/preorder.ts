@@ -4,16 +4,15 @@
  * .NET Reference: PreOrder.aspx.cs
  *
  * Pre-order categories: IsPreOrder=true (from SQL)
- * Pre-order products: Fetched from Shopify API (clean SKUs, no DU3/DU9 prefix)
+ * Pre-order products: NOW fetched from SQL Sku table (clean SKUs, no DU3/DU9 prefix)
  * Excludes: "Defective" categories
  *
  * NOTE: Returns Product type (same as ATS) for unified ProductOrderCard usage.
- * Categories remain SQL-based, but products are fetched from Shopify directly.
+ * Both categories and products are now SQL-based after Shopify sync.
  */
 
 import { prisma } from '@/lib/prisma'
-import { getPreOrderProductsByCategory } from '@/app/actions/inventory'
-import type { Product } from '@/lib/types/inventory'
+import type { Product, ProductVariant } from '@/lib/types/inventory'
 import { sortBySize } from '@/lib/utils/size-sort'
 
 // ============================================================================
@@ -102,19 +101,31 @@ export async function getPreOrderCategoryById(
 // ============================================================================
 
 /**
+ * Extract base SKU from full SKU.
+ * e.g., "744-MU-7/8" → "744-MU" (base), "7/8" (size)
+ */
+function extractBaseSku(fullSku: string): string {
+  // Find the last dash that separates base from size
+  const lastDashIndex = fullSku.lastIndexOf('-')
+  if (lastDashIndex === -1) return fullSku
+  return fullSku.substring(0, lastDashIndex)
+}
+
+/**
  * Get pre-order products with variants for a category.
  *
- * Fetches products directly from Shopify API (clean SKUs without DU3/DU9 prefix).
+ * NOW fetches from SQL Sku table (clean SKUs without DU3/DU9 prefix).
  * Returns Product[] type (same as ATS) for unified ProductOrderCard usage.
  *
  * This function:
- * 1. Looks up the category name from SQL by ID
- * 2. Calls the Shopify API to get products for that category
+ * 1. Queries Sku table with ShowInPreOrder=true and CategoryID
+ * 2. Groups variants by base SKU
+ * 3. Returns unified Product[] format
  */
 export async function getPreOrderProductsWithVariants(
   categoryId: number
 ): Promise<Product[]> {
-  // Get category name from SQL database
+  // Verify category exists and is PreOrder
   const category = await prisma.skuCategories.findUnique({
     where: { ID: categoryId },
     select: { Name: true, IsPreOrder: true },
@@ -125,17 +136,77 @@ export async function getPreOrderProductsWithVariants(
     return []
   }
 
-  // Fetch products from Shopify API using category name
-  try {
-    const products = await getPreOrderProductsByCategory(category.Name)
+  // Fetch SKUs from SQL database
+  const skus = await prisma.sku.findMany({
+    where: {
+      CategoryID: categoryId,
+      ShowInPreOrder: true,
+    },
+    orderBy: [{ DisplayPriority: 'asc' }, { SkuID: 'asc' }],
+  })
 
-    // Sort variants by size using Limeapple's specific size sequence
-    return products.map((product) => ({
-      ...product,
-      variants: sortBySize(product.variants),
-    }))
-  } catch (error) {
-    console.error(`Error fetching PreOrder products for category ${category.Name}:`, error)
+  if (skus.length === 0) {
+    console.log(`No PreOrder SKUs found for category ${categoryId}`)
     return []
   }
+
+  // Group SKUs by base SKU (product)
+  const productMap = new Map<
+    string,
+    {
+      skus: typeof skus
+      baseSku: string
+    }
+  >()
+
+  for (const sku of skus) {
+    const baseSku = extractBaseSku(sku.SkuID)
+
+    if (!productMap.has(baseSku)) {
+      productMap.set(baseSku, { skus: [], baseSku })
+    }
+    productMap.get(baseSku)!.skus.push(sku)
+  }
+
+  // Convert to Product[] format
+  const products: Product[] = []
+
+  for (const [baseSku, { skus: variantSkus }] of productMap) {
+    // Use first variant for product-level data
+    const firstSku = variantSkus[0]
+
+    // Parse prices from strings
+    const parsePriceFromString = (priceStr: string | null): number => {
+      if (!priceStr) return 0
+      const num = parseFloat(priceStr)
+      return isNaN(num) ? 0 : num
+    }
+
+    // Build variants
+    const variants: ProductVariant[] = variantSkus.map((sku) => ({
+      size: sku.Size || '',
+      sku: sku.SkuID,
+      available: sku.Quantity ?? 0,
+      onRoute: sku.OnRoute ?? 0,
+      priceCad: parsePriceFromString(sku.PriceCAD),
+      priceUsd: parsePriceFromString(sku.PriceUSD),
+      status: 'preorder' as const,
+    }))
+
+    products.push({
+      id: baseSku,
+      skuBase: baseSku,
+      title: firstSku.OrderEntryDescription || firstSku.Description || baseSku,
+      fabric: firstSku.FabricContent || '',
+      color: firstSku.SkuColor || '',
+      priceCad: parsePriceFromString(firstSku.PriceCAD),
+      priceUsd: parsePriceFromString(firstSku.PriceUSD),
+      msrpCad: parsePriceFromString(firstSku.MSRPCAD),
+      msrpUsd: parsePriceFromString(firstSku.MSRPUSD),
+      imageUrl: firstSku.ShopifyImageURL || `/SkuImages/${baseSku}.jpg`,
+      variants: sortBySize(variants),
+    })
+  }
+
+  return products
 }
