@@ -13,6 +13,7 @@ Backlog of potential improvements to revisit once core functionality is stable.
 | Item | Status | Effort | Priority | File |
 |------|--------|--------|----------|------|
 | Real-time inventory sync via webhooks | 🔵 Idea | 2-4 hrs | Medium | [real-time-sync.md](./real-time-sync.md) |
+| Lightbox accessibility improvements | 🔵 Idea | 30 mins | Low | [lightbox-accessibility.md](./lightbox-accessibility.md) |
 
 ## Adding New Ideas
 
