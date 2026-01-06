@@ -598,10 +598,11 @@ async function fetchPreOrderProducts(
   token: string,
   retries = 3
 ): Promise<{ node: ShopifyPreOrderProductNode }[]> {
-  // Fetch 100 products - stays well under Shopify's query cost limit
+  // Fetch PreOrder products only using search query
+  // This filters at API level instead of fetching everything
   const query = `
     {
-      products(first: 100) {
+      products(first: 100, query: "tag:PreOrder") {
         edges {
           node {
             id
@@ -707,12 +708,18 @@ export async function getPreOrderProductsByCategory(category: string): Promise<P
   // Fetch single batch of products from Shopify
   const edges = await fetchPreOrderProducts(endpoint, SHOPIFY_ACCESS_TOKEN);
 
+  console.log(`[PreOrder Debug] Fetched ${edges.length} products from Shopify`);
+
   // Collect variants matching category
   type VariantWithParent = {
     variant: ShopifyPreOrderVariantNode;
     parent: ShopifyPreOrderProductNode;
   };
   const allVariants: VariantWithParent[] = [];
+
+  // Debug: track what categories we find
+  const foundCategories = new Set<string>();
+  let preOrderCount = 0;
 
   edges.forEach(({ node }) => {
     const rawCollection = node.metafieldCollection?.value;
@@ -722,8 +729,12 @@ export async function getPreOrderProductsByCategory(category: string): Promise<P
     const isPreOrder = rawCollection.includes("PreOrder");
     if (!isPreOrder) return;
 
+    preOrderCount++;
+
     // Parse categories and check if matches requested category
     const categories = parseCategories(rawCollection);
+    categories.forEach(c => foundCategories.add(c));
+
     if (!categories.includes(category)) return;
 
     // Add each variant with its parent product reference
