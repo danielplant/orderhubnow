@@ -646,21 +646,54 @@ export async function processJsonlLines(
 // ============================================================================
 
 /**
+ * Create a backup of the Sku table before transformation.
+ * Creates a timestamped backup table for rollback if needed.
+ */
+export async function backupSkuTable(): Promise<string | null> {
+  const timestamp = new Date().toISOString().replace(/[-:T.]/g, '_').slice(0, 15)
+  const backupTableName = `Sku_backup_${timestamp}`
+
+  try {
+    // Create backup table with current data
+    await prisma.$executeRawUnsafe(
+      `SELECT * INTO ${backupTableName} FROM Sku`
+    )
+    console.log(`Created backup table: ${backupTableName}`)
+    return backupTableName
+  } catch (err) {
+    console.error('Failed to create backup table:', err)
+    return null
+  }
+}
+
+/**
  * Transform raw Shopify data to the Sku table.
  * This is the TypeScript equivalent of the .NET TransformShopifySkus stored procedure.
  *
  * Key difference from .NET: We store CLEAN SKUs without DU3/DU9 prefix.
  */
-export async function transformToSkuTable(): Promise<{
+export async function transformToSkuTable(options?: { skipBackup?: boolean }): Promise<{
   processed: number
   errors: number
   skipped: number
+  backupTable?: string
 }> {
   console.log('Starting transform: RawSkusFromShopify → Sku table')
 
   let processed = 0
   let errors = 0
   let skipped = 0
+  let backupTable: string | undefined
+
+  // 0. Create backup before transformation (unless skipped)
+  if (!options?.skipBackup) {
+    const backup = await backupSkuTable()
+    if (backup) {
+      backupTable = backup
+    } else {
+      console.warn('Backup failed, proceeding anyway...')
+    }
+  }
 
   // 1. Fetch all categories for lookup
   const categories = await prisma.skuCategories.findMany({
@@ -680,6 +713,15 @@ export async function transformToSkuTable(): Promise<{
       isPreOrder: cat.IsPreOrder ?? false,
     })
   }
+
+  // 1b. Fetch PPSizes for PrePack categories (399, 401)
+  // These categories use special size mapping from the PPSizes table
+  const ppSizes = await prisma.pPSizes.findMany()
+  const ppSizeMap = new Map<number, string>()
+  for (const pp of ppSizes) {
+    ppSizeMap.set(pp.Size, pp.CorrespondingPP)
+  }
+  console.log(`Loaded ${ppSizeMap.size} PPSize mappings`)
 
   // 2. Preserve existing DisplayPriority values
   const existingPriorities = new Map<string, number>()
@@ -831,13 +873,41 @@ export async function transformToSkuTable(): Promise<{
       // Get preserved DisplayPriority or default to 10000
       const displayPriority = existingPriorities.get(raw.SkuID) ?? 10000
 
+      // Handle PP (PrePack) categories 399 and 401 - special size parsing
+      // For these categories, size comes from a numeric code mapped via PPSizes table
+      // e.g., SKU "PP-ITEM-3" where "3" maps to "5/6" via PPSizes
+      let sizeValue = raw.Size || ''
+      if (categoryMatch.id === 399 || categoryMatch.id === 401) {
+        // Try to extract numeric size from SKU and map via PPSizes
+        const skuParts = raw.SkuID.split('-')
+        const lastPart = skuParts[skuParts.length - 1]
+        const sizeNum = parseInt(lastPart, 10)
+        
+        if (!isNaN(sizeNum)) {
+          // Category 401 has special mapping: 3→33, 4→44
+          let lookupSize = sizeNum
+          if (categoryMatch.id === 401) {
+            if (sizeNum === 3) lookupSize = 33
+            else if (sizeNum === 4) lookupSize = 44
+          }
+          
+          // Look up in PPSizes table
+          const ppSize = ppSizeMap.get(lookupSize)
+          if (ppSize) {
+            sizeValue = ppSize
+          } else {
+            sizeValue = sizeNum.toString()
+          }
+        }
+      }
+
       skuRecords.push({
         // CLEAN SKU - NO PREFIX (key difference from .NET)
         SkuID: raw.SkuID.toUpperCase(),
         Description: raw.DisplayName,
         Quantity: raw.Quantity,
         Price: priceDisplay || null,
-        Size: raw.Size,
+        Size: sizeValue,
         FabricContent: raw.metafield_fabric,
         SkuColor: skuColor || null,
         CategoryID: categoryMatch.id,
@@ -901,5 +971,5 @@ export async function transformToSkuTable(): Promise<{
 
   console.log(`Transform complete: ${processed} processed, ${errors} errors, ${skipped} skipped`)
 
-  return { processed, errors, skipped }
+  return { processed, errors, skipped, backupTable }
 }

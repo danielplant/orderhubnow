@@ -1,37 +1,13 @@
 import { NextResponse } from 'next/server'
+import { auth } from '@/lib/auth/providers'
 import {
   isSyncInProgress,
   createSyncRun,
   cleanupOrphanedRuns,
+  getLatestSyncRun,
   BULK_OPERATION_QUERY,
+  CURRENT_BULK_OPERATION_QUERY,
 } from '@/lib/shopify/sync'
-
-// ============================================================================
-// Cron Security
-// ============================================================================
-
-function verifyCronSecret(request: Request): boolean {
-  const authHeader = request.headers.get('authorization')
-  const cronSecret = process.env.CRON_SECRET
-
-  // In development, allow unsigned requests
-  if (process.env.NODE_ENV !== 'production') {
-    return true
-  }
-
-  if (!cronSecret) {
-    console.warn('CRON_SECRET not configured')
-    return false
-  }
-
-  // Check Bearer token
-  if (authHeader?.startsWith('Bearer ')) {
-    const token = authHeader.slice(7)
-    return token === cronSecret
-  }
-
-  return false
-}
 
 // ============================================================================
 // Shopify API Helper
@@ -68,37 +44,64 @@ async function shopifyFetch(query: string): Promise<{ data?: unknown; error?: st
 }
 
 // ============================================================================
-// GET /api/cron/shopify-sync - Scheduled sync trigger
+// GET /api/admin/sync-shopify - Get sync status
 // ============================================================================
 
-export async function GET(request: Request) {
-  // Verify cron secret
-  if (!verifyCronSecret(request)) {
+export async function GET() {
+  // Verify admin auth
+  const session = await auth()
+  if (!session?.user || session.user.role !== 'admin') {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
   try {
-    console.log('Cron: Starting scheduled Shopify sync')
+    // Get latest sync run
+    const latestRun = await getLatestSyncRun()
 
+    // Check if sync is currently in progress
+    const { inProgress, reason } = await isSyncInProgress(shopifyFetch)
+
+    return NextResponse.json({
+      latestRun,
+      inProgress,
+      reason,
+    })
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : 'Failed to get sync status' },
+      { status: 500 }
+    )
+  }
+}
+
+// ============================================================================
+// POST /api/admin/sync-shopify - Trigger a sync
+// ============================================================================
+
+export async function POST() {
+  // Verify admin auth
+  const session = await auth()
+  if (!session?.user || session.user.role !== 'admin') {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  try {
     // Clean up any orphaned runs
     await cleanupOrphanedRuns()
 
     // Check if sync is already in progress
     const { inProgress, reason } = await isSyncInProgress(shopifyFetch)
     if (inProgress) {
-      console.log(`Cron: Sync skipped - ${reason}`)
-      return NextResponse.json({
-        success: false,
-        message: 'Sync already in progress',
-        reason,
-      })
+      return NextResponse.json(
+        { error: 'Sync already in progress', reason },
+        { status: 409 }
+      )
     }
 
     // Start the bulk operation
     const result = await shopifyFetch(BULK_OPERATION_QUERY)
 
     if (result.error) {
-      console.error('Cron: Failed to start bulk operation:', result.error)
       return NextResponse.json({ error: result.error }, { status: 500 })
     }
 
@@ -113,7 +116,6 @@ export async function GET(request: Request) {
     const userErrors = data?.bulkOperationRunQuery?.userErrors
 
     if (userErrors && userErrors.length > 0) {
-      console.error('Cron: Shopify user errors:', userErrors)
       return NextResponse.json(
         { error: 'Shopify error', details: userErrors },
         { status: 400 }
@@ -128,19 +130,17 @@ export async function GET(request: Request) {
     }
 
     // Create sync run record
-    const runId = await createSyncRun('scheduled', bulkOp.id)
-
-    console.log(`Cron: Sync started - operationId=${bulkOp.id}, runId=${runId}`)
+    const runId = await createSyncRun('on-demand', bulkOp.id)
 
     return NextResponse.json({
       success: true,
-      message: 'Scheduled sync started',
+      message: 'Sync started. Results will be processed when Shopify sends webhook.',
       operationId: bulkOp.id,
       status: bulkOp.status,
       runId: runId.toString(),
     })
   } catch (err) {
-    console.error('Cron: Error starting sync:', err)
+    console.error('Error starting sync:', err)
     return NextResponse.json(
       { error: err instanceof Error ? err.message : 'Failed to start sync' },
       { status: 500 }
