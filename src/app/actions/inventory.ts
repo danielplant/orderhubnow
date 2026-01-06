@@ -710,6 +710,11 @@ export async function getPreOrderProductsByCategory(category: string): Promise<P
 
   console.log(`[PreOrder Debug] Fetched ${edges.length} products from Shopify`);
 
+  // Log first few products' metafield values for debugging
+  edges.slice(0, 3).forEach(({ node }, i) => {
+    console.log(`[PreOrder Debug] Product ${i}: "${node.title}" - collection: "${node.metafieldCollection?.value || 'null'}"`);
+  });
+
   // Collect variants matching category
   type VariantWithParent = {
     variant: ShopifyPreOrderVariantNode;
@@ -818,7 +823,9 @@ export async function getPreOrderProductsByCategory(category: string): Promise<P
   });
 
   console.log(`\n--- PREORDER CATEGORY PRODUCTS: ${category} ---`);
-  console.log(`Found ${products.length} products (grouped by base SKU)`);
+  console.log(`PreOrder products in batch: ${preOrderCount}`);
+  console.log(`Categories found: ${Array.from(foundCategories).join(", ") || "none"}`);
+  console.log(`Matched products: ${products.length}`);
   console.log("----------------------------------------------\n");
 
   // Sort variants by size using Limeapple's specific size sequence
