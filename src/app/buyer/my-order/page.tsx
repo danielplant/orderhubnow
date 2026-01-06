@@ -10,6 +10,7 @@ interface Props {
     editOrder?: string
     returnTo?: string
     repId?: string
+    draft?: string
   }>
 }
 
@@ -28,6 +29,7 @@ export default async function MyOrderPage({ searchParams }: Props) {
   const isPreOrder = params.isPreOrder === 'true'
   const editOrderId = params.editOrder
   const returnTo = params.returnTo || '/buyer/select-journey'
+  const draftId = params.draft || null
   
   // Extract rep context for rep-created orders
   const repContext = params.repId ? { repId: params.repId } : null
@@ -74,6 +76,7 @@ export default async function MyOrderPage({ searchParams }: Props) {
       existingOrder={existingOrder}
       returnTo={returnTo}
       repContext={repContext}
+      draftId={draftId}
     />
   )
 }

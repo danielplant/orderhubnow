@@ -16,8 +16,10 @@ export interface OrderQuantities {
 
 /**
  * Valid order statuses matching .NET CustomerOrders.OrderStatus values.
+ * 'Draft' is used for server-side cart persistence before submission.
  */
 export const ORDER_STATUSES = [
+  'Draft',
   'Pending',
   'Processing',
   'Shipped',

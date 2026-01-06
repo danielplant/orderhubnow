@@ -200,6 +200,7 @@ export async function getOrders(
   // Build status counts map
   const statusCounts: OrdersListResult['statusCounts'] = {
     All: grouped.reduce((sum, g) => sum + g._count._all, 0),
+    Draft: 0,
     Pending: 0,
     Processing: 0,
     Shipped: 0,
@@ -457,6 +458,7 @@ export async function getOrdersByRep(
       total: 0,
       statusCounts: {
         All: 0,
+        Draft: 0,
         Pending: 0,
         Processing: 0,
         Shipped: 0,
@@ -525,6 +527,7 @@ export async function getOrdersByRep(
   // 5. Build status counts map
   const statusCounts: RepOrdersListResult['statusCounts'] = {
     All: grouped.reduce((sum, g) => sum + g._count._all, 0),
+    Draft: 0,
     Pending: 0,
     Processing: 0,
     Shipped: 0,

@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation'
 import { useOrder } from '@/lib/contexts/order-context'
 import { useCurrency } from '@/lib/contexts/currency-context'
 import { OrderForm } from '@/components/buyer/order-form'
+import { DraftToolbar } from '@/components/buyer/draft-toolbar'
+import { DraftRecoveryBanner } from '@/components/buyer/draft-recovery-banner'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { formatCurrency } from '@/lib/utils'
@@ -25,6 +27,7 @@ interface MyOrderClientProps {
   existingOrder?: OrderForEditing | null
   returnTo?: string
   repContext?: { repId: string } | null
+  draftId?: string | null
 }
 
 export function MyOrderClient({
@@ -34,10 +37,18 @@ export function MyOrderClient({
   existingOrder = null,
   returnTo = '/buyer/select-journey',
   repContext = null,
+  draftId: urlDraftId = null,
 }: MyOrderClientProps) {
   const router = useRouter()
-  const { orders, totalItems, removeItem } = useOrder()
+  const { orders, totalItems, removeItem, loadDraft, draftId } = useOrder()
   const { currency } = useCurrency()
+
+  // Load draft from URL param if present
+  useEffect(() => {
+    if (urlDraftId && urlDraftId !== draftId) {
+      loadDraft(urlDraftId)
+    }
+  }, [urlDraftId, draftId, loadDraft])
 
   // Determine if we're in edit mode
   const isEditMode = !!existingOrder
@@ -128,9 +139,15 @@ export function MyOrderClient({
 
   return (
     <div className="container mx-auto py-8 px-4">
-      <h1 className="text-2xl font-bold mb-6">
+      {/* Draft recovery banner - only show when not in edit mode */}
+      {!isEditMode && <DraftRecoveryBanner className="mb-4" />}
+
+      <h1 className="text-2xl font-bold mb-4">
         {isEditMode ? `Edit Order ${existingOrder?.orderNumber}` : 'Review Your Order'}
       </h1>
+
+      {/* Draft toolbar - only show when not in edit mode */}
+      {!isEditMode && <DraftToolbar className="mb-6" />}
 
       <div className="grid lg:grid-cols-3 gap-8">
         {/* Order Summary - Right side on desktop */}

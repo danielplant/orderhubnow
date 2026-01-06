@@ -8,14 +8,16 @@ interface LogoutButtonProps {
   callbackUrl?: string
 }
 
-// Storage key must match order-context.tsx
+// Storage keys must match order-context.tsx
 const DRAFT_ORDER_KEY = 'draft-order'
+const DRAFT_ID_KEY = 'draft-id'
 
 export function LogoutButton({ callbackUrl = '/admin/login' }: LogoutButtonProps) {
   const handleLogout = () => {
     // Clear cart/draft order before logout to prevent cart bleeding between users
     try {
       localStorage.removeItem(DRAFT_ORDER_KEY)
+      localStorage.removeItem(DRAFT_ID_KEY)
     } catch {
       // Ignore localStorage errors
     }

@@ -6,6 +6,7 @@ import {
   useState,
   useCallback,
   useEffect,
+  useRef,
   type ReactNode,
 } from "react";
 import type { OrderQuantities, Product, Currency } from "@/lib/types";
@@ -30,14 +31,48 @@ export interface OrderLineMetadata {
   isOnRoute: boolean;
 }
 
+/**
+ * Form data stored in draft (partial - user may not have filled everything)
+ */
+export interface DraftFormData {
+  storeName?: string;
+  buyerName?: string;
+  customerEmail?: string;
+  customerPhone?: string;
+  salesRepId?: string;
+  currency?: string;
+  street1?: string;
+  street2?: string;
+  city?: string;
+  stateProvince?: string;
+  zipPostal?: string;
+  country?: string;
+  shippingStreet1?: string;
+  shippingStreet2?: string;
+  shippingCity?: string;
+  shippingStateProvince?: string;
+  shippingZipPostal?: string;
+  shippingCountry?: string;
+  shipStartDate?: string;
+  shipEndDate?: string;
+  customerPO?: string;
+  orderNotes?: string;
+  website?: string;
+}
+
 interface OrderState {
   orders: Record<string, OrderQuantities>;
 }
 
+type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
+
 interface OrderContextValue {
+  // Cart state
   orders: Record<string, OrderQuantities>;
   totalItems: number;
   totalPrice: number;
+  
+  // Cart mutations
   addItem: (productId: string, sku: string, qty: number, price: number, preOrderMeta?: PreOrderItemMetadata, lineMeta?: OrderLineMetadata) => void;
   removeItem: (productId: string, sku: string) => void;
   setQuantity: (productId: string, sku: string, qty: number, price: number, lineMeta?: OrderLineMetadata) => void;
@@ -46,17 +81,34 @@ interface OrderContextValue {
   undo: () => void;
   canUndo: boolean;
   getProductTotal: (product: Product, currency: Currency) => { items: number; price: number };
+  
   // Pre-order metadata accessors
   preOrderMetadata: Record<string, PreOrderItemMetadata>;
   getPreOrderShipWindow: () => { start: string | null; end: string | null } | null;
+  
   // Order line metadata (isOnRoute tracking)
   orderLineMetadata: Record<string, OrderLineMetadata>;
+  
+  // Draft state (server-side persistence)
+  draftId: string | null;
+  saveStatus: SaveStatus;
+  lastSaved: Date | null;
+  formData: DraftFormData;
+  
+  // Draft methods
+  setFormData: (data: DraftFormData) => void;
+  updateFormField: (field: keyof DraftFormData, value: string) => void;
+  loadDraft: (id: string) => Promise<boolean>;
+  clearDraft: () => Promise<void>;
+  getDraftUrl: () => string | null;
 }
 
 const OrderContext = createContext<OrderContextValue | null>(null);
 
 const STORAGE_KEY = "draft-order";
+const DRAFT_ID_KEY = "draft-id";
 const MAX_HISTORY = 10;
+const DEBOUNCE_MS = 1000; // Auto-save debounce
 
 function calculateTotals(
   orders: Record<string, OrderQuantities>,
@@ -78,12 +130,15 @@ function loadFromStorage(): {
   prices: Map<string, number>;
   preOrderMeta: Record<string, PreOrderItemMetadata>;
   lineMeta: Record<string, OrderLineMetadata>;
+  formData: DraftFormData;
+  draftId: string | null;
 } {
   if (typeof window === "undefined") {
-    return { orders: {}, prices: new Map(), preOrderMeta: {}, lineMeta: {} };
+    return { orders: {}, prices: new Map(), preOrderMeta: {}, lineMeta: {}, formData: {}, draftId: null };
   }
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
+    const draftId = localStorage.getItem(DRAFT_ID_KEY);
     if (stored) {
       const parsed = JSON.parse(stored);
       return {
@@ -91,16 +146,23 @@ function loadFromStorage(): {
         prices: new Map(Object.entries(parsed.prices || {})),
         preOrderMeta: parsed.preOrderMeta || {},
         lineMeta: parsed.lineMeta || {},
+        formData: parsed.formData || {},
+        draftId: draftId || null,
       };
     }
   } catch {
     // Invalid storage, start fresh
   }
-  return { orders: {}, prices: new Map(), preOrderMeta: {}, lineMeta: {} };
+  return { orders: {}, prices: new Map(), preOrderMeta: {}, lineMeta: {}, formData: {}, draftId: null };
 }
 
-export function OrderProvider({ children }: { children: ReactNode }) {
-  // Lazy initialization from localStorage (runs once during first render)
+interface OrderProviderProps {
+  children: ReactNode;
+  initialDraftId?: string; // From ?draft= query param
+}
+
+export function OrderProvider({ children, initialDraftId }: OrderProviderProps) {
+  // Lazy initialization from localStorage
   const [orders, setOrders] = useState<Record<string, OrderQuantities>>(
     () => loadFromStorage().orders
   );
@@ -113,20 +175,211 @@ export function OrderProvider({ children }: { children: ReactNode }) {
   const [orderLineMetadata, setOrderLineMetadata] = useState<Record<string, OrderLineMetadata>>(
     () => loadFromStorage().lineMeta
   );
+  const [formData, setFormDataState] = useState<DraftFormData>(
+    () => loadFromStorage().formData
+  );
   const [history, setHistory] = useState<OrderState[]>([]);
+  
+  // Draft state
+  const [draftId, setDraftId] = useState<string | null>(
+    () => initialDraftId || loadFromStorage().draftId
+  );
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
+  const [lastSaved, setLastSaved] = useState<Date | null>(null);
+  
+  // Refs for debounced auto-save
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const pendingSaveRef = useRef(false);
 
-  // Sync to localStorage when orders/prices/preOrderMeta/lineMeta change
-  useEffect(() => {
+  // Save state to localStorage (optimistic cache)
+  const saveToLocalStorage = useCallback(() => {
     const data = {
       orders,
       prices: Object.fromEntries(priceMap),
       preOrderMeta: preOrderMetadata,
       lineMeta: orderLineMetadata,
+      formData,
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-  }, [orders, priceMap, preOrderMetadata, orderLineMetadata]);
+    if (draftId) {
+      localStorage.setItem(DRAFT_ID_KEY, draftId);
+    }
+  }, [orders, priceMap, preOrderMetadata, orderLineMetadata, formData, draftId]);
 
-  // Listen for changes from other tabs (callback-based, not synchronous)
+  // Sync to localStorage when state changes
+  useEffect(() => {
+    saveToLocalStorage();
+  }, [saveToLocalStorage]);
+
+  // Create or ensure draft exists on server
+  const ensureDraft = useCallback(async (): Promise<string> => {
+    if (draftId) return draftId;
+    
+    try {
+      const res = await fetch('/api/drafts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currency: formData.currency || 'CAD' }),
+      });
+      
+      if (!res.ok) throw new Error('Failed to create draft');
+      
+      const data = await res.json();
+      const newDraftId = data.id;
+      
+      setDraftId(newDraftId);
+      localStorage.setItem(DRAFT_ID_KEY, newDraftId);
+      
+      return newDraftId;
+    } catch (err) {
+      console.error('Failed to create draft:', err);
+      throw err;
+    }
+  }, [draftId, formData.currency]);
+
+  // Sync current state to server
+  const syncToServer = useCallback(async (id: string) => {
+    setSaveStatus('saving');
+    
+    try {
+      const res = await fetch(`/api/drafts/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orders,
+          prices: Object.fromEntries(priceMap),
+          preOrderMeta: preOrderMetadata,
+          lineMeta: orderLineMetadata,
+          formData,
+          currency: formData.currency || 'CAD',
+        }),
+      });
+      
+      if (!res.ok) throw new Error('Failed to sync draft');
+      
+      setSaveStatus('saved');
+      setLastSaved(new Date());
+    } catch (err) {
+      console.error('Failed to sync to server:', err);
+      setSaveStatus('error');
+    }
+  }, [orders, priceMap, preOrderMetadata, orderLineMetadata, formData]);
+
+  // Debounced auto-save to server
+  const scheduleServerSync = useCallback(() => {
+    // Clear any pending timeout
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+    
+    pendingSaveRef.current = true;
+    
+    saveTimeoutRef.current = setTimeout(async () => {
+      if (!pendingSaveRef.current) return;
+      pendingSaveRef.current = false;
+      
+      try {
+        const id = await ensureDraft();
+        await syncToServer(id);
+      } catch {
+        // Error already logged
+      }
+    }, DEBOUNCE_MS);
+  }, [ensureDraft, syncToServer]);
+
+  // Load draft from server
+  const loadDraft = useCallback(async (id: string): Promise<boolean> => {
+    try {
+      const res = await fetch(`/api/drafts/${id}`);
+      
+      if (!res.ok) {
+        if (res.status === 404) {
+          // Draft not found, clear local reference
+          localStorage.removeItem(DRAFT_ID_KEY);
+          setDraftId(null);
+          return false;
+        }
+        throw new Error('Failed to load draft');
+      }
+      
+      const data = await res.json();
+      const state = data.state;
+      
+      // Update all state from server
+      setOrders(state.orders || {});
+      setPriceMap(new Map(Object.entries(state.prices || {})));
+      setPreOrderMetadata(state.preOrderMeta || {});
+      setOrderLineMetadata(state.lineMeta || {});
+      setFormDataState(state.formData || {});
+      setDraftId(id);
+      setSaveStatus('saved');
+      setLastSaved(new Date(state.lastUpdated || Date.now()));
+      
+      // Update localStorage
+      localStorage.setItem(DRAFT_ID_KEY, id);
+      
+      return true;
+    } catch (err) {
+      console.error('Failed to load draft:', err);
+      return false;
+    }
+  }, []);
+
+  // Clear draft (server + localStorage)
+  const clearDraft = useCallback(async () => {
+    // Clear server draft if exists
+    if (draftId) {
+      try {
+        await fetch(`/api/drafts/${draftId}`, { method: 'DELETE' });
+      } catch {
+        // Ignore delete errors
+      }
+    }
+    
+    // Clear all state
+    setOrders({});
+    setPriceMap(new Map());
+    setPreOrderMetadata({});
+    setOrderLineMetadata({});
+    setFormDataState({});
+    setDraftId(null);
+    setSaveStatus('idle');
+    setLastSaved(null);
+    setHistory([]);
+    
+    // Clear localStorage
+    localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(DRAFT_ID_KEY);
+  }, [draftId]);
+
+  // Get shareable draft URL
+  const getDraftUrl = useCallback(() => {
+    if (!draftId) return null;
+    if (typeof window === 'undefined') return null;
+    return `${window.location.origin}/draft/${draftId}`;
+  }, [draftId]);
+
+  // Load initial draft from URL param or localStorage
+  useEffect(() => {
+    const loadInitialDraft = async () => {
+      if (initialDraftId) {
+        // URL has draft param - load from server (overrides localStorage)
+        await loadDraft(initialDraftId);
+      } else {
+        // Check localStorage for existing draft ID
+        const storedDraftId = localStorage.getItem(DRAFT_ID_KEY);
+        if (storedDraftId) {
+          // Background sync from server
+          loadDraft(storedDraftId);
+        }
+      }
+    };
+    
+    loadInitialDraft();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialDraftId]);
+
+  // Listen for changes from other tabs
   useEffect(() => {
     function handleStorage(e: StorageEvent) {
       if (e.key === STORAGE_KEY && e.newValue) {
@@ -136,13 +389,26 @@ export function OrderProvider({ children }: { children: ReactNode }) {
           setPriceMap(new Map(Object.entries(parsed.prices || {})));
           setPreOrderMetadata(parsed.preOrderMeta || {});
           setOrderLineMetadata(parsed.lineMeta || {});
+          setFormDataState(parsed.formData || {});
         } catch {
           // Ignore invalid data
         }
       }
+      if (e.key === DRAFT_ID_KEY) {
+        setDraftId(e.newValue);
+      }
     }
     window.addEventListener("storage", handleStorage);
     return () => window.removeEventListener("storage", handleStorage);
+  }, []);
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
   }, []);
 
   const saveToHistory = useCallback(() => {
@@ -160,22 +426,16 @@ export function OrderProvider({ children }: { children: ReactNode }) {
           [sku]: (prev[productId]?.[sku] || 0) + qty,
         },
       }));
-      // Store pre-order metadata if provided (keyed by SKU)
       if (preOrderMeta) {
-        setPreOrderMetadata((prev) => ({
-          ...prev,
-          [sku]: preOrderMeta,
-        }));
+        setPreOrderMetadata((prev) => ({ ...prev, [sku]: preOrderMeta }));
       }
-      // Store order line metadata (isOnRoute flag) if provided
       if (lineMeta) {
-        setOrderLineMetadata((prev) => ({
-          ...prev,
-          [sku]: lineMeta,
-        }));
+        setOrderLineMetadata((prev) => ({ ...prev, [sku]: lineMeta }));
       }
+      // Auto-save to server
+      scheduleServerSync();
     },
-    [saveToHistory]
+    [saveToHistory, scheduleServerSync]
   );
 
   const removeItem = useCallback(
@@ -191,8 +451,10 @@ export function OrderProvider({ children }: { children: ReactNode }) {
         }
         return { ...prev, [productId]: productOrders };
       });
+      // Auto-save to server
+      scheduleServerSync();
     },
-    [saveToHistory]
+    [saveToHistory, scheduleServerSync]
   );
 
   const setQuantity = useCallback(
@@ -210,7 +472,6 @@ export function OrderProvider({ children }: { children: ReactNode }) {
           }
           return { ...prev, [productId]: productOrders };
         });
-        // Clean up line metadata when removing item
         setOrderLineMetadata((prev) => {
           const next = { ...prev };
           delete next[sku];
@@ -219,21 +480,16 @@ export function OrderProvider({ children }: { children: ReactNode }) {
       } else {
         setOrders((prev) => ({
           ...prev,
-          [productId]: {
-            ...prev[productId],
-            [sku]: qty,
-          },
+          [productId]: { ...prev[productId], [sku]: qty },
         }));
-        // Store order line metadata (isOnRoute flag) if provided
         if (lineMeta) {
-          setOrderLineMetadata((prev) => ({
-            ...prev,
-            [sku]: lineMeta,
-          }));
+          setOrderLineMetadata((prev) => ({ ...prev, [sku]: lineMeta }));
         }
       }
+      // Auto-save to server
+      scheduleServerSync();
     },
-    [saveToHistory]
+    [saveToHistory, scheduleServerSync]
   );
 
   const clearProduct = useCallback(
@@ -244,8 +500,10 @@ export function OrderProvider({ children }: { children: ReactNode }) {
         delete next[productId];
         return next;
       });
+      // Auto-save to server
+      scheduleServerSync();
     },
-    [saveToHistory]
+    [saveToHistory, scheduleServerSync]
   );
 
   const clearAll = useCallback(() => {
@@ -253,14 +511,18 @@ export function OrderProvider({ children }: { children: ReactNode }) {
     setOrders({});
     setPreOrderMetadata({});
     setOrderLineMetadata({});
-  }, [saveToHistory]);
+    // Auto-save to server
+    scheduleServerSync();
+  }, [saveToHistory, scheduleServerSync]);
 
   const undo = useCallback(() => {
     if (history.length === 0) return;
     const previousState = history[history.length - 1];
     setHistory((prev) => prev.slice(0, -1));
     setOrders(previousState.orders);
-  }, [history]);
+    // Auto-save to server
+    scheduleServerSync();
+  }, [history, scheduleServerSync]);
 
   const getProductTotal = useCallback(
     (product: Product, currency: Currency) => {
@@ -278,19 +540,25 @@ export function OrderProvider({ children }: { children: ReactNode }) {
     [orders]
   );
 
-  /**
-   * Get the suggested ship window from pre-order metadata.
-   * If items span multiple categories with different windows, returns the first one found.
-   * User can edit this on the checkout form per .NET behavior.
-   */
   const getPreOrderShipWindow = useCallback(() => {
     const metaValues = Object.values(preOrderMetadata);
     if (metaValues.length === 0) return null;
-    // Return first available ship window
     const first = metaValues.find((m) => m.onRouteStart || m.onRouteEnd);
     if (!first) return null;
     return { start: first.onRouteStart, end: first.onRouteEnd };
   }, [preOrderMetadata]);
+
+  const setFormData = useCallback((data: DraftFormData) => {
+    setFormDataState(data);
+    // Auto-save to server
+    scheduleServerSync();
+  }, [scheduleServerSync]);
+
+  const updateFormField = useCallback((field: keyof DraftFormData, value: string) => {
+    setFormDataState((prev) => ({ ...prev, [field]: value }));
+    // Auto-save to server
+    scheduleServerSync();
+  }, [scheduleServerSync]);
 
   const { items: totalItems, price: totalPrice } = calculateTotals(orders, priceMap);
 
@@ -311,6 +579,17 @@ export function OrderProvider({ children }: { children: ReactNode }) {
         preOrderMetadata,
         getPreOrderShipWindow,
         orderLineMetadata,
+        // Draft state
+        draftId,
+        saveStatus,
+        lastSaved,
+        formData,
+        // Draft methods
+        setFormData,
+        updateFormField,
+        loadDraft,
+        clearDraft,
+        getDraftUrl,
       }}
     >
       {children}
