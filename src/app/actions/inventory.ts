@@ -685,6 +685,26 @@ async function fetchPreOrderProducts(
   return json.data.products.edges;
 }
 
+// Helper to extract core category keyword from SQL category name
+// SQL names: "SS26 Swim II (Jan 20 - Feb 15)" → "SWIM"
+// Shopify metafield: "PreOrder SWIM" → "SWIM"
+function extractCoreCategory(sqlCategoryName: string): string {
+  // Known category keywords that appear in both SQL and Shopify
+  const knownCategories = ["SWIM", "COZY", "ACTIVE", "RESORT", "PREPPY GOOSE", "HOLIDAY"];
+
+  const upperName = sqlCategoryName.toUpperCase();
+
+  // Check if any known category keyword appears in the SQL name
+  for (const keyword of knownCategories) {
+    if (upperName.includes(keyword)) {
+      return keyword;
+    }
+  }
+
+  // Fallback: return the original name (normalized)
+  return sqlCategoryName.trim().toUpperCase();
+}
+
 /**
  * Get PreOrder products by category from Shopify API.
  *
@@ -693,6 +713,9 @@ async function fetchPreOrderProducts(
  * - Includes products with available <= 0 (PreOrder shows items not yet in stock)
  * - Uses label_title metafield for product titles
  * - SKUs are clean (no DU3/DU9 prefix)
+ *
+ * Category matching: SQL category names (e.g., "SS26 Swim II (Jan 20 - Feb 15)") are matched
+ * against Shopify metafield values (e.g., "SWIM") using core keyword extraction.
  *
  * NOTE: Single batch fetch for validation. Future phase will use SQL sync for full data.
  */
@@ -705,14 +728,18 @@ export async function getPreOrderProductsByCategory(category: string): Promise<P
 
   const endpoint = `https://${SHOPIFY_STORE_DOMAIN}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`;
 
+  // Extract core category keyword from SQL category name
+  const coreCategory = extractCoreCategory(category);
+  console.log(`[PreOrder] SQL category: "${category}" → Core keyword: "${coreCategory}"`);
+
   // Fetch single batch of products from Shopify
   const edges = await fetchPreOrderProducts(endpoint, SHOPIFY_ACCESS_TOKEN);
 
-  console.log(`[PreOrder Debug] Fetched ${edges.length} products from Shopify`);
+  console.log(`[PreOrder] Fetched ${edges.length} products from Shopify`);
 
   // Log first few products' metafield values for debugging
-  edges.slice(0, 3).forEach(({ node }, i) => {
-    console.log(`[PreOrder Debug] Product ${i}: "${node.title}" - collection: "${node.metafieldCollection?.value || 'null'}"`);
+  edges.slice(0, 5).forEach(({ node }, i) => {
+    console.log(`[PreOrder] Product ${i}: "${node.title}" - collection: "${node.metafieldCollection?.value || 'null'}"`);
   });
 
   // Collect variants matching category
@@ -730,17 +757,23 @@ export async function getPreOrderProductsByCategory(category: string): Promise<P
     const rawCollection = node.metafieldCollection?.value;
     if (!rawCollection) return;
 
-    // Must be a PreOrder product
+    // Must be a PreOrder product (contains "PreOrder" in metafield)
     const isPreOrder = rawCollection.includes("PreOrder");
     if (!isPreOrder) return;
 
     preOrderCount++;
 
-    // Parse categories and check if matches requested category
-    const categories = parseCategories(rawCollection);
-    categories.forEach(c => foundCategories.add(c));
+    // Parse categories from metafield (removes "PreOrder" prefix)
+    const shopifyCategories = parseCategories(rawCollection);
+    shopifyCategories.forEach(c => foundCategories.add(c));
 
-    if (!categories.includes(category)) return;
+    // Match using core keyword comparison (case-insensitive)
+    const matchesCategory = shopifyCategories.some(shopifyCat => {
+      const shopifyCore = shopifyCat.trim().toUpperCase();
+      return shopifyCore === coreCategory || shopifyCore.includes(coreCategory) || coreCategory.includes(shopifyCore);
+    });
+
+    if (!matchesCategory) return;
 
     // Add each variant with its parent product reference
     // Unlike ATS, we include ALL variants (even with 0 or negative stock)
