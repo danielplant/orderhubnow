@@ -436,7 +436,7 @@ export function OrderForm({
                 )}
               </Label>
               <Select
-                value={watch('salesRepId')}
+                value={watch('salesRepId') || ''}
                 onValueChange={(value) => {
                   if (!isRepLocked) {
                     setValue('salesRepId', value)
@@ -567,7 +567,7 @@ export function OrderForm({
               <div className="space-y-2">
                 <Label htmlFor="country">Country *</Label>
                 <Select
-                  value={watch('country')}
+                  value={watch('country') || 'USA'}
                   onValueChange={(value) => setValue('country', value as 'USA' | 'Canada')}
                 >
                   <SelectTrigger className="w-full">
@@ -664,7 +664,7 @@ export function OrderForm({
               <div className="space-y-2">
                 <Label htmlFor="shippingCountry">Country *</Label>
                 <Select
-                  value={watch('shippingCountry')}
+                  value={watch('shippingCountry') || 'USA'}
                   onValueChange={(value) => setValue('shippingCountry', value as 'USA' | 'Canada')}
                 >
                   <SelectTrigger className="w-full">
