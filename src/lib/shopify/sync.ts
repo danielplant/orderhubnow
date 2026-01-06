@@ -742,12 +742,10 @@ export async function backupSkuTable(): Promise<string | null> {
 }
 
 /**
- * Transform raw Shopify data to the Sku table using bulk SQL.
- * This is the TypeScript equivalent of the .NET TransformShopifySkus stored procedure.
+ * Transform raw Shopify data to the Sku table.
+ * Matches .NET approach: exact category name matching after splitting comma-separated values.
  *
  * Key difference from .NET: We store CLEAN SKUs without DU3/DU9 prefix.
- * 
- * Uses bulk INSERT...SELECT for performance (~2 seconds vs ~60+ seconds with individual inserts).
  */
 export async function transformToSkuTable(options?: { skipBackup?: boolean }): Promise<{
   processed: number
@@ -755,7 +753,7 @@ export async function transformToSkuTable(options?: { skipBackup?: boolean }): P
   skipped: number
   backupTable?: string
 }> {
-  console.log('Starting bulk SQL transform: RawSkusFromShopify → Sku table')
+  console.log('Starting transform: RawSkusFromShopify → Sku table')
 
   let backupTable: string | undefined
 
@@ -769,128 +767,140 @@ export async function transformToSkuTable(options?: { skipBackup?: boolean }): P
     }
   }
 
-  // Execute the bulk SQL transform
-  // This does everything in a single SQL operation:
-  // - Preserves DisplayPriority from existing Sku records
-  // - Matches categories by name (handling PreOrder prefix)
-  // - Formats price strings
-  // - Cleans color JSON
-  // - Handles PP categories 399/401 size mapping
   try {
-    await prisma.$executeRaw`
-      -- Step 1: Preserve existing DisplayPriority values in a temp table
-      IF OBJECT_ID('tempdb..#PreservedPriority') IS NOT NULL DROP TABLE #PreservedPriority;
-      SELECT SkuID, DisplayPriority INTO #PreservedPriority FROM Sku WHERE DisplayPriority IS NOT NULL;
+    // 1. Get all categories and build lookup map (exact match like .NET)
+    const categories = await prisma.skuCategories.findMany()
+    const catMap = new Map<string, number>()
+    for (const c of categories) {
+      // Key: lowercase name + isPreOrder flag
+      const key = c.Name.toLowerCase().trim() + '_' + (c.IsPreOrder ? '1' : '0')
+      catMap.set(key, c.ID)
+    }
+    console.log(`Loaded ${categories.length} categories`)
 
-      -- Step 2: Truncate Sku table
-      TRUNCATE TABLE Sku;
+    // 2. Get raw SKUs with required fields (same filters as .NET)
+    const rawSkus = await prisma.$queryRawUnsafe<Array<{
+      SkuID: string
+      ShopifyId: bigint | null
+      DisplayName: string | null
+      Quantity: number | null
+      Size: string | null
+      metafield_fabric: string | null
+      metafield_color: string | null
+      metafield_cad_ws_price_test: string | null
+      metafield_usd_ws_price: string | null
+      metafield_msrp_cad: string | null
+      metafield_msrp_us: string | null
+      metafield_order_entry_collection: string | null
+      metafield_order_entry_description: string | null
+      ShopifyProductImageURL: string | null
+    }>>(`
+      SELECT SkuID, ShopifyId, DisplayName, Quantity, Size,
+             metafield_fabric, metafield_color, metafield_cad_ws_price_test,
+             metafield_usd_ws_price, metafield_msrp_cad, metafield_msrp_us,
+             metafield_order_entry_collection, metafield_order_entry_description,
+             ShopifyProductImageURL
+      FROM RawSkusFromShopify
+      WHERE SkuID LIKE '%-%'
+        AND metafield_order_entry_collection IS NOT NULL
+        AND LEN(metafield_order_entry_collection) > 0
+        AND metafield_order_entry_collection NOT LIKE '%GROUP%'
+        AND ISNULL(metafield_cad_ws_price_test, '') <> ''
+        AND ISNULL(metafield_usd_ws_price, '') <> ''
+        AND ISNULL(metafield_msrp_cad, '') <> ''
+        AND ISNULL(metafield_msrp_us, '') <> ''
+    `)
+    console.log(`Found ${rawSkus.length} raw SKUs to process`)
 
-      -- Step 3: Bulk insert with all transformations
-      INSERT INTO Sku (
-        SkuID, Description, Quantity, Price, Size, FabricContent, SkuColor,
-        CategoryID, OnRoute, PriceCAD, PriceUSD, ShowInPreOrder,
-        OrderEntryDescription, MSRPCAD, MSRPUSD, DisplayPriority,
-        ShopifyProductVariantId, ShopifyImageURL, DateAdded, DateModified
-      )
-      SELECT DISTINCT
-        -- CLEAN SKU - NO PREFIX (key difference from .NET)
-        UPPER(r.SkuID) AS SkuID,
-        r.DisplayName AS Description,
-        r.Quantity,
-        -- Price formatting: "CAD: X / USD: Y"
-        CASE 
-          WHEN r.metafield_cad_ws_price_test IS NOT NULL AND r.metafield_usd_ws_price IS NOT NULL
-          THEN CONCAT('CAD: ', r.metafield_cad_ws_price_test, ' / USD: ', r.metafield_usd_ws_price)
-          ELSE NULL
-        END AS Price,
-        -- Size with PP category special handling
-        CASE
-          WHEN c.ID IN (399, 401) THEN
-            COALESCE(
-              pp.CorrespondingPP,
-              -- Extract last part of SKU after final dash as size
-              REVERSE(LEFT(REVERSE(r.SkuID), CHARINDEX('-', REVERSE(r.SkuID)) - 1))
-            )
-          ELSE r.Size
-        END AS Size,
-        r.metafield_fabric AS FabricContent,
-        -- Clean color JSON: remove brackets and quotes
-        REPLACE(REPLACE(REPLACE(ISNULL(r.metafield_color, ''), '[', ''), ']', ''), '"', '') AS SkuColor,
-        c.ID AS CategoryID,
-        -- OnRoute: incoming - committed (simplified, using 0 for now)
-        0 AS OnRoute,
-        r.metafield_cad_ws_price_test AS PriceCAD,
-        r.metafield_usd_ws_price AS PriceUSD,
-        -- ShowInPreOrder: true if collection contains 'PreOrder'
-        CASE WHEN r.metafield_order_entry_collection LIKE '%PreOrder%' THEN 1 ELSE 0 END AS ShowInPreOrder,
-        r.metafield_order_entry_description AS OrderEntryDescription,
-        r.metafield_msrp_cad AS MSRPCAD,
-        r.metafield_msrp_us AS MSRPUSD,
-        -- Preserve DisplayPriority or default to 10000
-        COALESCE(p.DisplayPriority, 10000) AS DisplayPriority,
-        r.ShopifyId AS ShopifyProductVariantId,
-        r.ShopifyProductImageURL AS ShopifyImageURL,
-        GETUTCDATE() AS DateAdded,
-        GETUTCDATE() AS DateModified
-      FROM RawSkusFromShopify r
-      -- Join to find matching category
-      INNER JOIN SkuCategories c ON (
-        -- Normalize collection: replace "Pre-Order" with "PreOrder"
-        -- Then match category name (strip PreOrder prefix for matching)
-        LTRIM(RTRIM(REPLACE(
-          REPLACE(r.metafield_order_entry_collection, 'Pre-Order', 'PreOrder'),
-          'PreOrder', ''
-        ))) LIKE '%' + c.Name + '%'
-        -- Match IsPreOrder flag
-        AND c.IsPreOrder = CASE WHEN r.metafield_order_entry_collection LIKE '%PreOrder%' THEN 1 ELSE 0 END
-      )
-      -- Left join to preserve DisplayPriority
-      LEFT JOIN #PreservedPriority p ON p.SkuID = UPPER(r.SkuID)
-      -- Left join to PPSizes for categories 399/401
-      LEFT JOIN PPSizes pp ON (
-        c.ID IN (399, 401) AND
-        pp.Size = CASE
-          -- Category 401 special mapping: 3→33, 4→44
-          WHEN c.ID = 401 AND TRY_CAST(REVERSE(LEFT(REVERSE(r.SkuID), CHARINDEX('-', REVERSE(r.SkuID)) - 1)) AS INT) = 3 THEN 33
-          WHEN c.ID = 401 AND TRY_CAST(REVERSE(LEFT(REVERSE(r.SkuID), CHARINDEX('-', REVERSE(r.SkuID)) - 1)) AS INT) = 4 THEN 44
-          ELSE TRY_CAST(REVERSE(LEFT(REVERSE(r.SkuID), CHARINDEX('-', REVERSE(r.SkuID)) - 1)) AS INT)
-        END
-      )
-      WHERE
-        -- Must have dash in SKU
-        r.SkuID LIKE '%-%'
-        -- Must have order_entry_collection
-        AND r.metafield_order_entry_collection IS NOT NULL
-        AND LEN(r.metafield_order_entry_collection) > 0
-        -- Exclude GROUP items (same as .NET)
-        AND r.metafield_order_entry_collection NOT LIKE '%GROUP%'
-        -- Must have pricing metafields
-        AND r.metafield_cad_ws_price_test IS NOT NULL
-        AND r.metafield_usd_ws_price IS NOT NULL
-        AND r.metafield_msrp_cad IS NOT NULL
-        AND r.metafield_msrp_us IS NOT NULL
-        -- Exclude Defective category
-        AND r.metafield_order_entry_collection NOT LIKE '%Defective%';
+    // 3. Build insert records - split collection by comma, exact match each (like .NET)
+    const inserts: Array<{
+      SkuID: string
+      Description: string | null
+      Quantity: number | null
+      Price: string | null
+      Size: string | null
+      FabricContent: string | null
+      SkuColor: string | null
+      CategoryID: number
+      PriceCAD: string | null
+      PriceUSD: string | null
+      ShowInPreOrder: boolean
+      OrderEntryDescription: string | null
+      MSRPCAD: string | null
+      MSRPUSD: string | null
+      DisplayPriority: number
+      ShopifyProductVariantId: bigint | null
+      ShopifyImageURL: string | null
+    }> = []
 
-      -- Step 4: Remove duplicates (keep first by ID, same as .NET)
+    for (const r of rawSkus) {
+      // Normalize Pre-Order → PreOrder (same as .NET)
+      const collection = (r.metafield_order_entry_collection || '').replace(/Pre-Order/g, 'PreOrder')
+      // Split by comma and process each category token
+      const parts = collection.split(',').map(s => s.trim()).filter(Boolean)
+
+      for (const part of parts) {
+        const isPreOrder = part.includes('PreOrder')
+        const catName = part.replace(/PreOrder/g, '').trim()
+
+        // Skip Defective
+        if (catName.toLowerCase() === 'defective') continue
+
+        // Exact match lookup (like .NET)
+        const key = catName.toLowerCase() + '_' + (isPreOrder ? '1' : '0')
+        const catId = catMap.get(key)
+
+        if (catId) {
+          inserts.push({
+            SkuID: r.SkuID.toUpperCase(),
+            Description: r.DisplayName,
+            Quantity: r.Quantity,
+            Price: r.metafield_cad_ws_price_test && r.metafield_usd_ws_price
+              ? `CAD: ${r.metafield_cad_ws_price_test} / USD: ${r.metafield_usd_ws_price}`
+              : null,
+            Size: r.Size || '',
+            FabricContent: r.metafield_fabric,
+            SkuColor: (r.metafield_color || '').replace(/[\[\]"]/g, ''),
+            CategoryID: catId,
+            PriceCAD: r.metafield_cad_ws_price_test,
+            PriceUSD: r.metafield_usd_ws_price,
+            ShowInPreOrder: isPreOrder,
+            OrderEntryDescription: r.metafield_order_entry_description,
+            MSRPCAD: r.metafield_msrp_cad,
+            MSRPUSD: r.metafield_msrp_us,
+            DisplayPriority: 10000,
+            ShopifyProductVariantId: r.ShopifyId,
+            ShopifyImageURL: r.ShopifyProductImageURL,
+          })
+        }
+      }
+    }
+    console.log(`Built ${inserts.length} Sku records`)
+
+    // 4. Truncate and bulk insert
+    await prisma.$executeRawUnsafe('TRUNCATE TABLE Sku')
+
+    // Insert in batches
+    const batchSize = 500
+    for (let i = 0; i < inserts.length; i += batchSize) {
+      const batch = inserts.slice(i, i + batchSize)
+      await prisma.sku.createMany({ data: batch })
+    }
+
+    // 5. Remove duplicates (keep first by ID, same as .NET)
+    await prisma.$executeRawUnsafe(`
       WITH CTE AS (
-        SELECT *,
-          ROW_NUMBER() OVER (PARTITION BY SkuID, CategoryID ORDER BY ID) AS rn
-        FROM Sku
+        SELECT *, ROW_NUMBER() OVER (PARTITION BY SkuID, CategoryID ORDER BY ID DESC) AS rn FROM Sku
       )
-      DELETE FROM CTE WHERE rn > 1;
+      DELETE FROM CTE WHERE rn > 1
+    `)
 
-      -- Cleanup temp table
-      DROP TABLE #PreservedPriority;
-    `
-
-    // Get the final count
     const count = await prisma.sku.count()
-    console.log(`Bulk SQL transform complete: ${count} SKUs inserted`)
+    console.log(`Transform complete: ${count} SKUs`)
 
-    return { processed: count, errors: 0, skipped: 0, backupTable }
+    return { processed: count, errors: 0, skipped: rawSkus.length - inserts.length, backupTable }
   } catch (err) {
-    console.error('Bulk SQL transform failed:', err)
+    console.error('Transform failed:', err)
     throw err
   }
 }
