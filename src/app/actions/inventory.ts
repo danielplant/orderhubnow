@@ -598,11 +598,11 @@ async function fetchPreOrderProducts(
   token: string,
   retries = 3
 ): Promise<{ node: ShopifyPreOrderProductNode }[]> {
-  // Fetch PreOrder products only using search query
-  // This filters at API level instead of fetching everything
+  // Fetch products - try general search for PreOrder
+  // Note: If products don't have PreOrder in searchable fields, this returns empty
   const query = `
     {
-      products(first: 100, query: "tag:PreOrder") {
+      products(first: 250) {
         edges {
           node {
             id
