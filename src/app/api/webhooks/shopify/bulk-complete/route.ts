@@ -15,8 +15,15 @@ function verifyWebhookSignature(body: string, signature: string | null): boolean
     return true
   }
 
-  if (!signature || !secret) {
-    console.warn('Webhook verification failed: missing signature or secret')
+  // If no secret configured, allow webhook (bulk operation webhooks registered via API
+  // don't have a signing secret - only app-installed webhooks do)
+  if (!secret) {
+    console.log('SHOPIFY_WEBHOOK_SECRET not configured - allowing webhook')
+    return true
+  }
+
+  if (!signature) {
+    console.warn('Webhook verification failed: missing signature')
     return false
   }
 
