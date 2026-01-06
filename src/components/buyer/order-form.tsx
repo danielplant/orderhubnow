@@ -75,7 +75,7 @@ export function OrderForm({
   repContext = null,
 }: OrderFormProps) {
   const router = useRouter()
-  const { clearAll, getPreOrderShipWindow, formData: draftFormData, setFormData } = useOrder()
+  const { clearAll, getPreOrderShipWindow, formData: draftFormData, setFormData, isLoadingDraft } = useOrder()
   const [isPending, startTransition] = useTransition()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const formSyncRef = useRef<NodeJS.Timeout | null>(null)
@@ -233,6 +233,7 @@ export function OrderForm({
   const allFormValues = watch()
   useEffect(() => {
     if (editMode) return // Don't sync in edit mode
+    if (isLoadingDraft) return // Don't sync while loading draft (would overwrite server data)
     
     // Clear any existing timeout
     if (formSyncRef.current) {
@@ -273,7 +274,7 @@ export function OrderForm({
         clearTimeout(formSyncRef.current)
       }
     }
-  }, [allFormValues, editMode, setFormData, currency])
+  }, [allFormValues, editMode, isLoadingDraft, setFormData, currency])
 
   // Debounced store name search (only for new orders)
   useEffect(() => {

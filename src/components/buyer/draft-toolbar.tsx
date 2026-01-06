@@ -39,17 +39,10 @@ export function DraftToolbar({ className }: DraftToolbarProps) {
     }
   }
 
-  // Format last saved time
+  // Format last saved text - just show "Saved" with checkmark, no running clock
   const getLastSavedText = () => {
     if (!lastSaved) return null
-    
-    const now = new Date()
-    const diff = Math.floor((now.getTime() - lastSaved.getTime()) / 1000)
-    
-    if (diff < 5) return 'Just now'
-    if (diff < 60) return `${diff}s ago`
-    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
-    return lastSaved.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    return 'Saved'
   }
 
   // Don't show toolbar if cart is empty and no draft exists
@@ -72,11 +65,11 @@ export function DraftToolbar({ className }: DraftToolbarProps) {
         )}
         {saveStatus === 'saved' && draftId && (
           <>
-            <Cloud className="size-4 text-green-600" />
+            <Check className="size-4 text-green-600" />
             <span className="text-muted-foreground">
               Draft <span className="font-mono font-medium text-foreground">{draftId}</span>
               {lastSaved && (
-                <span className="text-muted-foreground"> · Saved {getLastSavedText()}</span>
+                <span className="text-green-600"> · {getLastSavedText()}</span>
               )}
             </span>
           </>

@@ -94,6 +94,7 @@ interface OrderContextValue {
   saveStatus: SaveStatus;
   lastSaved: Date | null;
   formData: DraftFormData;
+  isLoadingDraft: boolean;
   
   // Draft methods
   setFormData: (data: DraftFormData) => void;
@@ -186,6 +187,7 @@ export function OrderProvider({ children, initialDraftId }: OrderProviderProps) 
   );
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
+  const [isLoadingDraft, setIsLoadingDraft] = useState<boolean>(!!initialDraftId);
   
   // Refs for debounced auto-save
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -289,6 +291,7 @@ export function OrderProvider({ children, initialDraftId }: OrderProviderProps) 
 
   // Load draft from server
   const loadDraft = useCallback(async (id: string): Promise<boolean> => {
+    setIsLoadingDraft(true);
     try {
       const res = await fetch(`/api/drafts/${id}`);
       
@@ -297,6 +300,7 @@ export function OrderProvider({ children, initialDraftId }: OrderProviderProps) 
           // Draft not found, clear local reference
           localStorage.removeItem(DRAFT_ID_KEY);
           setDraftId(null);
+          setIsLoadingDraft(false);
           return false;
         }
         throw new Error('Failed to load draft');
@@ -318,9 +322,11 @@ export function OrderProvider({ children, initialDraftId }: OrderProviderProps) 
       // Update localStorage
       localStorage.setItem(DRAFT_ID_KEY, id);
       
+      setIsLoadingDraft(false);
       return true;
     } catch (err) {
       console.error('Failed to load draft:', err);
+      setIsLoadingDraft(false);
       return false;
     }
   }, []);
@@ -584,6 +590,7 @@ export function OrderProvider({ children, initialDraftId }: OrderProviderProps) 
         saveStatus,
         lastSaved,
         formData,
+        isLoadingDraft,
         // Draft methods
         setFormData,
         updateFormField,
