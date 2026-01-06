@@ -52,13 +52,10 @@ function verifyWebhookSignature(body: string, signature: string | null): boolean
 // ============================================================================
 
 export async function POST(request: Request) {
-  const body = await request.text()
-  const signature = request.headers.get('x-shopify-hmac-sha256')
-
-  // Verify webhook signature
-  if (!verifyWebhookSignature(body, signature)) {
-    return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
-  }
+  // DISABLED: We now use polling instead of webhooks to avoid concurrency issues
+  // Just acknowledge the webhook and do nothing
+  console.log('Webhook received but ignored - using polling mode')
+  return NextResponse.json({ received: true, mode: 'polling' })
 
   // Track operationId outside try block for error handling
   let operationId: string | undefined
