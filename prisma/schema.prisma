@@ -245,6 +245,7 @@ model RawSkusFromShopify {
   metafield_msrp_us                 String? @db.NVarChar(Max)
   metafield_msrp_cad                String? @db.NVarChar(Max)
   ShopifyProductImageURL            String? @db.NVarChar(500)
+  InventoryItemId                   String? @db.NVarChar(100)
 }
 
 model RawSkusInventoryLevelFromShopify {

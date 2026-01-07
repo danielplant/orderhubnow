@@ -382,6 +382,8 @@ export interface ShopifyVariantData {
   imageUrl?: string
   variantImageUrl?: string
   size?: string
+  // Inventory item ID for linking to incoming quantities
+  inventoryItemGid?: string
   // Metafields from Shopify (from .NET SyncController.cs)
   metafield_order_entry_collection?: string
   metafield_order_entry_description?: string
@@ -444,6 +446,8 @@ export async function upsertShopifyVariant(data: ShopifyVariantData): Promise<vo
     // Weight data
     VariantWeight: data.variantWeight ?? null,
     VariantWeightUnit: data.variantWeightUnit ?? null,
+    // Inventory item ID for linking to incoming quantities (OnRoute)
+    InventoryItemId: data.inventoryItemGid ? parseShopifyGid(data.inventoryItemGid)?.toString() : null,
   }
 
   if (existing) {
@@ -577,6 +581,8 @@ async function processJsonlItem(item: Record<string, unknown>): Promise<boolean>
       productType: product?.productType,
       imageUrl: product?.featuredMedia?.preview?.image?.url,
       variantImageUrl: variantImage?.url,
+      // Inventory item ID for linking to incoming quantities (OnRoute)
+      inventoryItemGid: inventoryItem?.id,
       // Metafields
       metafield_order_entry_collection: metafields.order_entry_collection,
       metafield_order_entry_description: metafields.order_entry_description,
@@ -800,21 +806,24 @@ export async function transformToSkuTable(options?: { skipBackup?: boolean }): P
       metafield_order_entry_collection: string | null
       metafield_order_entry_description: string | null
       ShopifyProductImageURL: string | null
+      Incoming: number | null
     }>>(`
-      SELECT SkuID, ShopifyId, DisplayName, Quantity, Size, ProductType,
-             metafield_fabric, metafield_color, metafield_cad_ws_price_test,
-             metafield_usd_ws_price, metafield_msrp_cad, metafield_msrp_us,
-             metafield_order_entry_collection, metafield_order_entry_description,
-             ShopifyProductImageURL
-      FROM RawSkusFromShopify
-      WHERE SkuID LIKE '%-%'
-        AND metafield_order_entry_collection IS NOT NULL
-        AND LEN(metafield_order_entry_collection) > 0
-        AND metafield_order_entry_collection NOT LIKE '%GROUP%'
-        AND ISNULL(metafield_cad_ws_price_test, '') <> ''
-        AND ISNULL(metafield_usd_ws_price, '') <> ''
-        AND ISNULL(metafield_msrp_cad, '') <> ''
-        AND ISNULL(metafield_msrp_us, '') <> ''
+      SELECT r.SkuID, r.ShopifyId, r.DisplayName, r.Quantity, r.Size, r.ProductType,
+             r.metafield_fabric, r.metafield_color, r.metafield_cad_ws_price_test,
+             r.metafield_usd_ws_price, r.metafield_msrp_cad, r.metafield_msrp_us,
+             r.metafield_order_entry_collection, r.metafield_order_entry_description,
+             r.ShopifyProductImageURL,
+             inv.Incoming
+      FROM RawSkusFromShopify r
+      LEFT JOIN RawSkusInventoryLevelFromShopify inv ON r.InventoryItemId = inv.ParentId
+      WHERE r.SkuID LIKE '%-%'
+        AND r.metafield_order_entry_collection IS NOT NULL
+        AND LEN(r.metafield_order_entry_collection) > 0
+        AND r.metafield_order_entry_collection NOT LIKE '%GROUP%'
+        AND ISNULL(r.metafield_cad_ws_price_test, '') <> ''
+        AND ISNULL(r.metafield_usd_ws_price, '') <> ''
+        AND ISNULL(r.metafield_msrp_cad, '') <> ''
+        AND ISNULL(r.metafield_msrp_us, '') <> ''
     `)
     console.log(`Found ${rawSkus.length} raw SKUs to process`)
 
@@ -838,6 +847,7 @@ export async function transformToSkuTable(options?: { skipBackup?: boolean }): P
       DisplayPriority: number
       ShopifyProductVariantId: bigint | null
       ShopifyImageURL: string | null
+      OnRoute: number | null
     }> = []
 
     for (const r of rawSkus) {
@@ -879,6 +889,8 @@ export async function transformToSkuTable(options?: { skipBackup?: boolean }): P
             DisplayPriority: 10000,
             ShopifyProductVariantId: r.ShopifyId,
             ShopifyImageURL: r.ShopifyProductImageURL,
+            // OnRoute comes from Shopify "incoming" inventory quantity
+            OnRoute: r.Incoming ?? 0,
           })
         }
       }
