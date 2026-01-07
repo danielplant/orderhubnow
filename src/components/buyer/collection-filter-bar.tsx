@@ -219,7 +219,7 @@ function FilterPill({ label, value, options, onChange }: FilterPillProps) {
             )}
             onClick={() => { onChange(null); setOpen(false) }}
           >
-            All {label}s
+            All {label === 'Category' ? 'Categories' : `${label}s`}
           </button>
           {options.map(option => (
             <button

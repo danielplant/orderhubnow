@@ -127,8 +127,11 @@ export function ShopifyStatusCard({ status }: ShopifyStatusCardProps) {
         setSyncMessage(data.message || 'Sync failed')
       }
     } catch (err) {
-      setSyncState('error')
-      setSyncMessage(err instanceof Error ? err.message : 'Failed to sync')
+      // If we get a timeout/parse error, the sync is likely still running on the server
+      // Start polling to check when it completes
+      console.log('Sync request failed (likely timeout), starting polling...', err)
+      setSyncMessage('Sync in progress... Checking status.')
+      startPolling()
     }
   }
 
