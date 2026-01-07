@@ -815,7 +815,7 @@ export async function transformToSkuTable(options?: { skipBackup?: boolean }): P
              r.ShopifyProductImageURL,
              inv.Incoming
       FROM RawSkusFromShopify r
-      LEFT JOIN RawSkusInventoryLevelFromShopify inv ON r.InventoryItemId = inv.ParentId
+      LEFT JOIN RawSkusInventoryLevelFromShopify inv ON CAST(r.ShopifyId AS VARCHAR) = inv.ParentId
       WHERE r.SkuID LIKE '%-%'
         AND r.metafield_order_entry_collection IS NOT NULL
         AND LEN(r.metafield_order_entry_collection) > 0
