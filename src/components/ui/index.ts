@@ -52,6 +52,7 @@ export { Badge } from "./badge";
 export { IndicatorDot } from "./indicator-dot";
 export { IconBox } from "./icon-box";
 export { ColorSwatch } from "./color-swatch";
+export { FabricSwatch } from "./fabric-swatch";
 export { Text, textVariants, type TextProps } from "./text";
 export { DataTable, dataTableVariants, type DataTableColumn, type DataTableProps } from "./data-table";
 export { StatusBadge, statusBadgeVariants, type StatusBadgeProps } from "./status-badge";

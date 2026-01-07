@@ -7,7 +7,7 @@ import type { Product, ProductVariant, Currency } from "@/lib/types";
 import { cn, formatPrice } from "@/lib/utils";
 import { STOCK_THRESHOLDS } from "@/lib/constants/inventory";
 import { FEATURES } from "@/lib/constants/features";
-import { ColorSwatch, Text } from "@/components/ui";
+import { ColorSwatch, FabricSwatch, Text } from "@/components/ui";
 import { useOrder, useAnnouncement, useCurrency } from "@/lib/contexts";
 import {
   Dialog,
@@ -221,6 +221,7 @@ export function ProductOrderCard({ product, isPreOrder = false }: ProductOrderCa
               {product.skuBase}
             </span>
             {product.color && <ColorSwatch color={product.color} />}
+            {product.fabric && <FabricSwatch fabric={product.fabric} />}
             {hasLowStock && (
               <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-50 border border-amber-200">
                 <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
