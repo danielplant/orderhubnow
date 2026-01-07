@@ -150,7 +150,9 @@ export async function getPreOrderProductsWithVariants(
     return []
   }
 
-  // Group SKUs by base SKU (product)
+  // Group SKUs by base SKU + image URL to split cards when images differ
+  // This handles cases where Kids and Ladies variants share the same SKU prefix
+  // but have different product images
   const productMap = new Map<
     string,
     {
@@ -161,17 +163,19 @@ export async function getPreOrderProductsWithVariants(
 
   for (const sku of skus) {
     const baseSku = extractBaseSku(sku.SkuID)
+    const imageUrl = sku.ShopifyImageURL ?? ''
+    const groupKey = `${baseSku}::${imageUrl}`
 
-    if (!productMap.has(baseSku)) {
-      productMap.set(baseSku, { skus: [], baseSku })
+    if (!productMap.has(groupKey)) {
+      productMap.set(groupKey, { skus: [], baseSku })
     }
-    productMap.get(baseSku)!.skus.push(sku)
+    productMap.get(groupKey)!.skus.push(sku)
   }
 
   // Convert to Product[] format
   const products: Product[] = []
 
-  for (const [baseSku, { skus: variantSkus }] of productMap) {
+  for (const [groupKey, { skus: variantSkus, baseSku }] of productMap) {
     // Use first variant for product-level data
     const firstSku = variantSkus[0]
 
@@ -193,8 +197,9 @@ export async function getPreOrderProductsWithVariants(
       status: 'preorder' as const,
     }))
 
+    // Use groupKey as ID to ensure uniqueness when baseSku has multiple image variants
     products.push({
-      id: baseSku,
+      id: groupKey,
       skuBase: baseSku,
       title: firstSku.OrderEntryDescription || firstSku.Description || baseSku,
       fabric: firstSku.FabricContent || '',

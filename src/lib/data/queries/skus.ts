@@ -23,24 +23,32 @@ export async function getSkusByCategory(categoryId: number): Promise<Product[]> 
     ]
   })
 
-  // Group SKUs by BaseSku (parsed via JS helper)
+  // Group SKUs by BaseSku + ImageURL to split cards when images differ
+  // This handles cases where Kids and Ladies variants share the same SKU prefix
+  // but have different product images (e.g., 600C-BLK kids vs 600C-BLK ladies)
   const grouped = new Map<string, Array<typeof skus[0] & { baseSku: string; parsedSize: string }>>()
-  
+
   for (const sku of skus) {
     const { baseSku, parsedSize } = parseSkuId(sku.SkuID)
     const skuWithParsed = { ...sku, baseSku, parsedSize }
-    if (!grouped.has(baseSku)) {
-      grouped.set(baseSku, [])
+
+    // Use composite key: baseSku + image URL
+    const imageUrl = sku.ShopifyImageURL ?? ''
+    const groupKey = `${baseSku}::${imageUrl}`
+
+    if (!grouped.has(groupKey)) {
+      grouped.set(groupKey, [])
     }
-    grouped.get(baseSku)!.push(skuWithParsed)
+    grouped.get(groupKey)!.push(skuWithParsed)
   }
 
   // Transform each group into a Product
   const products: Product[] = []
 
-  for (const [baseSku, skuGroup] of grouped) {
+  for (const [groupKey, skuGroup] of grouped) {
     const first = skuGroup[0]
-    
+    const baseSku = first.baseSku
+
     // Map variants and sort by size using Limeapple's specific size sequence
     const variants: ProductVariant[] = sortBySize(
       skuGroup.map(sku => ({
@@ -53,8 +61,9 @@ export async function getSkusByCategory(categoryId: number): Promise<Product[]> 
       }))
     )
 
+    // Use groupKey as ID to ensure uniqueness when baseSku has multiple image variants
     products.push({
-      id: baseSku,
+      id: groupKey,
       skuBase: baseSku,
       title: first.OrderEntryDescription ?? first.Description ?? baseSku,
       fabric: first.FabricContent ?? '',
