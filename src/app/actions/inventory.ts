@@ -43,6 +43,7 @@ interface ShopifyVariantNode {
 interface ShopifyProductDetailNode {
   id: string;
   title: string;
+  productType: string;
   featuredImage: { url: string } | null;
   metafieldCollection: { value: string } | null;
   metafieldLabel: { value: string } | null;
@@ -256,6 +257,7 @@ async function fetchProductPage(cursor: string | null, endpoint: string, token: 
             node {
               id
               title
+              productType
               featuredImage {
                 url
               }
@@ -541,6 +543,7 @@ export async function getProductsByCategory(category: string): Promise<Product[]
       title: parent.metafieldLabel?.value || parent.title,
       fabric: parent.metafieldFabric?.value || "",
       color: colorName,
+      productType: parent.productType || "",
       priceCad,
       priceUsd,
       msrpCad,
@@ -867,6 +870,7 @@ export async function getPreOrderProductsByCategory(category: string): Promise<P
       title: parent.metafieldLabel?.value || parent.title,
       fabric: parent.metafieldFabric?.value || "",
       color: colorName,
+      productType: "",  // PreOrder via Shopify API doesn't have productType in simplified query
       priceCad,
       priceUsd,
       msrpCad,

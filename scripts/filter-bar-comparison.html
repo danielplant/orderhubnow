@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Filter Bar Comparison</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; }
+    
+    .section { padding: 24px; margin-bottom: 20px; background: white; }
+    .section-label { 
+      font-size: 11px; font-weight: 600; color: #666; 
+      text-transform: uppercase; letter-spacing: 1px; 
+      margin-bottom: 16px; 
+      display: flex; align-items: center; gap: 12px;
+    }
+    .section-label::after { content: ''; flex: 1; height: 1px; background: #e0e0e0; }
+    
+    .page-title { font-size: 24px; font-weight: 600; margin-bottom: 16px; }
+    
+    /* ========== STYLE 1: DAWN (Shopify) ========== */
+    .dawn-bar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 0;
+      border-top: 1px solid #e0e0e0;
+      border-bottom: 1px solid #e0e0e0;
+    }
+    .dawn-filter-btn {
+      display: flex; align-items: center; gap: 6px;
+      padding: 10px 16px;
+      font-size: 14px;
+      background: none;
+      border: 1px solid #222;
+      cursor: pointer;
+    }
+    .dawn-filter-btn:hover { background: #f5f5f5; }
+    .dawn-sort {
+      margin-left: auto;
+      display: flex; align-items: center; gap: 8px;
+      font-size: 14px;
+    }
+    .dawn-sort select {
+      padding: 8px 28px 8px 12px;
+      font-size: 14px;
+      border: none;
+      background: transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23333'/%3E%3C/svg%3E") no-repeat right 8px center;
+      appearance: none;
+      cursor: pointer;
+    }
+    .dawn-count { font-size: 14px; color: #666; }
+    .dawn-search {
+      padding: 10px 14px;
+      font-size: 14px;
+      border: 1px solid #ccc;
+      width: 180px;
+    }
+    .dawn-search:focus { outline: none; border-color: #222; }
+    
+    /* Drawer simulation */
+    .dawn-drawer {
+      margin-top: 12px;
+      padding: 16px;
+      background: #fafafa;
+      border: 1px solid #e0e0e0;
+      display: flex;
+      gap: 24px;
+    }
+    .dawn-drawer-group label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 8px; text-transform: uppercase; }
+    .dawn-drawer-group select { padding: 10px 32px 10px 12px; font-size: 14px; border: 1px solid #ccc; min-width: 160px; }
+    
+    /* ========== STYLE 2: ASOS/ZARA ========== */
+    .asos-bar {
+      display: flex;
+      align-items: center;
+      background: #fff;
+      padding: 0;
+      border-bottom: 1px solid #e0e0e0;
+      position: sticky;
+      top: 0;
+    }
+    .asos-filter-item {
+      padding: 16px 20px;
+      font-size: 13px;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      border: none;
+      background: none;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .asos-filter-item:hover { background: #f5f5f5; }
+    .asos-filter-item.active { border-bottom-color: #222; }
+    .asos-filter-item svg { width: 10px; height: 10px; }
+    .asos-divider { width: 1px; height: 24px; background: #e0e0e0; }
+    .asos-search {
+      margin-left: auto;
+      padding: 10px 14px 10px 36px;
+      font-size: 13px;
+      border: none;
+      background: #f5f5f5 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%23999'%3E%3Cpath d='M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z'/%3E%3C/svg%3E") no-repeat 12px center;
+      width: 200px;
+      margin-right: 16px;
+    }
+    .asos-search:focus { outline: none; background-color: #eee; }
+    .asos-count { padding: 16px; font-size: 13px; color: #666; margin-left: 8px; }
+    
+    /* Dropdown panel */
+    .asos-dropdown {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      background: white;
+      border: 1px solid #e0e0e0;
+      padding: 16px;
+      min-width: 200px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+      z-index: 10;
+    }
+    .asos-dropdown label { display: block; padding: 8px 0; font-size: 14px; cursor: pointer; }
+    .asos-dropdown label:hover { color: #666; }
+    .asos-wrapper { position: relative; }
+    
+    /* ========== STYLE 3: NIKE (Pills) ========== */
+    .nike-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 16px 0;
+    }
+    .nike-pill {
+      padding: 10px 18px;
+      font-size: 14px;
+      border-radius: 20px;
+      border: 1.5px solid #ccc;
+      background: white;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s;
+    }
+    .nike-pill:hover { border-color: #222; }
+    .nike-pill.active { background: #222; color: white; border-color: #222; }
+    .nike-pill svg { width: 12px; height: 12px; transition: transform 0.2s; }
+    .nike-pill.active svg { transform: rotate(180deg); }
+    .nike-search {
+      margin-left: auto;
+      padding: 10px 16px;
+      font-size: 14px;
+      border-radius: 20px;
+      border: 1.5px solid #ccc;
+      width: 200px;
+    }
+    .nike-search:focus { outline: none; border-color: #222; }
+    .nike-search::placeholder { color: #999; }
+    .nike-count { font-size: 14px; color: #666; }
+    
+    /* Active filter tags */
+    .nike-tags {
+      display: flex;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .nike-tag {
+      padding: 6px 10px 6px 12px;
+      font-size: 12px;
+      background: #f5f5f5;
+      border-radius: 16px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .nike-tag button {
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 14px;
+      color: #666;
+      line-height: 1;
+    }
+    .nike-tag button:hover { color: #222; }
+    .nike-clear {
+      font-size: 12px;
+      color: #666;
+      text-decoration: underline;
+      cursor: pointer;
+      margin-left: 8px;
+    }
+
+    .arrow { font-size: 10px; }
+  </style>
+</head>
+<body>
+
+<!-- ========== STYLE 1: SHOPIFY DAWN ========== -->
+<div class="section">
+  <div class="section-label">Style 1: Shopify Dawn — Filter Drawer</div>
+  <h1 class="page-title">Almost Gone - Last Call</h1>
+  
+  <div class="dawn-bar">
+    <button class="dawn-filter-btn">
+      <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h10M5 10h6M7 14h2"/></svg>
+      Filter
+    </button>
+    <input type="text" class="dawn-search" placeholder="Search SKU...">
+    <span class="dawn-count">71 products</span>
+    <div class="dawn-sort">
+      <span>Sort by:</span>
+      <select>
+        <option>Best selling</option>
+        <option>Price: Low to High</option>
+        <option>Price: High to Low</option>
+        <option>Newest</option>
+      </select>
+    </div>
+  </div>
+  
+  <div class="dawn-drawer">
+    <div class="dawn-drawer-group">
+      <label>Type</label>
+      <select>
+        <option>All Types</option>
+        <option>Leggings</option>
+        <option>T-Shirts</option>
+        <option>Hoodies</option>
+      </select>
+    </div>
+    <div class="dawn-drawer-group">
+      <label>Color</label>
+      <select>
+        <option>All Colors</option>
+        <option>Black</option>
+        <option>Blue</option>
+        <option>Pink</option>
+      </select>
+    </div>
+    <div class="dawn-drawer-group">
+      <label>Fabric</label>
+      <select>
+        <option>All Fabrics</option>
+        <option>Plush</option>
+        <option>Organic Cotton</option>
+        <option>UPF 50+</option>
+      </select>
+    </div>
+  </div>
+</div>
+
+<!-- ========== STYLE 2: ASOS/ZARA ========== -->
+<div class="section" style="padding: 0;">
+  <div style="padding: 24px 24px 0;">
+    <div class="section-label">Style 2: ASOS/Zara — Sticky Bar + Dropdowns</div>
+    <h1 class="page-title">Almost Gone - Last Call</h1>
+  </div>
+  
+  <div class="asos-bar">
+    <div class="asos-wrapper">
+      <button class="asos-filter-item active">
+        Type <span class="arrow">▼</span>
+      </button>
+    </div>
+    <div class="asos-divider"></div>
+    <button class="asos-filter-item">Color <span class="arrow">▼</span></button>
+    <div class="asos-divider"></div>
+    <button class="asos-filter-item">Fabric <span class="arrow">▼</span></button>
+    <span class="asos-count">71 styles</span>
+    <input type="text" class="asos-search" placeholder="Search SKU...">
+  </div>
+  
+  <!-- Example dropdown shown -->
+  <div style="position: relative; padding: 0 24px;">
+    <div class="asos-dropdown" style="position: relative; display: inline-block; margin: 12px 0;">
+      <label><input type="radio" name="type" checked> All Types</label>
+      <label><input type="radio" name="type"> Leggings</label>
+      <label><input type="radio" name="type"> T-Shirts</label>
+      <label><input type="radio" name="type"> Hoodies</label>
+      <label><input type="radio" name="type"> Swim 2-Piece</label>
+    </div>
+  </div>
+</div>
+
+<!-- ========== STYLE 3: NIKE ========== -->
+<div class="section">
+  <div class="section-label">Style 3: Nike — Pill Toggles</div>
+  <h1 class="page-title">Almost Gone - Last Call</h1>
+  
+  <div class="nike-bar">
+    <button class="nike-pill active">
+      Type <svg viewBox="0 0 12 12" fill="currentColor"><path d="M2 4l4 4 4-4"/></svg>
+    </button>
+    <button class="nike-pill">
+      Color <svg viewBox="0 0 12 12" fill="currentColor"><path d="M2 4l4 4 4-4"/></svg>
+    </button>
+    <button class="nike-pill">
+      Fabric <svg viewBox="0 0 12 12" fill="currentColor"><path d="M2 4l4 4 4-4"/></svg>
+    </button>
+    <span class="nike-count">71 styles</span>
+    <input type="text" class="nike-search" placeholder="🔍 Search SKU...">
+  </div>
+  
+  <div class="nike-tags">
+    <span class="nike-tag">Type: Leggings <button>×</button></span>
+    <span class="nike-tag">Color: Black <button>×</button></span>
+    <span class="nike-clear">Clear All</span>
+  </div>
+</div>
+
+</body>
+</html>

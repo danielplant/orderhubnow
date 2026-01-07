@@ -231,6 +231,7 @@ model RawSkusFromShopify {
   VariantWeightUnit                 String? @db.NVarChar(50)
   VariantWeightInGrams              Float?
   productId                         String? @db.NVarChar(500)
+  ProductType                       String? @db.NVarChar(200)
   metafield_order_entry_collection  String? @db.NVarChar(200)
   metafield_order_entry_description String? @db.NVarChar(Max)
   metafield_msrp                    String? @db.NVarChar(Max)
@@ -315,6 +316,7 @@ model Sku {
   Size                    String?        @db.NVarChar(50)
   FabricContent           String?        @db.NVarChar(Max)
   SkuColor                String?        @db.NVarChar(400)
+  ProductType             String?        @db.NVarChar(200)
   DateAdded               DateTime?      @default(now(), map: "DF_Sku_DateAdded") @db.DateTime
   DateModified            DateTime?      @default(now(), map: "DF_Sku_DateModified") @db.DateTime
   CategoryID              Int?

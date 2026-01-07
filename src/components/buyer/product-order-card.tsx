@@ -14,6 +14,11 @@ import {
   DialogContent,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+} from "@/components/ui/tooltip";
 
 function getPrice(item: { priceCad: number; priceUsd: number }, currency: Currency): number {
   return currency === "CAD" ? item.priceCad : item.priceUsd;
@@ -228,14 +233,21 @@ export function ProductOrderCard({ product, isPreOrder = false }: ProductOrderCa
               </span>
             )}
           </div>
-          <span className="text-lg font-bold text-foreground">
+          <span className="text-sm font-bold text-foreground">
             {formatPrice(price)}
           </span>
         </div>
 
-        <h3 className="text-sm font-semibold text-foreground tracking-tight leading-snug">
-          {product.title || product.skuBase}
-        </h3>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <h3 className="text-xs font-medium text-foreground tracking-tight truncate cursor-default">
+              {product.title || product.skuBase}
+            </h3>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" className="max-w-[250px]">
+            {product.title || product.skuBase}
+          </TooltipContent>
+        </Tooltip>
 
         <div className="flex items-center justify-between mt-1">
           <span className="text-xs text-muted-foreground">
@@ -261,7 +273,7 @@ export function ProductOrderCard({ product, isPreOrder = false }: ProductOrderCa
 
       {/* Size Grid (direct order entry) */}
       <div className="border-t border-border shrink-0">
-        <div className="px-3 py-3 overflow-x-auto scrollbar-none">
+        <div className="px-3 py-2 overflow-x-auto scrollbar-none">
           {orderableVariants.length === 0 ? (
             <span className="text-sm text-muted-foreground italic">No sizes available</span>
           ) : (
@@ -307,17 +319,17 @@ export function ProductOrderCard({ product, isPreOrder = false }: ProductOrderCa
                 </div>
               ))}
 
-              <div className="bg-muted px-2 py-2 text-xs font-semibold">Order</div>
+              <div className="bg-muted px-2 py-1.5 text-xs font-semibold">Order</div>
               {orderableVariants.map((variant) => {
                 const maxOrderable = getMaxOrderable(variant, isPreOrder);
                 const orderedQty = productOrders[variant.sku] || 0;
                 return (
-                  <div key={`order-${variant.sku}`} className="px-2 py-2">
+                  <div key={`order-${variant.sku}`} className="px-2 py-1.5">
                     <input
                       inputMode="numeric"
                       pattern="[0-9]*"
                       className={cn(
-                        "w-full h-9 rounded-sm border border-input bg-background text-center text-sm tabular-nums",
+                        "w-full h-7 rounded-sm border border-input bg-background text-center text-xs tabular-nums",
                         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       )}
                       aria-label={`Order quantity for size ${variant.size || "OS"}`}

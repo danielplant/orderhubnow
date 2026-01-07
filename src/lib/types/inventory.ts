@@ -60,6 +60,7 @@ export interface Product {
   title: string;
   fabric: string;
   color: string;
+  productType: string;
   priceCad: number;
   priceUsd: number;
   msrpCad: number;

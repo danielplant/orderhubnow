@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, Calendar } from "lucide-react";
 import { BrandHeader } from "@/components/buyer/brand-header";
 import { Divider } from "@/components/ui";
-import { ProductOrderCard } from "@/components/buyer/product-order-card";
+import { CollectionProductsGrid } from "@/components/buyer/collection-products-grid";
 import {
   getPreOrderCategoryById,
   getPreOrderProductsWithVariants,
@@ -80,19 +80,14 @@ export default async function PreOrderCollectionPage({ params, searchParams }: P
             Back to Pre-Order Collections
           </Link>
 
-          <div className="flex flex-col md:flex-row md:items-baseline justify-between gap-4">
-            <div>
-              <h1 className="text-3xl md:text-4xl font-medium tracking-tight text-foreground">
-                {category.name}
-              </h1>
-              <div className="flex items-center gap-2 mt-2 text-primary">
-                <Calendar className="h-5 w-5" />
-                <span className="text-lg font-medium">Ships: {shipWindow}</span>
-              </div>
+          <div>
+            <h1 className="text-3xl md:text-4xl font-medium tracking-tight text-foreground">
+              {category.name}
+            </h1>
+            <div className="flex items-center gap-2 mt-2 text-primary">
+              <Calendar className="h-5 w-5" />
+              <span className="text-lg font-medium">Ships: {shipWindow}</span>
             </div>
-            <span className="text-sm font-mono text-muted-foreground">
-              {products.length} Products
-            </span>
           </div>
 
           <p className="text-base text-muted-foreground max-w-2xl">
@@ -103,17 +98,9 @@ export default async function PreOrderCollectionPage({ params, searchParams }: P
           <Divider size="md" strong />
         </div>
 
-        {/* Product Grid - Uses unified ProductOrderCard with isPreOrder=true */}
+        {/* Filter Bar + Product Grid */}
         {products.length > 0 ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6">
-            {products.map((product) => (
-              <ProductOrderCard
-                key={product.id}
-                product={product}
-                isPreOrder
-              />
-            ))}
-          </div>
+          <CollectionProductsGrid products={products} isPreOrder />
         ) : (
           <div className="text-center py-16">
             <p className="text-muted-foreground">

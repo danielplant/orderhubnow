@@ -1,0 +1,146 @@
+[
+  {
+    "CategoryID": 157,
+    "BaseSku": "600C-BLK",
+    "RowCount": 5,
+    "DistinctOED": 1,
+    "DistinctDesc": 5,
+    "DistinctImg": 2
+  },
+  {
+    "CategoryID": 157,
+    "BaseSku": "600C-VPTD",
+    "RowCount": 7,
+    "DistinctOED": 1,
+    "DistinctDesc": 7,
+    "DistinctImg": 2
+  },
+  {
+    "CategoryID": 358,
+    "BaseSku": "582P-CC",
+    "RowCount": 6,
+    "DistinctOED": 1,
+    "DistinctDesc": 6,
+    "DistinctImg": 2
+  },
+  {
+    "CategoryID": 358,
+    "BaseSku": "582P-KS",
+    "RowCount": 6,
+    "DistinctOED": 1,
+    "DistinctDesc": 6,
+    "DistinctImg": 2
+  },
+  {
+    "CategoryID": 358,
+    "BaseSku": "ADDISON-MN",
+    "RowCount": 6,
+    "DistinctOED": 1,
+    "DistinctDesc": 6,
+    "DistinctImg": 2
+  },
+  {
+    "CategoryID": 358,
+    "BaseSku": "ALEXA-MU",
+    "RowCount": 2,
+    "DistinctOED": 1,
+    "DistinctDesc": 2,
+    "DistinctImg": 2
+  },
+  {
+    "CategoryID": 358,
+    "BaseSku": "EMILIA-MU",
+    "RowCount": 9,
+    "DistinctOED": 1,
+    "DistinctDesc": 9,
+    "DistinctImg": 2
+  },
+  {
+    "CategoryID": 358,
+    "BaseSku": "FIORELLA-FC",
+    "RowCount": 2,
+    "DistinctOED": 1,
+    "DistinctDesc": 2,
+    "DistinctImg": 2
+  },
+  {
+    "CategoryID": 358,
+    "BaseSku": "GEORGIA-BU",
+    "RowCount": 8,
+    "DistinctOED": 1,
+    "DistinctDesc": 8,
+    "DistinctImg": 2
+  },
+  {
+    "CategoryID": 358,
+    "BaseSku": "LILIANNA-BU",
+    "RowCount": 7,
+    "DistinctOED": 1,
+    "DistinctDesc": 7,
+    "DistinctImg": 2
+  },
+  {
+    "CategoryID": 358,
+    "BaseSku": "MADELIENE-BK",
+    "RowCount": 8,
+    "DistinctOED": 1,
+    "DistinctDesc": 8,
+    "DistinctImg": 2
+  },
+  {
+    "CategoryID": 358,
+    "BaseSku": "MARINA-MG",
+    "RowCount": 8,
+    "DistinctOED": 1,
+    "DistinctDesc": 8,
+    "DistinctImg": 2
+  },
+  {
+    "CategoryID": 410,
+    "BaseSku": "582P-FD",
+    "RowCount": 6,
+    "DistinctOED": 1,
+    "DistinctDesc": 6,
+    "DistinctImg": 2
+  },
+  {
+    "CategoryID": 410,
+    "BaseSku": "584P-FD",
+    "RowCount": 6,
+    "DistinctOED": 1,
+    "DistinctDesc": 6,
+    "DistinctImg": 2
+  },
+  {
+    "CategoryID": 410,
+    "BaseSku": "611P-JY",
+    "RowCount": 6,
+    "DistinctOED": 1,
+    "DistinctDesc": 6,
+    "DistinctImg": 2
+  },
+  {
+    "CategoryID": 410,
+    "BaseSku": "EMERY-CM",
+    "RowCount": 6,
+    "DistinctOED": 1,
+    "DistinctDesc": 6,
+    "DistinctImg": 2
+  },
+  {
+    "CategoryID": 423,
+    "BaseSku": "582P-CC",
+    "RowCount": 6,
+    "DistinctOED": 1,
+    "DistinctDesc": 6,
+    "DistinctImg": 2
+  },
+  {
+    "CategoryID": 423,
+    "BaseSku": "611P-JY",
+    "RowCount": 6,
+    "DistinctOED": 1,
+    "DistinctDesc": 6,
+    "DistinctImg": 2
+  }
+]

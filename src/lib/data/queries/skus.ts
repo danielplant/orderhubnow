@@ -68,6 +68,7 @@ export async function getSkusByCategory(categoryId: number): Promise<Product[]> 
       title: first.OrderEntryDescription ?? first.Description ?? baseSku,
       fabric: first.FabricContent ?? '',
       color: first.SkuColor ?? '',
+      productType: first.ProductType ?? '',
       priceCad: parsePrice(first.PriceCAD),
       priceUsd: parsePrice(first.PriceUSD),
       msrpCad: parsePrice(first.MSRPCAD),

@@ -1,0 +1,27 @@
+[
+  {
+    "ShopifyImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/megan-crinkle-textured-one-piece-swimsuit_70995513-b08c-4989-8db5-0ecf0a8f4a43.jpg?v=1756432812",
+    "TotalUses": 21,
+    "DistinctBaseSkus": 4
+  },
+  {
+    "ShopifyImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/vasia-crinkle-skirt.jpg?v=1756432949",
+    "TotalUses": 20,
+    "DistinctBaseSkus": 4
+  },
+  {
+    "ShopifyImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/products/2142B-BK-Activewear-fulllength-leggings-black-front.jpg?v=1756433119",
+    "TotalUses": 11,
+    "DistinctBaseSkus": 4
+  },
+  {
+    "ShopifyImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/584P-DS-daisy-smiles-loungewear-pant.jpg?v=1754593585",
+    "TotalUses": 9,
+    "DistinctBaseSkus": 4
+  },
+  {
+    "ShopifyImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/582P-GS-groovy-smiles-shorts_a9abaafe-5a68-4a95-8362-30650a36fe6b.jpg?v=1754593384",
+    "TotalUses": 3,
+    "DistinctBaseSkus": 3
+  }
+]

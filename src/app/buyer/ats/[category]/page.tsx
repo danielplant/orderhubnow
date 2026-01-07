@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { BrandHeader } from "@/components/buyer/brand-header";
-import { ProductOrderCard } from "@/components/buyer/product-order-card";
+import { CollectionProductsGrid } from "@/components/buyer/collection-products-grid";
 import { Divider } from "@/components/ui";
 import { getSkusByCategory, getCategoryName } from "@/lib/data/queries/skus";
 import { buildRepQueryStringFromObject } from "@/lib/utils/rep-context";
@@ -43,25 +43,16 @@ export default async function CategoryPage({ params, searchParams }: PageProps) 
             Back to Collections
           </Link>
 
-          <div className="flex items-baseline justify-between gap-4">
-            <h1 className="text-3xl md:text-4xl font-medium tracking-tight text-foreground">
-              {displayName}
-            </h1>
-            <span className="text-sm font-mono text-muted-foreground">
-              {products.length} {products.length === 1 ? "style" : "styles"}
-            </span>
-          </div>
+          <h1 className="text-3xl md:text-4xl font-medium tracking-tight text-foreground">
+            {displayName}
+          </h1>
 
           <Divider size="md" strong />
         </div>
 
-        {/* Products Grid */}
+        {/* Filter Bar + Products Grid */}
         {products.length > 0 ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-            {products.map((product) => (
-              <ProductOrderCard key={product.id} product={product} />
-            ))}
-          </div>
+          <CollectionProductsGrid products={products} />
         ) : (
           <div className="text-center py-16">
             <p className="text-muted-foreground">No products available in this collection.</p>

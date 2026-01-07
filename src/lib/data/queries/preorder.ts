@@ -137,10 +137,15 @@ export async function getPreOrderProductsWithVariants(
   }
 
   // Fetch SKUs from SQL database
+  // Match .NET behavior: Show sizes where ShowInPreOrder=true OR Quantity<1
+  // This ensures all available sizes appear, not just those explicitly marked
   const skus = await prisma.sku.findMany({
     where: {
       CategoryID: categoryId,
-      ShowInPreOrder: true,
+      OR: [
+        { ShowInPreOrder: true },
+        { Quantity: { lt: 1 } },
+      ],
     },
     orderBy: [{ DisplayPriority: 'asc' }, { SkuID: 'asc' }],
   })
@@ -204,6 +209,7 @@ export async function getPreOrderProductsWithVariants(
       title: firstSku.OrderEntryDescription || firstSku.Description || baseSku,
       fabric: firstSku.FabricContent || '',
       color: firstSku.SkuColor || '',
+      productType: firstSku.ProductType || '',
       priceCad: parsePriceFromString(firstSku.PriceCAD),
       priceUsd: parsePriceFromString(firstSku.PriceUSD),
       msrpCad: parsePriceFromString(firstSku.MSRPCAD),

@@ -1,0 +1,1012 @@
+[
+  {
+    "CategoryID": 157,
+    "SkuID": "600C-FC-10/12",
+    "Sku_Description": "Minky Bubble Zip Hoodie - 10/12 / Fuchsia",
+    "Sku_OED": "CUDDLE BUBBLE TIE DYE HOODIE",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/600c-fc-lifestyle-1.webp?v=1756433055",
+    "Raw_DisplayName": "Minky Bubble Zip Hoodie - Fuchsia - 10/12 / Fuchsia",
+    "Raw_LabelTitle": "CUDDLE BUBBLE HOODIE",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/600c-fc-lifestyle-2_6f4d1840-c891-4740-a93b-2cff563cf297.webp?v=1756433055"
+  },
+  {
+    "CategoryID": 157,
+    "SkuID": "600C-FC-14/16",
+    "Sku_Description": "Minky Bubble Zip Hoodie - 14/16 / Fuchsia",
+    "Sku_OED": "CUDDLE BUBBLE TIE DYE HOODIE",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/600c-fc-lifestyle-1.webp?v=1756433055",
+    "Raw_DisplayName": "Minky Bubble Zip Hoodie - Fuchsia - 14/16 / Fuchsia",
+    "Raw_LabelTitle": "CUDDLE BUBBLE HOODIE",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/600c-fc-lifestyle-2_6f4d1840-c891-4740-a93b-2cff563cf297.webp?v=1756433055"
+  },
+  {
+    "CategoryID": 157,
+    "SkuID": "600C-FC-5/6",
+    "Sku_Description": "Minky Bubble Zip Hoodie - 5/6 / Fuchsia",
+    "Sku_OED": "CUDDLE BUBBLE TIE DYE HOODIE",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/600c-fc-lifestyle-1.webp?v=1756433055",
+    "Raw_DisplayName": "Minky Bubble Zip Hoodie - Fuchsia - 5/6 / Fuchsia",
+    "Raw_LabelTitle": "CUDDLE BUBBLE HOODIE",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/600c-fc-lifestyle-2_6f4d1840-c891-4740-a93b-2cff563cf297.webp?v=1756433055"
+  },
+  {
+    "CategoryID": 157,
+    "SkuID": "600C-FC-7/8",
+    "Sku_Description": "Minky Bubble Zip Hoodie - 7/8 / Fuchsia",
+    "Sku_OED": "CUDDLE BUBBLE TIE DYE HOODIE",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/600c-fc-lifestyle-1.webp?v=1756433055",
+    "Raw_DisplayName": "Minky Bubble Zip Hoodie - Fuchsia - 7/8 / Fuchsia",
+    "Raw_LabelTitle": "CUDDLE BUBBLE HOODIE",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/600c-fc-lifestyle-2_6f4d1840-c891-4740-a93b-2cff563cf297.webp?v=1756433055"
+  },
+  {
+    "CategoryID": 157,
+    "SkuID": "600C-SC-10/12",
+    "Sku_Description": "Minky Bubble Zip Hoodie - 10/12 / Coral",
+    "Sku_OED": "CUDDLE BUBBLE TIE DYE HOODIE",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/600c-sc.webp?v=1756433056",
+    "Raw_DisplayName": "Minky Bubble Zip Hoodie - Coral - 10/12 / Coral",
+    "Raw_LabelTitle": "CUDDLE BUBBLE HOODIE",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/600c-sc-2.webp?v=1756433057"
+  },
+  {
+    "CategoryID": 157,
+    "SkuID": "600C-SC-14/16",
+    "Sku_Description": "Minky Bubble Zip Hoodie - 14/16 / Coral",
+    "Sku_OED": "CUDDLE BUBBLE TIE DYE HOODIE",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/600c-sc.webp?v=1756433056",
+    "Raw_DisplayName": "Minky Bubble Zip Hoodie - Coral - 14/16 / Coral",
+    "Raw_LabelTitle": "CUDDLE BUBBLE HOODIE",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/600c-sc-2.webp?v=1756433057"
+  },
+  {
+    "CategoryID": 157,
+    "SkuID": "600C-SC-5/6",
+    "Sku_Description": "Minky Bubble Zip Hoodie - 5/6 / Coral",
+    "Sku_OED": "CUDDLE BUBBLE TIE DYE HOODIE",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/600c-sc.webp?v=1756433056",
+    "Raw_DisplayName": "Minky Bubble Zip Hoodie - Coral - 5/6 / Coral",
+    "Raw_LabelTitle": "CUDDLE BUBBLE HOODIE",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/600c-sc-2.webp?v=1756433057"
+  },
+  {
+    "CategoryID": 157,
+    "SkuID": "600C-SC-7/8",
+    "Sku_Description": "Minky Bubble Zip Hoodie - 7/8 / Coral",
+    "Sku_OED": "CUDDLE BUBBLE TIE DYE HOODIE",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/600c-sc.webp?v=1756433056",
+    "Raw_DisplayName": "Minky Bubble Zip Hoodie - Coral - 7/8 / Coral",
+    "Raw_LabelTitle": "CUDDLE BUBBLE HOODIE",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/600c-sc-2.webp?v=1756433057"
+  },
+  {
+    "CategoryID": 187,
+    "SkuID": "143S-BK-L",
+    "Sku_Description": "Seamless Activewear Leggings - Black - L (14-16) / Black",
+    "Sku_OED": "Activewear Seamless Leggings",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/143s-bk.webp?v=1756432742",
+    "Raw_DisplayName": "Seamless Activewear Leggings - L (14-16) / Black",
+    "Raw_LabelTitle": "Activewear Seamless Leggings",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/143s-bk-seamless-black-leggings_a8c13d42-002f-4e58-8a01-88172ac7311f.jpg?v=1761858912"
+  },
+  {
+    "CategoryID": 187,
+    "SkuID": "143S-BK-M",
+    "Sku_Description": "Seamless Activewear Leggings - Black - M (10-12) / Black",
+    "Sku_OED": "Activewear Seamless Leggings",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/143s-bk.webp?v=1756432742",
+    "Raw_DisplayName": "Seamless Activewear Leggings - M (10-12) / Black",
+    "Raw_LabelTitle": "Activewear Seamless Leggings",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/143s-bk-seamless-black-leggings_a8c13d42-002f-4e58-8a01-88172ac7311f.jpg?v=1761858912"
+  },
+  {
+    "CategoryID": 187,
+    "SkuID": "143S-BK-S",
+    "Sku_Description": "Seamless Activewear Leggings - Black - S (7-8) / Black",
+    "Sku_OED": "Activewear Seamless Leggings",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/143s-bk.webp?v=1756432742",
+    "Raw_DisplayName": "Seamless Activewear Leggings - S (7-8) / Black",
+    "Raw_LabelTitle": "Activewear Seamless Leggings",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/143s-bk-seamless-black-leggings_a8c13d42-002f-4e58-8a01-88172ac7311f.jpg?v=1761858912"
+  },
+  {
+    "CategoryID": 187,
+    "SkuID": "143S-CH-L",
+    "Sku_Description": "Seamless Activewear Leggings - Charcoal - L (14-16) / Dark Gray",
+    "Sku_OED": "Activewear Seamless Leggings",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/143S-CH.webp?v=1756432742",
+    "Raw_DisplayName": "Seamless Activewear Leggings - L (14-16) / Dark Gray",
+    "Raw_LabelTitle": "Activewear Seamless Leggings",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/143S-CH_08d28918-6067-4ee8-869b-31d6701b9e2d.webp?v=1761858912"
+  },
+  {
+    "CategoryID": 187,
+    "SkuID": "143S-CH-M",
+    "Sku_Description": "Seamless Activewear Leggings - Charcoal - M (10-12) / Dark Gray",
+    "Sku_OED": "Activewear Seamless Leggings",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/143S-CH.webp?v=1756432742",
+    "Raw_DisplayName": "Seamless Activewear Leggings - M (10-12) / Dark Gray",
+    "Raw_LabelTitle": "Activewear Seamless Leggings",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/143S-CH_08d28918-6067-4ee8-869b-31d6701b9e2d.webp?v=1761858912"
+  },
+  {
+    "CategoryID": 187,
+    "SkuID": "143S-CH-S",
+    "Sku_Description": "Seamless Activewear Leggings - Charcoal - S (7-8) / Dark Gray",
+    "Sku_OED": "Activewear Seamless Leggings",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/143S-CH.webp?v=1756432742",
+    "Raw_DisplayName": "Seamless Activewear Leggings - S (7-8) / Dark Gray",
+    "Raw_LabelTitle": "Activewear Seamless Leggings",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/143S-CH_08d28918-6067-4ee8-869b-31d6701b9e2d.webp?v=1761858912"
+  },
+  {
+    "CategoryID": 187,
+    "SkuID": "143S-MU-L",
+    "Sku_Description": "Seamless Activewear Leggings - Gray - L (14-16) / Gray",
+    "Sku_OED": "Activewear Seamless Leggings",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/143S-MU.webp?v=1756432742",
+    "Raw_DisplayName": "Seamless Activewear Leggings - L (14-16) / Gray",
+    "Raw_LabelTitle": "Activewear Seamless Leggings",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/143S-CH_08d28918-6067-4ee8-869b-31d6701b9e2d.webp?v=1761858912"
+  },
+  {
+    "CategoryID": 187,
+    "SkuID": "143S-MU-M",
+    "Sku_Description": "Seamless Activewear Leggings - Gray - M (10-12) / Gray",
+    "Sku_OED": "Activewear Seamless Leggings",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/143S-MU.webp?v=1756432742",
+    "Raw_DisplayName": "Seamless Activewear Leggings - M (10-12) / Gray",
+    "Raw_LabelTitle": "Activewear Seamless Leggings",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/143S-CH_08d28918-6067-4ee8-869b-31d6701b9e2d.webp?v=1761858912"
+  },
+  {
+    "CategoryID": 187,
+    "SkuID": "143S-MU-S",
+    "Sku_Description": "Seamless Activewear Leggings - Gray - S (7-8) / Gray",
+    "Sku_OED": "Activewear Seamless Leggings",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/143S-MU.webp?v=1756432742",
+    "Raw_DisplayName": "Seamless Activewear Leggings - S (7-8) / Gray",
+    "Raw_LabelTitle": "Activewear Seamless Leggings",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/143S-CH_08d28918-6067-4ee8-869b-31d6701b9e2d.webp?v=1761858912"
+  },
+  {
+    "CategoryID": 187,
+    "SkuID": "143S-NV-L",
+    "Sku_Description": "Seamless Activewear Leggings - Blue - L (14-16) / Blue",
+    "Sku_OED": "Activewear Seamless Leggings",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/143s-bu-blue-seamless-leggings.webp?v=1761856852",
+    "Raw_DisplayName": "Seamless Activewear Leggings - L (14-16) / Blue",
+    "Raw_LabelTitle": "Activewear Seamless Leggings",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/143S-CH_08d28918-6067-4ee8-869b-31d6701b9e2d.webp?v=1761858912"
+  },
+  {
+    "CategoryID": 187,
+    "SkuID": "143S-NV-M",
+    "Sku_Description": "Seamless Activewear Leggings - Blue - M (10-12) / Blue",
+    "Sku_OED": "Activewear Seamless Leggings",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/143s-bu-blue-seamless-leggings.webp?v=1761856852",
+    "Raw_DisplayName": "Seamless Activewear Leggings - M (10-12) / Blue",
+    "Raw_LabelTitle": "Activewear Seamless Leggings",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/143S-CH_08d28918-6067-4ee8-869b-31d6701b9e2d.webp?v=1761858912"
+  },
+  {
+    "CategoryID": 187,
+    "SkuID": "143S-NV-S",
+    "Sku_Description": "Seamless Activewear Leggings - Blue - S (7-8) / Blue",
+    "Sku_OED": "Activewear Seamless Leggings",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/143s-bu-blue-seamless-leggings.webp?v=1761856852",
+    "Raw_DisplayName": "Seamless Activewear Leggings - S (7-8) / Blue",
+    "Raw_LabelTitle": "Activewear Seamless Leggings",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/143S-CH_08d28918-6067-4ee8-869b-31d6701b9e2d.webp?v=1761858912"
+  },
+  {
+    "CategoryID": 187,
+    "SkuID": "2143S-BK-S/M",
+    "Sku_Description": "Seamless Activewear Leggings - Black - S/M (1-12) / Black",
+    "Sku_OED": "Activewear Seamless Leggings",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/143s-bk.webp?v=1756432742",
+    "Raw_DisplayName": "Seamless Activewear Leggings - S/M (7-12) / Black",
+    "Raw_LabelTitle": "Activewear Seamless Leggings",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/143s-bk-seamless-black-leggings_a8c13d42-002f-4e58-8a01-88172ac7311f.jpg?v=1761858912"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "DINA-AM-10",
+    "Sku_Description": "Dina Crinkle Side Cutout One Piece Swimsuit - Amethyst - Amethyst / 10",
+    "Sku_OED": "CRINKLE SWIMSUIT W/ SIDE RING ",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/Dina-Am_1copy.webp?v=1763745357",
+    "Raw_DisplayName": "Dina Crinkle Side Cutout One Piece Swimsuit - Amethyst / 10",
+    "Raw_LabelTitle": "CRINKLE SWIMSUIT W/ SIDE RING ",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/DINA-NC-crinkle-cutout-one-piece-swimcopy.webp?v=1756432834"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "DINA-AM-12",
+    "Sku_Description": "Dina Crinkle Side Cutout One Piece Swimsuit - Amethyst - Amethyst / 12",
+    "Sku_OED": "CRINKLE SWIMSUIT W/ SIDE RING ",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/Dina-Am_1copy.webp?v=1763745357",
+    "Raw_DisplayName": "Dina Crinkle Side Cutout One Piece Swimsuit - Amethyst / 12",
+    "Raw_LabelTitle": "CRINKLE SWIMSUIT W/ SIDE RING ",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/DINA-NC-crinkle-cutout-one-piece-swimcopy.webp?v=1756432834"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "DINA-AM-14",
+    "Sku_Description": "Dina Crinkle Side Cutout One Piece Swimsuit - Amethyst - Amethyst / 14",
+    "Sku_OED": "CRINKLE SWIMSUIT W/ SIDE RING ",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/Dina-Am_1copy.webp?v=1763745357",
+    "Raw_DisplayName": "Dina Crinkle Side Cutout One Piece Swimsuit - Amethyst / 14",
+    "Raw_LabelTitle": "CRINKLE SWIMSUIT W/ SIDE RING ",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/DINA-NC-crinkle-cutout-one-piece-swimcopy.webp?v=1756432834"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "DINA-AM-16",
+    "Sku_Description": "Dina Crinkle Side Cutout One Piece Swimsuit - Amethyst - Amethyst / 16",
+    "Sku_OED": "CRINKLE SWIMSUIT W/ SIDE RING ",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/Dina-Am_1copy.webp?v=1763745357",
+    "Raw_DisplayName": "Dina Crinkle Side Cutout One Piece Swimsuit - Amethyst / 16",
+    "Raw_LabelTitle": "CRINKLE SWIMSUIT W/ SIDE RING ",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/DINA-NC-crinkle-cutout-one-piece-swimcopy.webp?v=1756432834"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "DINA-AM-7",
+    "Sku_Description": "Dina Crinkle Side Cutout One Piece Swimsuit - Amethyst - Amethyst / 7",
+    "Sku_OED": "CRINKLE SWIMSUIT W/ SIDE RING ",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/Dina-Am_1copy.webp?v=1763745357",
+    "Raw_DisplayName": "Dina Crinkle Side Cutout One Piece Swimsuit - Amethyst / 7",
+    "Raw_LabelTitle": "CRINKLE SWIMSUIT W/ SIDE RING ",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/DINA-NC-crinkle-cutout-one-piece-swimcopy.webp?v=1756432834"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "DINA-AM-8",
+    "Sku_Description": "Dina Crinkle Side Cutout One Piece Swimsuit - Amethyst - Amethyst / 8",
+    "Sku_OED": "CRINKLE SWIMSUIT W/ SIDE RING ",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/Dina-Am_1copy.webp?v=1763745357",
+    "Raw_DisplayName": "Dina Crinkle Side Cutout One Piece Swimsuit - Amethyst / 8",
+    "Raw_LabelTitle": "CRINKLE SWIMSUIT W/ SIDE RING ",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/DINA-NC-crinkle-cutout-one-piece-swimcopy.webp?v=1756432834"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "DINA-BW-10",
+    "Sku_Description": "Dina Crinkle Side Cutout One Piece Swimsuit - Black and White - Black White / 10",
+    "Sku_OED": "CRINKLE SWIMSUIT W/ SIDE RING ",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/Dina-BW_1copy.webp?v=1756432834",
+    "Raw_DisplayName": "Dina Crinkle Side Cutout One Piece Swimsuit - Black White / 10",
+    "Raw_LabelTitle": "CRINKLE SWIMSUIT W/ SIDE RING ",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/DINA-BW-crinkle-cutout-one-piece-swim_b6f7dc9c-0b03-44f3-8729-dc0aaef2a0ba.jpg?v=1756432834"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "DINA-BW-12",
+    "Sku_Description": "Dina Crinkle Side Cutout One Piece Swimsuit - Black and White - Black White / 12",
+    "Sku_OED": "CRINKLE SWIMSUIT W/ SIDE RING ",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/Dina-BW_1copy.webp?v=1756432834",
+    "Raw_DisplayName": "Dina Crinkle Side Cutout One Piece Swimsuit - Black White / 12",
+    "Raw_LabelTitle": "CRINKLE SWIMSUIT W/ SIDE RING ",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/DINA-BW-crinkle-cutout-one-piece-swim_b6f7dc9c-0b03-44f3-8729-dc0aaef2a0ba.jpg?v=1756432834"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "DINA-BW-14",
+    "Sku_Description": "Dina Crinkle Side Cutout One Piece Swimsuit - Black and White - Black White / 14",
+    "Sku_OED": "CRINKLE SWIMSUIT W/ SIDE RING ",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/Dina-BW_1copy.webp?v=1756432834",
+    "Raw_DisplayName": "Dina Crinkle Side Cutout One Piece Swimsuit - Black White / 14",
+    "Raw_LabelTitle": "CRINKLE SWIMSUIT W/ SIDE RING ",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/DINA-BW-crinkle-cutout-one-piece-swim_b6f7dc9c-0b03-44f3-8729-dc0aaef2a0ba.jpg?v=1756432834"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "DINA-BW-16",
+    "Sku_Description": "Dina Crinkle Side Cutout One Piece Swimsuit - Black and White - Black White / 16",
+    "Sku_OED": "CRINKLE SWIMSUIT W/ SIDE RING ",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/Dina-BW_1copy.webp?v=1756432834",
+    "Raw_DisplayName": "Dina Crinkle Side Cutout One Piece Swimsuit - Black White / 16",
+    "Raw_LabelTitle": "CRINKLE SWIMSUIT W/ SIDE RING ",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/DINA-BW-crinkle-cutout-one-piece-swim_b6f7dc9c-0b03-44f3-8729-dc0aaef2a0ba.jpg?v=1756432834"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "DINA-BW-7",
+    "Sku_Description": "Dina Crinkle Side Cutout One Piece Swimsuit - Black and White - Black White / 7",
+    "Sku_OED": "CRINKLE SWIMSUIT W/ SIDE RING ",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/Dina-BW_1copy.webp?v=1756432834",
+    "Raw_DisplayName": "Dina Crinkle Side Cutout One Piece Swimsuit - Black White / 7",
+    "Raw_LabelTitle": "CRINKLE SWIMSUIT W/ SIDE RING ",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/DINA-BW-crinkle-cutout-one-piece-swim_b6f7dc9c-0b03-44f3-8729-dc0aaef2a0ba.jpg?v=1756432834"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "DINA-BW-8",
+    "Sku_Description": "Dina Crinkle Side Cutout One Piece Swimsuit - Black and White - Black White / 8",
+    "Sku_OED": "CRINKLE SWIMSUIT W/ SIDE RING ",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/Dina-BW_1copy.webp?v=1756432834",
+    "Raw_DisplayName": "Dina Crinkle Side Cutout One Piece Swimsuit - Black White / 8",
+    "Raw_LabelTitle": "CRINKLE SWIMSUIT W/ SIDE RING ",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/DINA-BW-crinkle-cutout-one-piece-swim_b6f7dc9c-0b03-44f3-8729-dc0aaef2a0ba.jpg?v=1756432834"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "DINA-NC-10",
+    "Sku_Description": "Dina Crinkle Side Cutout One Piece Swimsuit - Turquoise Citrus Lime - Turquoise Citrus Lime / 10",
+    "Sku_OED": "CRINKLE SWIMSUIT W/ SIDE RING ",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/Dina-NC_1copy.webp?v=1756432834",
+    "Raw_DisplayName": "Dina Crinkle Side Cutout One Piece Swimsuit - Turquoise Citrus Lime / 10",
+    "Raw_LabelTitle": "CRINKLE SWIMSUIT W/ SIDE RING ",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/DINA-NC-crinkle-cutout-one-piece-swimcopy.webp?v=1756432834"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "DINA-NC-12",
+    "Sku_Description": "Dina Crinkle Side Cutout One Piece Swimsuit - Turquoise Citrus Lime - Turquoise Citrus Lime / 12",
+    "Sku_OED": "CRINKLE SWIMSUIT W/ SIDE RING ",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/Dina-NC_1copy.webp?v=1756432834",
+    "Raw_DisplayName": "Dina Crinkle Side Cutout One Piece Swimsuit - Turquoise Citrus Lime / 12",
+    "Raw_LabelTitle": "CRINKLE SWIMSUIT W/ SIDE RING ",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/DINA-NC-crinkle-cutout-one-piece-swimcopy.webp?v=1756432834"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "DINA-NC-14",
+    "Sku_Description": "Dina Crinkle Side Cutout One Piece Swimsuit - Turquoise Citrus Lime - Turquoise Citrus Lime / 14",
+    "Sku_OED": "CRINKLE SWIMSUIT W/ SIDE RING ",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/Dina-NC_1copy.webp?v=1756432834",
+    "Raw_DisplayName": "Dina Crinkle Side Cutout One Piece Swimsuit - Turquoise Citrus Lime / 14",
+    "Raw_LabelTitle": "CRINKLE SWIMSUIT W/ SIDE RING ",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/DINA-NC-crinkle-cutout-one-piece-swimcopy.webp?v=1756432834"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "DINA-NC-16",
+    "Sku_Description": "Dina Crinkle Side Cutout One Piece Swimsuit - Turquoise Citrus Lime - Turquoise Citrus Lime / 16",
+    "Sku_OED": "CRINKLE SWIMSUIT W/ SIDE RING ",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/Dina-NC_1copy.webp?v=1756432834",
+    "Raw_DisplayName": "Dina Crinkle Side Cutout One Piece Swimsuit - Turquoise Citrus Lime / 16",
+    "Raw_LabelTitle": "CRINKLE SWIMSUIT W/ SIDE RING ",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/DINA-NC-crinkle-cutout-one-piece-swimcopy.webp?v=1756432834"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "DINA-NC-7",
+    "Sku_Description": "Dina Crinkle Side Cutout One Piece Swimsuit - Turquoise Citrus Lime - Turquoise Citrus Lime / 7",
+    "Sku_OED": "CRINKLE SWIMSUIT W/ SIDE RING ",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/Dina-NC_1copy.webp?v=1756432834",
+    "Raw_DisplayName": "Dina Crinkle Side Cutout One Piece Swimsuit - Turquoise Citrus Lime / 7",
+    "Raw_LabelTitle": "CRINKLE SWIMSUIT W/ SIDE RING ",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/DINA-NC-crinkle-cutout-one-piece-swimcopy.webp?v=1756432834"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "DINA-NC-8",
+    "Sku_Description": "Dina Crinkle Side Cutout One Piece Swimsuit - Turquoise Citrus Lime - Turquoise Citrus Lime / 8",
+    "Sku_OED": "CRINKLE SWIMSUIT W/ SIDE RING ",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/Dina-NC_1copy.webp?v=1756432834",
+    "Raw_DisplayName": "Dina Crinkle Side Cutout One Piece Swimsuit - Turquoise Citrus Lime / 8",
+    "Raw_LabelTitle": "CRINKLE SWIMSUIT W/ SIDE RING ",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/DINA-NC-crinkle-cutout-one-piece-swimcopy.webp?v=1756432834"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "ELIANA-AP-10",
+    "Sku_Description": "Eliana Rosette Halter One Piece Swimsuit - Pink - Pink / 10",
+    "Sku_OED": "FLOWER ONE PIECE SWIMSUIT",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/Eliana-AP_1copy.webp?v=1756432844",
+    "Raw_DisplayName": "Eliana Rosette Halter One Piece Swimsuit - Pink / 10",
+    "Raw_LabelTitle": "FLOWER ONE PIECE SWIMSUIT",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ELIANA-AP-rosette-cutout-onepiece-swimcopy.webp?v=1756432843"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "ELIANA-AP-12",
+    "Sku_Description": "Eliana Rosette Halter One Piece Swimsuit - Pink - Pink / 12",
+    "Sku_OED": "FLOWER ONE PIECE SWIMSUIT",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/Eliana-AP_1copy.webp?v=1756432844",
+    "Raw_DisplayName": "Eliana Rosette Halter One Piece Swimsuit - Pink / 12",
+    "Raw_LabelTitle": "FLOWER ONE PIECE SWIMSUIT",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ELIANA-AP-rosette-cutout-onepiece-swimcopy.webp?v=1756432843"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "ELIANA-AP-14",
+    "Sku_Description": "Eliana Rosette Halter One Piece Swimsuit - Pink - Pink / 14",
+    "Sku_OED": "FLOWER ONE PIECE SWIMSUIT",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/Eliana-AP_1copy.webp?v=1756432844",
+    "Raw_DisplayName": "Eliana Rosette Halter One Piece Swimsuit - Pink / 14",
+    "Raw_LabelTitle": "FLOWER ONE PIECE SWIMSUIT",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ELIANA-AP-rosette-cutout-onepiece-swimcopy.webp?v=1756432843"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "ELIANA-AP-16",
+    "Sku_Description": "Eliana Rosette Halter One Piece Swimsuit - Pink - Pink / 16",
+    "Sku_OED": "FLOWER ONE PIECE SWIMSUIT",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/Eliana-AP_1copy.webp?v=1756432844",
+    "Raw_DisplayName": "Eliana Rosette Halter One Piece Swimsuit - Pink / 16",
+    "Raw_LabelTitle": "FLOWER ONE PIECE SWIMSUIT",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ELIANA-AP-rosette-cutout-onepiece-swimcopy.webp?v=1756432843"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "ELIANA-AP-4",
+    "Sku_Description": "Eliana Rosette Halter One Piece Swimsuit - Pink - Pink / 4",
+    "Sku_OED": "FLOWER ONE PIECE SWIMSUIT",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/Eliana-AP_1copy.webp?v=1756432844",
+    "Raw_DisplayName": "Eliana Rosette Halter One Piece Swimsuit - Pink / 4",
+    "Raw_LabelTitle": "FLOWER ONE PIECE SWIMSUIT",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ELIANA-AP-rosette-cutout-onepiece-swimcopy.webp?v=1756432843"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "ELIANA-AP-5",
+    "Sku_Description": "Eliana Rosette Halter One Piece Swimsuit - Pink - Pink / 5",
+    "Sku_OED": "FLOWER ONE PIECE SWIMSUIT",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/Eliana-AP_1copy.webp?v=1756432844",
+    "Raw_DisplayName": "Eliana Rosette Halter One Piece Swimsuit - Pink / 5",
+    "Raw_LabelTitle": "FLOWER ONE PIECE SWIMSUIT",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ELIANA-AP-rosette-cutout-onepiece-swimcopy.webp?v=1756432843"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "ELIANA-AP-6",
+    "Sku_Description": "Eliana Rosette Halter One Piece Swimsuit - Pink - Pink / 6",
+    "Sku_OED": "FLOWER ONE PIECE SWIMSUIT",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/Eliana-AP_1copy.webp?v=1756432844",
+    "Raw_DisplayName": "Eliana Rosette Halter One Piece Swimsuit - Pink / 6",
+    "Raw_LabelTitle": "FLOWER ONE PIECE SWIMSUIT",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ELIANA-AP-rosette-cutout-onepiece-swimcopy.webp?v=1756432843"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "ELIANA-AP-7",
+    "Sku_Description": "Eliana Rosette Halter One Piece Swimsuit - Pink - Pink / 7",
+    "Sku_OED": "FLOWER ONE PIECE SWIMSUIT",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/Eliana-AP_1copy.webp?v=1756432844",
+    "Raw_DisplayName": "Eliana Rosette Halter One Piece Swimsuit - Pink / 7",
+    "Raw_LabelTitle": "FLOWER ONE PIECE SWIMSUIT",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ELIANA-AP-rosette-cutout-onepiece-swimcopy.webp?v=1756432843"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "ELIANA-AP-8",
+    "Sku_Description": "Eliana Rosette Halter One Piece Swimsuit - Pink - Pink / 8",
+    "Sku_OED": "FLOWER ONE PIECE SWIMSUIT",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/Eliana-AP_1copy.webp?v=1756432844",
+    "Raw_DisplayName": "Eliana Rosette Halter One Piece Swimsuit - Pink / 8",
+    "Raw_LabelTitle": "FLOWER ONE PIECE SWIMSUIT",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ELIANA-AP-rosette-cutout-onepiece-swimcopy.webp?v=1756432843"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "ESTER-AM-10",
+    "Sku_Description": "Ester Crinkle One Piece Swimsuit - Amethyst - Amethyst / 10",
+    "Sku_OED": "CRINKLE ONE PIECE",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/Ester-AM_1.webp?v=1756432838",
+    "Raw_DisplayName": "Ester Crinkle One Piece Swimsuit - Amethyst / 10",
+    "Raw_LabelTitle": "CRINKLE ONE PIECE",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-AM-crinkle-onepiece-swimsuit_46f76e7a-dc2f-469f-bba4-f2707fe13c6b.jpg?v=1756432838"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "ESTER-AM-12",
+    "Sku_Description": "Ester Crinkle One Piece Swimsuit - Amethyst - Amethyst / 12",
+    "Sku_OED": "CRINKLE ONE PIECE",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/Ester-AM_1.webp?v=1756432838",
+    "Raw_DisplayName": "Ester Crinkle One Piece Swimsuit - Amethyst / 12",
+    "Raw_LabelTitle": "CRINKLE ONE PIECE",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-AM-crinkle-onepiece-swimsuit_46f76e7a-dc2f-469f-bba4-f2707fe13c6b.jpg?v=1756432838"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "ESTER-AM-14",
+    "Sku_Description": "Ester Crinkle One Piece Swimsuit - Amethyst - Amethyst / 14",
+    "Sku_OED": "CRINKLE ONE PIECE",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/Ester-AM_1.webp?v=1756432838",
+    "Raw_DisplayName": "Ester Crinkle One Piece Swimsuit - Amethyst / 14",
+    "Raw_LabelTitle": "CRINKLE ONE PIECE",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-AM-crinkle-onepiece-swimsuit_46f76e7a-dc2f-469f-bba4-f2707fe13c6b.jpg?v=1756432838"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "ESTER-AM-16",
+    "Sku_Description": "Ester Crinkle One Piece Swimsuit - Amethyst - Amethyst / 16",
+    "Sku_OED": "CRINKLE ONE PIECE",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/Ester-AM_1.webp?v=1756432838",
+    "Raw_DisplayName": "Ester Crinkle One Piece Swimsuit - Amethyst / 16",
+    "Raw_LabelTitle": "CRINKLE ONE PIECE",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-AM-crinkle-onepiece-swimsuit_46f76e7a-dc2f-469f-bba4-f2707fe13c6b.jpg?v=1756432838"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "ESTER-AM-4",
+    "Sku_Description": "Ester Crinkle One Piece Swimsuit - Amethyst - Amethyst / 4",
+    "Sku_OED": "CRINKLE ONE PIECE",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/Ester-AM_1.webp?v=1756432838",
+    "Raw_DisplayName": "Ester Crinkle One Piece Swimsuit - Amethyst / 4",
+    "Raw_LabelTitle": "CRINKLE ONE PIECE",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-AM-crinkle-onepiece-swimsuit_46f76e7a-dc2f-469f-bba4-f2707fe13c6b.jpg?v=1756432838"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "ESTER-AM-5",
+    "Sku_Description": "Ester Crinkle One Piece Swimsuit - Amethyst - Amethyst / 5",
+    "Sku_OED": "CRINKLE ONE PIECE",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/Ester-AM_1.webp?v=1756432838",
+    "Raw_DisplayName": "Ester Crinkle One Piece Swimsuit - Amethyst / 5",
+    "Raw_LabelTitle": "CRINKLE ONE PIECE",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-AM-crinkle-onepiece-swimsuit_46f76e7a-dc2f-469f-bba4-f2707fe13c6b.jpg?v=1756432838"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "ESTER-AM-6",
+    "Sku_Description": "Ester Crinkle One Piece Swimsuit - Amethyst - Amethyst / 6",
+    "Sku_OED": "CRINKLE ONE PIECE",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/Ester-AM_1.webp?v=1756432838",
+    "Raw_DisplayName": "Ester Crinkle One Piece Swimsuit - Amethyst / 6",
+    "Raw_LabelTitle": "CRINKLE ONE PIECE",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-AM-crinkle-onepiece-swimsuit_46f76e7a-dc2f-469f-bba4-f2707fe13c6b.jpg?v=1756432838"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "ESTER-AM-7",
+    "Sku_Description": "Ester Crinkle One Piece Swimsuit - Amethyst - Amethyst / 7",
+    "Sku_OED": "CRINKLE ONE PIECE",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/Ester-AM_1.webp?v=1756432838",
+    "Raw_DisplayName": "Ester Crinkle One Piece Swimsuit - Amethyst / 7",
+    "Raw_LabelTitle": "CRINKLE ONE PIECE",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-AM-crinkle-onepiece-swimsuit_46f76e7a-dc2f-469f-bba4-f2707fe13c6b.jpg?v=1756432838"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "ESTER-AM-8",
+    "Sku_Description": "Ester Crinkle One Piece Swimsuit - Amethyst - Amethyst / 8",
+    "Sku_OED": "CRINKLE ONE PIECE",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/Ester-AM_1.webp?v=1756432838",
+    "Raw_DisplayName": "Ester Crinkle One Piece Swimsuit - Amethyst / 8",
+    "Raw_LabelTitle": "CRINKLE ONE PIECE",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-AM-crinkle-onepiece-swimsuit_46f76e7a-dc2f-469f-bba4-f2707fe13c6b.jpg?v=1756432838"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "ESTER-CT-10",
+    "Sku_Description": "Ester Crinkle One Piece Swimsuit - Citrus Lime - Citrus Lime / 10",
+    "Sku_OED": "CRINKLE LIME ONE PIECE",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/Ester-CT.webp?v=1756432839",
+    "Raw_DisplayName": "Ester Crinkle One Piece Swimsuit - Citrus Lime / 10",
+    "Raw_LabelTitle": "CRINKLE ONE PIECE",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-CT-2copy.webp?v=1763745248"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "ESTER-CT-12",
+    "Sku_Description": "Ester Crinkle One Piece Swimsuit - Citrus Lime - Citrus Lime / 12",
+    "Sku_OED": "CRINKLE LIME ONE PIECE",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/Ester-CT.webp?v=1756432839",
+    "Raw_DisplayName": "Ester Crinkle One Piece Swimsuit - Citrus Lime / 12",
+    "Raw_LabelTitle": "CRINKLE ONE PIECE",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-CT-2copy.webp?v=1763745248"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "ESTER-CT-14",
+    "Sku_Description": "Ester Crinkle One Piece Swimsuit - Citrus Lime - Citrus Lime / 14",
+    "Sku_OED": "CRINKLE LIME ONE PIECE",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/Ester-CT.webp?v=1756432839",
+    "Raw_DisplayName": "Ester Crinkle One Piece Swimsuit - Citrus Lime / 14",
+    "Raw_LabelTitle": "CRINKLE ONE PIECE",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-CT-2copy.webp?v=1763745248"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "ESTER-CT-16",
+    "Sku_Description": "Ester Crinkle One Piece Swimsuit - Citrus Lime - Citrus Lime / 16",
+    "Sku_OED": "CRINKLE LIME ONE PIECE",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/Ester-CT.webp?v=1756432839",
+    "Raw_DisplayName": "Ester Crinkle One Piece Swimsuit - Citrus Lime / 16",
+    "Raw_LabelTitle": "CRINKLE ONE PIECE",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-CT-2copy.webp?v=1763745248"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "ESTER-CT-4",
+    "Sku_Description": "Ester Crinkle One Piece Swimsuit - Citrus Lime - Citrus Lime / 4",
+    "Sku_OED": "CRINKLE LIME ONE PIECE",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/Ester-CT.webp?v=1756432839",
+    "Raw_DisplayName": "Ester Crinkle One Piece Swimsuit - Citrus Lime / 4",
+    "Raw_LabelTitle": "CRINKLE ONE PIECE",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-CT-2copy.webp?v=1763745248"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "ESTER-CT-5",
+    "Sku_Description": "Ester Crinkle One Piece Swimsuit - Citrus Lime - Citrus Lime / 5",
+    "Sku_OED": "CRINKLE LIME ONE PIECE",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/Ester-CT.webp?v=1756432839",
+    "Raw_DisplayName": "Ester Crinkle One Piece Swimsuit - Citrus Lime / 5",
+    "Raw_LabelTitle": "CRINKLE ONE PIECE",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-CT-2copy.webp?v=1763745248"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "ESTER-CT-6",
+    "Sku_Description": "Ester Crinkle One Piece Swimsuit - Citrus Lime - Citrus Lime / 6",
+    "Sku_OED": "CRINKLE LIME ONE PIECE",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/Ester-CT.webp?v=1756432839",
+    "Raw_DisplayName": "Ester Crinkle One Piece Swimsuit - Citrus Lime / 6",
+    "Raw_LabelTitle": "CRINKLE ONE PIECE",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-CT-2copy.webp?v=1763745248"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "ESTER-CT-7",
+    "Sku_Description": "Ester Crinkle One Piece Swimsuit - Citrus Lime - Citrus Lime / 7",
+    "Sku_OED": "CRINKLE LIME ONE PIECE",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/Ester-CT.webp?v=1756432839",
+    "Raw_DisplayName": "Ester Crinkle One Piece Swimsuit - Citrus Lime / 7",
+    "Raw_LabelTitle": "CRINKLE ONE PIECE",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-CT-2copy.webp?v=1763745248"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "ESTER-CT-8",
+    "Sku_Description": "Ester Crinkle One Piece Swimsuit - Citrus Lime - Citrus Lime / 8",
+    "Sku_OED": "CRINKLE LIME ONE PIECE",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/Ester-CT.webp?v=1756432839",
+    "Raw_DisplayName": "Ester Crinkle One Piece Swimsuit - Citrus Lime / 8",
+    "Raw_LabelTitle": "CRINKLE ONE PIECE",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-CT-2copy.webp?v=1763745248"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "ESTER-LS-10",
+    "Sku_Description": "Ester Crinkle One Piece Swimsuit - Lipstick Pink - Fuchsia / 10",
+    "Sku_OED": "CRINKLE ONE PIECE",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-LS-crinkle-one-piece-swimsuit-flatcopy.webp?v=1761856973",
+    "Raw_DisplayName": "Ester Crinkle One Piece Swimsuit - Fuchsia / 10",
+    "Raw_LabelTitle": "CRINKLE ONE PIECE",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-BR-crinkle-one-piece-swimsuitcopy.webp?v=1756432838"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "ESTER-LS-12",
+    "Sku_Description": "Ester Crinkle One Piece Swimsuit - Lipstick Pink - Fuchsia / 12",
+    "Sku_OED": "CRINKLE ONE PIECE",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-LS-crinkle-one-piece-swimsuit-flatcopy.webp?v=1761856973",
+    "Raw_DisplayName": "Ester Crinkle One Piece Swimsuit - Fuchsia / 12",
+    "Raw_LabelTitle": "CRINKLE ONE PIECE",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-BR-crinkle-one-piece-swimsuitcopy.webp?v=1756432838"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "ESTER-LS-14",
+    "Sku_Description": "Ester Crinkle One Piece Swimsuit - Lipstick Pink - Fuchsia / 14",
+    "Sku_OED": "CRINKLE ONE PIECE",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-LS-crinkle-one-piece-swimsuit-flatcopy.webp?v=1761856973",
+    "Raw_DisplayName": "Ester Crinkle One Piece Swimsuit - Fuchsia / 14",
+    "Raw_LabelTitle": "CRINKLE ONE PIECE",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-BR-crinkle-one-piece-swimsuitcopy.webp?v=1756432838"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "ESTER-LS-16",
+    "Sku_Description": "Ester Crinkle One Piece Swimsuit - Lipstick Pink - Fuchsia / 16",
+    "Sku_OED": "CRINKLE ONE PIECE",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-LS-crinkle-one-piece-swimsuit-flatcopy.webp?v=1761856973",
+    "Raw_DisplayName": "Ester Crinkle One Piece Swimsuit - Fuchsia / 16",
+    "Raw_LabelTitle": "CRINKLE ONE PIECE",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-BR-crinkle-one-piece-swimsuitcopy.webp?v=1756432838"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "ESTER-LS-2",
+    "Sku_Description": "Ester Crinkle One Piece Swimsuit - Lipstick Pink - Fuchsia / 2",
+    "Sku_OED": "CRINKLE ONE PIECE",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-LS-crinkle-one-piece-swimsuit-flatcopy.webp?v=1761856973",
+    "Raw_DisplayName": "Ester Crinkle One Piece Swimsuit - Fuchsia / 2",
+    "Raw_LabelTitle": "CRINKLE ONE PIECE",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-BR-crinkle-one-piece-swimsuitcopy.webp?v=1756432838"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "ESTER-LS-3",
+    "Sku_Description": "Ester Crinkle One Piece Swimsuit - Lipstick Pink - Fuchsia / 3",
+    "Sku_OED": "CRINKLE ONE PIECE",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-LS-crinkle-one-piece-swimsuit-flatcopy.webp?v=1761856973",
+    "Raw_DisplayName": "Ester Crinkle One Piece Swimsuit - Fuchsia / 3",
+    "Raw_LabelTitle": "CRINKLE ONE PIECE",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-BR-crinkle-one-piece-swimsuitcopy.webp?v=1756432838"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "ESTER-LS-4",
+    "Sku_Description": "Ester Crinkle One Piece Swimsuit - Lipstick Pink - Fuchsia / 4",
+    "Sku_OED": "CRINKLE ONE PIECE",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-LS-crinkle-one-piece-swimsuit-flatcopy.webp?v=1761856973",
+    "Raw_DisplayName": "Ester Crinkle One Piece Swimsuit - Fuchsia / 4",
+    "Raw_LabelTitle": "CRINKLE ONE PIECE",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-BR-crinkle-one-piece-swimsuitcopy.webp?v=1756432838"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "ESTER-LS-5",
+    "Sku_Description": "Ester Crinkle One Piece Swimsuit - Lipstick Pink - Fuchsia / 5",
+    "Sku_OED": "CRINKLE ONE PIECE",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-LS-crinkle-one-piece-swimsuit-flatcopy.webp?v=1761856973",
+    "Raw_DisplayName": "Ester Crinkle One Piece Swimsuit - Fuchsia / 5",
+    "Raw_LabelTitle": "CRINKLE ONE PIECE",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-BR-crinkle-one-piece-swimsuitcopy.webp?v=1756432838"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "ESTER-LS-6",
+    "Sku_Description": "Ester Crinkle One Piece Swimsuit - Lipstick Pink - Fuchsia / 6",
+    "Sku_OED": "CRINKLE ONE PIECE",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-LS-crinkle-one-piece-swimsuit-flatcopy.webp?v=1761856973",
+    "Raw_DisplayName": "Ester Crinkle One Piece Swimsuit - Fuchsia / 6",
+    "Raw_LabelTitle": "CRINKLE ONE PIECE",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-BR-crinkle-one-piece-swimsuitcopy.webp?v=1756432838"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "ESTER-LS-7",
+    "Sku_Description": "Ester Crinkle One Piece Swimsuit - Lipstick Pink - Fuchsia / 7",
+    "Sku_OED": "CRINKLE ONE PIECE",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-LS-crinkle-one-piece-swimsuit-flatcopy.webp?v=1761856973",
+    "Raw_DisplayName": "Ester Crinkle One Piece Swimsuit - Fuchsia / 7",
+    "Raw_LabelTitle": "CRINKLE ONE PIECE",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-BR-crinkle-one-piece-swimsuitcopy.webp?v=1756432838"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "ESTER-LS-8",
+    "Sku_Description": "Ester Crinkle One Piece Swimsuit - Lipstick Pink - Fuchsia / 8",
+    "Sku_OED": "CRINKLE ONE PIECE",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-LS-crinkle-one-piece-swimsuit-flatcopy.webp?v=1761856973",
+    "Raw_DisplayName": "Ester Crinkle One Piece Swimsuit - Fuchsia / 8",
+    "Raw_LabelTitle": "CRINKLE ONE PIECE",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-BR-crinkle-one-piece-swimsuitcopy.webp?v=1756432838"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "ESTER-NT-10",
+    "Sku_Description": "Ester Crinkle One Piece Swimsuit - Turquoise - Turquoise / 10",
+    "Sku_OED": "CRINKLE ONE PIECE",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-NT-2_d67cf74b-a81b-47aa-8ef3-11a706a7d6b2.webp?v=1756432590",
+    "Raw_DisplayName": "Ester Crinkle One Piece Swimsuit - Turquoise / 10",
+    "Raw_LabelTitle": "CRINKLE ONE PIECE",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-NT-2_25881b15-565d-4c79-8097-ba4e897f416f.webp?v=1761858986"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "ESTER-NT-12",
+    "Sku_Description": "Ester Crinkle One Piece Swimsuit - Turquoise - Turquoise / 12",
+    "Sku_OED": "CRINKLE ONE PIECE",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-NT-2_d67cf74b-a81b-47aa-8ef3-11a706a7d6b2.webp?v=1756432590",
+    "Raw_DisplayName": "Ester Crinkle One Piece Swimsuit - Turquoise / 12",
+    "Raw_LabelTitle": "CRINKLE ONE PIECE",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-NT-2_25881b15-565d-4c79-8097-ba4e897f416f.webp?v=1761858986"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "ESTER-NT-14",
+    "Sku_Description": "Ester Crinkle One Piece Swimsuit - Turquoise - Turquoise / 14",
+    "Sku_OED": "CRINKLE ONE PIECE",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-NT-2_d67cf74b-a81b-47aa-8ef3-11a706a7d6b2.webp?v=1756432590",
+    "Raw_DisplayName": "Ester Crinkle One Piece Swimsuit - Turquoise / 14",
+    "Raw_LabelTitle": "CRINKLE ONE PIECE",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-NT-2_25881b15-565d-4c79-8097-ba4e897f416f.webp?v=1761858986"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "ESTER-NT-16",
+    "Sku_Description": "Ester Crinkle One Piece Swimsuit - Turquoise - Turquoise / 16",
+    "Sku_OED": "CRINKLE ONE PIECE",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-NT-2_d67cf74b-a81b-47aa-8ef3-11a706a7d6b2.webp?v=1756432590",
+    "Raw_DisplayName": "Ester Crinkle One Piece Swimsuit - Turquoise / 16",
+    "Raw_LabelTitle": "CRINKLE ONE PIECE",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-NT-2_25881b15-565d-4c79-8097-ba4e897f416f.webp?v=1761858986"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "ESTER-NT-4",
+    "Sku_Description": "Ester Crinkle One Piece Swimsuit - Turquoise - Turquoise / 4",
+    "Sku_OED": "CRINKLE ONE PIECE",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-NT-2_d67cf74b-a81b-47aa-8ef3-11a706a7d6b2.webp?v=1756432590",
+    "Raw_DisplayName": "Ester Crinkle One Piece Swimsuit - Turquoise / 4",
+    "Raw_LabelTitle": "CRINKLE ONE PIECE",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-NT-2_25881b15-565d-4c79-8097-ba4e897f416f.webp?v=1761858986"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "ESTER-NT-5",
+    "Sku_Description": "Ester Crinkle One Piece Swimsuit - Turquoise - Turquoise / 5",
+    "Sku_OED": "CRINKLE ONE PIECE",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-NT-2_d67cf74b-a81b-47aa-8ef3-11a706a7d6b2.webp?v=1756432590",
+    "Raw_DisplayName": "Ester Crinkle One Piece Swimsuit - Turquoise / 5",
+    "Raw_LabelTitle": "CRINKLE ONE PIECE",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-NT-2_25881b15-565d-4c79-8097-ba4e897f416f.webp?v=1761858986"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "ESTER-NT-6",
+    "Sku_Description": "Ester Crinkle One Piece Swimsuit - Turquoise - Turquoise / 6",
+    "Sku_OED": "CRINKLE ONE PIECE",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-NT-2_d67cf74b-a81b-47aa-8ef3-11a706a7d6b2.webp?v=1756432590",
+    "Raw_DisplayName": "Ester Crinkle One Piece Swimsuit - Turquoise / 6",
+    "Raw_LabelTitle": "CRINKLE ONE PIECE",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-NT-2_25881b15-565d-4c79-8097-ba4e897f416f.webp?v=1761858986"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "ESTER-NT-7",
+    "Sku_Description": "Ester Crinkle One Piece Swimsuit - Turquoise - Turquoise / 7",
+    "Sku_OED": "CRINKLE ONE PIECE",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-NT-2_d67cf74b-a81b-47aa-8ef3-11a706a7d6b2.webp?v=1756432590",
+    "Raw_DisplayName": "Ester Crinkle One Piece Swimsuit - Turquoise / 7",
+    "Raw_LabelTitle": "CRINKLE ONE PIECE",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-NT-2_25881b15-565d-4c79-8097-ba4e897f416f.webp?v=1761858986"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "ESTER-NT-8",
+    "Sku_Description": "Ester Crinkle One Piece Swimsuit - Turquoise - Turquoise / 8",
+    "Sku_OED": "CRINKLE ONE PIECE",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-NT-2_d67cf74b-a81b-47aa-8ef3-11a706a7d6b2.webp?v=1756432590",
+    "Raw_DisplayName": "Ester Crinkle One Piece Swimsuit - Turquoise / 8",
+    "Raw_LabelTitle": "CRINKLE ONE PIECE",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/ESTER-NT-2_25881b15-565d-4c79-8097-ba4e897f416f.webp?v=1761858986"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "EVA-BK-7",
+    "Sku_Description": "Eva Textured Basic Black Bikini Swimsuit - 7 / Black",
+    "Sku_OED": "TEXTURED BASIC BLACK BIKINI",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/EVA-BK-two-piece-bikini-swim_892ab13a-1608-4847-a9c8-aa3b459eded6.jpg?v=1754593777",
+    "Raw_DisplayName": "EVA - Textured Basic Black Bikini | Limeapple - Default Title",
+    "Raw_LabelTitle": null,
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/products/EVA-BK-two-piece-swim-front.jpg?v=1740767742"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "IZY-AM-10",
+    "Sku_Description": "Izy Crinkle Tie Bikini Swimsuit - Amethyst - Amethyst / 10",
+    "Sku_OED": "CRINKLE TIE FRONT BIKINI",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/Izy-Am-tie-front-bikini-flatcopy.webp?v=1756432831",
+    "Raw_DisplayName": "Izy Crinkle Tie Bikini Swimsuit - Amethyst / 10",
+    "Raw_LabelTitle": "CRINKLE TIE FRONT BIKINI",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/IZY-AM-crinkle-tie-bikinicopy.webp?v=1756432831"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "IZY-AM-12",
+    "Sku_Description": "Izy Crinkle Tie Bikini Swimsuit - Amethyst - Amethyst / 12",
+    "Sku_OED": "CRINKLE TIE FRONT BIKINI",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/Izy-Am-tie-front-bikini-flatcopy.webp?v=1756432831",
+    "Raw_DisplayName": "Izy Crinkle Tie Bikini Swimsuit - Amethyst / 12",
+    "Raw_LabelTitle": "CRINKLE TIE FRONT BIKINI",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/IZY-AM-crinkle-tie-bikinicopy.webp?v=1756432831"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "IZY-AM-14",
+    "Sku_Description": "Izy Crinkle Tie Bikini Swimsuit - Amethyst - Amethyst / 14",
+    "Sku_OED": "CRINKLE TIE FRONT BIKINI",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/Izy-Am-tie-front-bikini-flatcopy.webp?v=1756432831",
+    "Raw_DisplayName": "Izy Crinkle Tie Bikini Swimsuit - Amethyst / 14",
+    "Raw_LabelTitle": "CRINKLE TIE FRONT BIKINI",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/IZY-AM-crinkle-tie-bikinicopy.webp?v=1756432831"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "IZY-AM-16",
+    "Sku_Description": "Izy Crinkle Tie Bikini Swimsuit - Amethyst - Amethyst / 16",
+    "Sku_OED": "CRINKLE TIE FRONT BIKINI",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/Izy-Am-tie-front-bikini-flatcopy.webp?v=1756432831",
+    "Raw_DisplayName": "Izy Crinkle Tie Bikini Swimsuit - Amethyst / 16",
+    "Raw_LabelTitle": "CRINKLE TIE FRONT BIKINI",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/IZY-AM-crinkle-tie-bikinicopy.webp?v=1756432831"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "IZY-AM-7",
+    "Sku_Description": "Izy Crinkle Tie Bikini Swimsuit - Amethyst - Amethyst / 7",
+    "Sku_OED": "CRINKLE TIE FRONT BIKINI",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/Izy-Am-tie-front-bikini-flatcopy.webp?v=1756432831",
+    "Raw_DisplayName": "Izy Crinkle Tie Bikini Swimsuit - Amethyst / 7",
+    "Raw_LabelTitle": "CRINKLE TIE FRONT BIKINI",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/IZY-AM-crinkle-tie-bikinicopy.webp?v=1756432831"
+  },
+  {
+    "CategoryID": 330,
+    "SkuID": "IZY-AM-8",
+    "Sku_Description": "Izy Crinkle Tie Bikini Swimsuit - Amethyst - Amethyst / 8",
+    "Sku_OED": "CRINKLE TIE FRONT BIKINI",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/Izy-Am-tie-front-bikini-flatcopy.webp?v=1756432831",
+    "Raw_DisplayName": "Izy Crinkle Tie Bikini Swimsuit - Amethyst / 8",
+    "Raw_LabelTitle": "CRINKLE TIE FRONT BIKINI",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/IZY-AM-crinkle-tie-bikinicopy.webp?v=1756432831"
+  },
+  {
+    "CategoryID": 358,
+    "SkuID": "2684C-FCS-4",
+    "Sku_Description": "Minky Bubble Loungewear Pant - Fuchsia / 4",
+    "Sku_OED": "MINKY BUBBLE PANT",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/684-fc.webp?v=1756433126",
+    "Raw_DisplayName": "Minky Bubble Loungewear Pant - Fuchsia - 4",
+    "Raw_LabelTitle": null,
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/products/684C-FUS_c30ad18c-40e9-4611-a4d9-b10f42bff85a.jpg?v=1754594156"
+  },
+  {
+    "CategoryID": 358,
+    "SkuID": "FLEUR-LS-10",
+    "Sku_Description": "Fleur Crinkle Bikini Swimsuit - Fuchsia - Fuchsia / 10",
+    "Sku_OED": "CRINKLE BIKINI SET",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/FLEUR-LS-crinkle-bikini-2copy.webp?v=1756432833",
+    "Raw_DisplayName": "Fleur Crinkle Bikini Swimsuit - Fuchsia / 10",
+    "Raw_LabelTitle": "CRINKLE BIKINI SET",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/fleur-bk.webp?v=1756432832"
+  },
+  {
+    "CategoryID": 358,
+    "SkuID": "FLEUR-LS-12",
+    "Sku_Description": "Fleur Crinkle Bikini Swimsuit - Fuchsia - Fuchsia / 12",
+    "Sku_OED": "CRINKLE BIKINI SET",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/FLEUR-LS-crinkle-bikini-2copy.webp?v=1756432833",
+    "Raw_DisplayName": "Fleur Crinkle Bikini Swimsuit - Fuchsia / 12",
+    "Raw_LabelTitle": "CRINKLE BIKINI SET",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/fleur-bk.webp?v=1756432832"
+  },
+  {
+    "CategoryID": 358,
+    "SkuID": "FLEUR-LS-14",
+    "Sku_Description": "Fleur Crinkle Bikini Swimsuit - Fuchsia - Fuchsia / 14",
+    "Sku_OED": "CRINKLE BIKINI SET",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/FLEUR-LS-crinkle-bikini-2copy.webp?v=1756432833",
+    "Raw_DisplayName": "Fleur Crinkle Bikini Swimsuit - Fuchsia / 14",
+    "Raw_LabelTitle": "CRINKLE BIKINI SET",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/fleur-bk.webp?v=1756432832"
+  },
+  {
+    "CategoryID": 358,
+    "SkuID": "FLEUR-LS-16",
+    "Sku_Description": "Fleur Crinkle Bikini Swimsuit - Fuchsia - Fuchsia / 16",
+    "Sku_OED": "CRINKLE BIKINI SET",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/FLEUR-LS-crinkle-bikini-2copy.webp?v=1756432833",
+    "Raw_DisplayName": "Fleur Crinkle Bikini Swimsuit - Fuchsia / 16",
+    "Raw_LabelTitle": "CRINKLE BIKINI SET",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/fleur-bk.webp?v=1756432832"
+  },
+  {
+    "CategoryID": 358,
+    "SkuID": "FLEUR-LS-7",
+    "Sku_Description": "Fleur Crinkle Bikini Swimsuit - Fuchsia - Fuchsia / 7",
+    "Sku_OED": "CRINKLE BIKINI SET",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/FLEUR-LS-crinkle-bikini-2copy.webp?v=1756432833",
+    "Raw_DisplayName": "Fleur Crinkle Bikini Swimsuit - Fuchsia / 7",
+    "Raw_LabelTitle": "CRINKLE BIKINI SET",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/fleur-bk.webp?v=1756432832"
+  },
+  {
+    "CategoryID": 358,
+    "SkuID": "FLEUR-LS-8",
+    "Sku_Description": "Fleur Crinkle Bikini Swimsuit - Fuchsia - Fuchsia / 8",
+    "Sku_OED": "CRINKLE BIKINI SET",
+    "Sku_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/FLEUR-LS-crinkle-bikini-2copy.webp?v=1756432833",
+    "Raw_DisplayName": "Fleur Crinkle Bikini Swimsuit - Fuchsia / 8",
+    "Raw_LabelTitle": "CRINKLE BIKINI SET",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/fleur-bk.webp?v=1756432832"
+  },
+  {
+    "CategoryID": 410,
+    "SkuID": "671P-SM-O/S",
+    "Sku_Description": "Puppy Love Oversized Hoodie - O/S / Orchid",
+    "Sku_OED": "PUPPLY LOVE PLUSH OS HOODIE",
+    "Sku_ImageURL": null,
+    "Raw_DisplayName": "Plush Smiley Faces Oversized Hoodie - O/S / Orchid",
+    "Raw_LabelTitle": "SMILEY PLUSH OS HOODIE",
+    "Raw_ImageURL": "https://cdn.shopify.com/s/files/1/1608/5387/files/671p-sm-oversized-hoodie.jpg?v=1756432627"
+  }
+]

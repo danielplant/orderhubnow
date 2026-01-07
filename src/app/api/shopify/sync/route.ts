@@ -2,47 +2,7 @@ import { NextResponse } from 'next/server'
 import { auth } from '@/lib/auth/providers'
 import { getSyncStatus } from '@/lib/data/queries/shopify'
 import { isShopifyConfigured } from '@/lib/shopify/client'
-import {
-  BULK_OPERATION_QUERY,
-  isSyncInProgress,
-  createSyncRun,
-  getLatestSyncRun,
-  cleanupOrphanedRuns,
-} from '@/lib/shopify/sync'
-
-// ============================================================================
-// Shopify GraphQL Helper
-// ============================================================================
-
-async function shopifyGraphQL(query: string): Promise<{ data?: unknown; error?: string }> {
-  const storeDomain = process.env.SHOPIFY_STORE_DOMAIN!
-  const accessToken = process.env.SHOPIFY_ACCESS_TOKEN!
-  const apiVersion = process.env.SHOPIFY_API_VERSION || '2024-01'
-
-  try {
-    const response = await fetch(
-      `https://${storeDomain}/admin/api/${apiVersion}/graphql.json`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Shopify-Access-Token': accessToken,
-        },
-        body: JSON.stringify({ query }),
-      }
-    )
-
-    const result = await response.json()
-
-    if (result.errors) {
-      return { error: result.errors[0]?.message || 'GraphQL error' }
-    }
-
-    return { data: result.data }
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : 'Fetch failed' }
-  }
-}
+import { getLatestSyncRun, runFullSync } from '@/lib/shopify/sync'
 
 // ============================================================================
 // GET /api/shopify/sync
@@ -87,9 +47,8 @@ export async function GET() {
 
 // ============================================================================
 // POST /api/shopify/sync
-// Trigger an on-demand sync operation.
-// Starts a Shopify bulk operation and returns immediately.
-// Webhook handles completion.
+// Trigger a full sync operation (like .NET - poll until complete).
+// This is a long-running request that polls Shopify, downloads, and transforms.
 // ============================================================================
 
 export async function POST() {
@@ -111,67 +70,38 @@ export async function POST() {
       )
     }
 
-    // Clean up any orphaned runs (started > 30 min ago, still 'started')
-    await cleanupOrphanedRuns()
-
-    // Check if sync is already in progress (DB lease + Shopify check)
-    const { inProgress, reason, runId } = await isSyncInProgress(shopifyGraphQL)
-
-    if (inProgress) {
-      return NextResponse.json({
-        success: false,
-        status: 'in_progress',
-        message: reason || 'A sync is already in progress',
-        runId: runId?.toString(),
-      })
-    }
-
-    // Start bulk operation
-    const result = await shopifyGraphQL(BULK_OPERATION_QUERY)
-
-    if (result.error) {
-      return NextResponse.json(
-        { success: false, error: `Failed to start bulk operation: ${result.error}` },
-        { status: 500 }
-      )
-    }
-
-    const bulkResult = result.data as {
-      bulkOperationRunQuery?: {
-        bulkOperation?: { id: string; status: string }
-        userErrors?: Array<{ field: string; message: string }>
-      }
-    }
-
-    // Check for Shopify user errors
-    if (bulkResult?.bulkOperationRunQuery?.userErrors?.length) {
-      const errorMsg = bulkResult.bulkOperationRunQuery.userErrors[0].message
-      return NextResponse.json({ success: false, error: `Shopify error: ${errorMsg}` }, { status: 400 })
-    }
-
-    const operationId = bulkResult?.bulkOperationRunQuery?.bulkOperation?.id
-
-    if (!operationId) {
-      return NextResponse.json(
-        { success: false, error: 'No operation ID returned from Shopify' },
-        { status: 500 }
-      )
-    }
-
-    // Create sync run record
-    const newRunId = await createSyncRun('on-demand', operationId)
-
-    // Return immediately - webhook will handle completion
-    return NextResponse.json({
-      success: true,
-      status: 'started',
-      operationId,
-      runId: newRunId.toString(),
-      message: 'Sync started. This page will update when complete.',
+    // Run the full sync (like .NET: poll until complete, download, transform)
+    // This may take several minutes
+    console.log('Starting full Shopify sync via API...')
+    const result = await runFullSync({
+      maxWaitMs: 600000, // 10 minutes max
     })
+
+    if (result.success) {
+      return NextResponse.json({
+        success: true,
+        status: 'completed',
+        message: result.message,
+        operationId: result.operationId,
+        variantsProcessed: result.variantsProcessed,
+        skusCreated: result.skusCreated,
+      })
+    } else {
+      // Sync failed but didn't throw
+      return NextResponse.json(
+        {
+          success: false,
+          status: 'failed',
+          message: result.message,
+          error: result.error,
+          operationId: result.operationId,
+        },
+        { status: result.message === 'Sync already in progress' ? 409 : 500 }
+      )
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error'
-    console.error('Sync trigger error:', error)
+    console.error('Sync error:', error)
     return NextResponse.json({ success: false, error: message }, { status: 500 })
   }
 }

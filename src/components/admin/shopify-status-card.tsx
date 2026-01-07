@@ -102,28 +102,33 @@ export function ShopifyStatusCard({ status }: ShopifyStatusCardProps) {
     if (!status.isConnected) return
 
     setSyncState('syncing')
-    setSyncMessage('Starting sync...')
+    setSyncMessage('Syncing from Shopify... This may take a few minutes.')
 
     try {
+      // This is now a long-running request (like .NET) that polls Shopify server-side
       const response = await fetch('/api/shopify/sync', { method: 'POST' })
       const data = await response.json()
 
-      if (data.status === 'started') {
-        setSyncMessage('Sync in progress. This page will update when complete.')
-        startPolling()
-      } else if (data.status === 'in_progress') {
-        setSyncMessage('A sync is already in progress. Please wait.')
-        startPolling()
+      if (data.status === 'completed') {
+        // Sync completed successfully
+        setSyncState('complete')
+        setSyncMessage(`Sync complete! ${data.skusCreated?.toLocaleString() ?? 0} SKUs synced.`)
+        // Refresh the page data after a short delay
+        setTimeout(() => router.refresh(), 1000)
+      } else if (data.status === 'in_progress' || data.message === 'Sync already in progress') {
+        // Another sync is already running
+        setSyncState('error')
+        setSyncMessage('A sync is already in progress. Please wait and try again.')
       } else if (data.error) {
         setSyncState('error')
         setSyncMessage(data.error)
       } else {
         setSyncState('error')
-        setSyncMessage('Failed to start sync')
+        setSyncMessage(data.message || 'Sync failed')
       }
     } catch (err) {
       setSyncState('error')
-      setSyncMessage(err instanceof Error ? err.message : 'Failed to start sync')
+      setSyncMessage(err instanceof Error ? err.message : 'Failed to sync')
     }
   }
 

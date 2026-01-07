@@ -35,6 +35,11 @@ Backlog of potential improvements to revisit once core functionality is stable.
 | Color swatch fallback from SKU suffix | 🔵 Idea | 45 mins | Low | [color-from-sku-fallback.md](./color-from-sku-fallback.md) |
 | Fabric type visual indicator | 🔵 Idea | 1-2 hrs | Low | [fabric-type-indicator.md](./fabric-type-indicator.md) |
 
+### Code Cleanup
+| Item | Status | Effort | Priority | Notes |
+|------|--------|--------|----------|-------|
+| Remove ShopifyStatusCard polling code | 🔵 Idea | 15 mins | Low | Leftover from old webhook-based flow. The component still has `startPolling`, `pollIntervalRef`, `setInterval` that's no longer needed since sync is now synchronous. Kept as fallback for `status.syncInProgress` on page load, but could be removed since: (1) new syncs wait for completion, (2) if someone refreshes during a sync, they just see "in progress" and can wait. |
+
 ## Adding New Ideas
 
 Create a new markdown file in this folder with:

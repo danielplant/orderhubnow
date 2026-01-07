@@ -134,6 +134,7 @@ export const BULK_OPERATION_QUERY = `
                 id
                 title
                 status
+                productType
                 featuredMedia {
                   preview {
                     image {
@@ -377,6 +378,7 @@ export interface ShopifyVariantData {
   displayName: string
   productTitle?: string
   productGid?: string
+  productType?: string
   imageUrl?: string
   variantImageUrl?: string
   size?: string
@@ -427,6 +429,7 @@ export async function upsertShopifyVariant(data: ShopifyVariantData): Promise<vo
     ShopifyId: numericId,
     ShopifyProductImageURL: imageUrl,
     productId: data.productGid ?? null,
+    ProductType: data.productType ?? null,
     // Metafields
     metafield_order_entry_collection: data.metafield_order_entry_collection ?? null,
     metafield_order_entry_description: data.metafield_order_entry_description ?? null,
@@ -495,6 +498,7 @@ interface ProductData {
   id?: string
   title?: string
   status?: string
+  productType?: string
   featuredMedia?: {
     preview?: {
       image?: {
@@ -570,6 +574,7 @@ async function processJsonlItem(item: Record<string, unknown>): Promise<boolean>
       size: (item.title as string) || '', // variant title is usually the size
       productTitle: product?.title,
       productGid: product?.id,
+      productType: product?.productType,
       imageUrl: product?.featuredMedia?.preview?.image?.url,
       variantImageUrl: variantImage?.url,
       // Metafields
@@ -785,6 +790,7 @@ export async function transformToSkuTable(options?: { skipBackup?: boolean }): P
       DisplayName: string | null
       Quantity: number | null
       Size: string | null
+      ProductType: string | null
       metafield_fabric: string | null
       metafield_color: string | null
       metafield_cad_ws_price_test: string | null
@@ -795,7 +801,7 @@ export async function transformToSkuTable(options?: { skipBackup?: boolean }): P
       metafield_order_entry_description: string | null
       ShopifyProductImageURL: string | null
     }>>(`
-      SELECT SkuID, ShopifyId, DisplayName, Quantity, Size,
+      SELECT SkuID, ShopifyId, DisplayName, Quantity, Size, ProductType,
              metafield_fabric, metafield_color, metafield_cad_ws_price_test,
              metafield_usd_ws_price, metafield_msrp_cad, metafield_msrp_us,
              metafield_order_entry_collection, metafield_order_entry_description,
@@ -821,6 +827,7 @@ export async function transformToSkuTable(options?: { skipBackup?: boolean }): P
       Size: string | null
       FabricContent: string | null
       SkuColor: string | null
+      ProductType: string | null
       CategoryID: number
       PriceCAD: string | null
       PriceUSD: string | null
@@ -861,6 +868,7 @@ export async function transformToSkuTable(options?: { skipBackup?: boolean }): P
             Size: r.Size || '',
             FabricContent: r.metafield_fabric,
             SkuColor: (r.metafield_color || '').replace(/[\[\]"]/g, ''),
+            ProductType: r.ProductType,
             CategoryID: catId,
             PriceCAD: r.metafield_cad_ws_price_test,
             PriceUSD: r.metafield_usd_ws_price,
@@ -902,5 +910,210 @@ export async function transformToSkuTable(options?: { skipBackup?: boolean }): P
   } catch (err) {
     console.error('Transform failed:', err)
     throw err
+  }
+}
+
+// ============================================================================
+// Full Sync: Poll until complete, download, transform (like .NET)
+// ============================================================================
+
+/**
+ * Run a complete Shopify sync: start bulk operation, poll until complete,
+ * download JSONL, process to RawSkusFromShopify, transform to Sku table.
+ *
+ * This matches the .NET approach: synchronous polling, no webhooks.
+ */
+export async function runFullSync(options?: {
+  onProgress?: (step: string, details?: string) => void
+  maxWaitMs?: number
+}): Promise<{
+  success: boolean
+  message: string
+  operationId?: string
+  variantsProcessed?: number
+  skusCreated?: number
+  error?: string
+}> {
+  const onProgress = options?.onProgress ?? ((step, details) => console.log(`Sync: ${step}${details ? ` - ${details}` : ''}`))
+  const maxWaitMs = options?.maxWaitMs ?? 300000 // 5 minutes default
+
+  let operationId: string | undefined
+
+  // Helper to call Shopify GraphQL
+  const shopifyFetch = async (query: string, variables?: Record<string, unknown>): Promise<{ data?: unknown; error?: string }> => {
+    const { SHOPIFY_ACCESS_TOKEN, SHOPIFY_STORE_DOMAIN, SHOPIFY_API_VERSION } = process.env
+
+    if (!SHOPIFY_ACCESS_TOKEN || !SHOPIFY_STORE_DOMAIN) {
+      return { error: 'Missing Shopify credentials' }
+    }
+
+    const endpoint = `https://${SHOPIFY_STORE_DOMAIN}/admin/api/${SHOPIFY_API_VERSION || '2024-01'}/graphql.json`
+
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
+        },
+        body: JSON.stringify({ query, variables }),
+      })
+
+      if (!response.ok) {
+        return { error: `Shopify API error: ${response.status} ${response.statusText}` }
+      }
+
+      const json = await response.json()
+      return { data: json.data }
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : 'Unknown error' }
+    }
+  }
+
+  try {
+    onProgress('Starting', 'Cleaning up orphaned runs')
+    await cleanupOrphanedRuns()
+
+    // Check if sync is already in progress
+    const { inProgress, reason } = await isSyncInProgress(shopifyFetch)
+    if (inProgress) {
+      return { success: false, message: 'Sync already in progress', error: reason }
+    }
+
+    // Step 1: Start bulk operation
+    onProgress('Step 1/4', 'Starting bulk operation')
+    const result = await shopifyFetch(BULK_OPERATION_QUERY)
+
+    if (result.error) {
+      return { success: false, message: 'Failed to start bulk operation', error: result.error }
+    }
+
+    const data = result.data as {
+      bulkOperationRunQuery?: {
+        bulkOperation?: { id: string; status: string }
+        userErrors?: Array<{ field: string; message: string }>
+      }
+    }
+
+    const bulkOp = data?.bulkOperationRunQuery?.bulkOperation
+    const userErrors = data?.bulkOperationRunQuery?.userErrors
+
+    if (userErrors && userErrors.length > 0) {
+      return { success: false, message: 'Shopify error', error: userErrors[0].message }
+    }
+
+    if (!bulkOp?.id) {
+      return { success: false, message: 'Failed to start bulk operation', error: 'No operation ID returned' }
+    }
+
+    operationId = bulkOp.id
+    await createSyncRun('on-demand', operationId)
+    onProgress('Step 1/4', `Bulk operation started: ${operationId}`)
+
+    // Step 2: Poll until complete
+    onProgress('Step 2/4', 'Polling for completion (this may take a few minutes)')
+
+    const statusQuery = `
+      query($id: ID!) {
+        node(id: $id) {
+          ... on BulkOperation {
+            id
+            status
+            errorCode
+            objectCount
+            url
+          }
+        }
+      }
+    `
+
+    const startTime = Date.now()
+    const pollInterval = 3000 // 3 seconds like .NET
+    let pollUrl: string | undefined
+    let objectCount = 0
+
+    while (Date.now() - startTime < maxWaitMs) {
+      const pollResult = await shopifyFetch(statusQuery, { id: operationId })
+
+      if (pollResult.error) {
+        await completeSyncRun(operationId, 'failed', 0, pollResult.error)
+        return { success: false, message: 'Polling failed', error: pollResult.error, operationId }
+      }
+
+      const op = (pollResult.data as { node?: { status: string; url?: string; objectCount?: number; errorCode?: string } })?.node
+
+      if (!op) {
+        await completeSyncRun(operationId, 'failed', 0, 'Bulk operation not found')
+        return { success: false, message: 'Bulk operation not found', operationId }
+      }
+
+      onProgress('Step 2/4', `Status: ${op.status}, Objects: ${op.objectCount || 0}`)
+
+      if (op.status === 'COMPLETED') {
+        if (!op.url) {
+          await completeSyncRun(operationId, 'failed', 0, 'Completed but no download URL')
+          return { success: false, message: 'Completed but no download URL', operationId }
+        }
+        pollUrl = op.url
+        objectCount = op.objectCount || 0
+        break
+      }
+
+      if (op.status === 'FAILED') {
+        await completeSyncRun(operationId, 'failed', 0, `Bulk operation failed: ${op.errorCode}`)
+        return { success: false, message: 'Bulk operation failed', error: op.errorCode, operationId }
+      }
+
+      if (op.status === 'CANCELED') {
+        await completeSyncRun(operationId, 'cancelled', 0, 'Bulk operation was canceled')
+        return { success: false, message: 'Bulk operation was canceled', operationId }
+      }
+
+      // Still running, wait and poll again
+      await new Promise(resolve => setTimeout(resolve, pollInterval))
+    }
+
+    if (!pollUrl) {
+      await completeSyncRun(operationId, 'timeout', 0, 'Timeout waiting for bulk operation')
+      return { success: false, message: 'Timeout waiting for bulk operation', operationId }
+    }
+
+    onProgress('Step 2/4', `Complete - ${objectCount} objects`)
+
+    // Step 3: Download and process JSONL
+    onProgress('Step 3/4', 'Downloading and processing variants')
+    const jsonlResponse = await fetch(pollUrl)
+    if (!jsonlResponse.ok) {
+      await completeSyncRun(operationId, 'failed', 0, `Failed to download JSONL: ${jsonlResponse.status}`)
+      return { success: false, message: 'Failed to download JSONL', operationId }
+    }
+
+    const processResult = await processJsonlStream(jsonlResponse, (n) => {
+      if (n % 500 === 0) onProgress('Step 3/4', `Processed ${n} variants`)
+    })
+    onProgress('Step 3/4', `Complete - ${processResult.processed} variants processed`)
+
+    // Step 4: Transform to Sku table
+    onProgress('Step 4/4', 'Transforming to Sku table')
+    const transformResult = await transformToSkuTable()
+    onProgress('Step 4/4', `Complete - ${transformResult.processed} SKUs created`)
+
+    // Mark sync as complete
+    await completeSyncRun(operationId, 'completed', transformResult.processed)
+
+    return {
+      success: true,
+      message: 'Sync completed successfully',
+      operationId,
+      variantsProcessed: processResult.processed,
+      skusCreated: transformResult.processed,
+    }
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : 'Unknown error'
+    console.error('Sync error:', err)
+    if (operationId) {
+      await completeSyncRun(operationId, 'failed', 0, errorMessage)
+    }
+    return { success: false, message: 'Sync failed', error: errorMessage, operationId }
   }
 }
