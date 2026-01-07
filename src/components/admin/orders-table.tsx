@@ -17,6 +17,7 @@ import {
 } from '@/components/ui'
 import { BulkActionsBar } from '@/components/admin/bulk-actions-bar'
 import { OrderCommentsModal } from '@/components/admin/order-comments-modal'
+import { ShipmentModal } from '@/components/admin/shipment-modal'
 import { cn } from '@/lib/utils'
 import type { AdminOrderRow, OrderStatus, OrdersListResult } from '@/lib/types/order'
 import { bulkUpdateStatus, updateOrderStatus } from '@/lib/data/actions/orders'
@@ -73,6 +74,7 @@ export function OrdersTable({ initialOrders, total, statusCounts, reps }: Orders
 
   const [selectedIds, setSelectedIds] = React.useState<string[]>([])
   const [commentsOrderId, setCommentsOrderId] = React.useState<string | null>(null)
+  const [shipmentOrder, setShipmentOrder] = React.useState<AdminOrderRow | null>(null)
   const [isLoading, setIsLoading] = React.useState(false)
 
   // Parse current filter state from URL
@@ -242,6 +244,54 @@ export function OrdersTable({ initialOrders, total, statusCounts, reps }: Orders
         cell: (o) => <span className="font-medium">{o.orderAmountFormatted}</span>,
       },
       {
+        id: 'shippedTotal',
+        header: 'Shipped',
+        cell: (o) => (
+          <span className="font-medium">
+            {o.shippedTotalFormatted ?? '—'}
+          </span>
+        ),
+      },
+      {
+        id: 'variance',
+        header: 'Variance',
+        cell: (o) => {
+          if (o.variance === null) {
+            return <span className="text-muted-foreground">—</span>
+          }
+          const isNegative = o.variance < 0
+          const isPositive = o.variance > 0
+          return (
+            <span
+              className={cn(
+                'font-medium',
+                isNegative && 'text-destructive',
+                isPositive && 'text-success',
+                !isNegative && !isPositive && 'text-muted-foreground'
+              )}
+            >
+              {o.varianceFormatted}
+            </span>
+          )
+        },
+      },
+      {
+        id: 'tracking',
+        header: 'Tracking',
+        cell: (o) => {
+          if (o.trackingCount === 0) {
+            return <span className="text-muted-foreground">—</span>
+          }
+          return (
+            <span className="text-sm text-muted-foreground">
+              {o.trackingCount === 1
+                ? '1 tracking #'
+                : `${o.trackingCount} tracking #s`}
+            </span>
+          )
+        },
+      },
+      {
         id: 'inShopify',
         header: 'Sync',
         cell: (o) => (
@@ -267,6 +317,12 @@ export function OrdersTable({ initialOrders, total, statusCounts, reps }: Orders
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => setCommentsOrderId(o.id)}>
                 Comments
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => setShipmentOrder(o)}
+                disabled={o.status === 'Cancelled' || o.status === 'Invoiced'}
+              >
+                Create Shipment
               </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={() => handleStatusChange(o.id, 'Processing')}
@@ -437,6 +493,18 @@ export function OrdersTable({ initialOrders, total, statusCounts, reps }: Orders
         open={!!commentsOrderId}
         onOpenChange={(open) => {
           if (!open) setCommentsOrderId(null)
+        }}
+      />
+
+      {/* Shipment Modal */}
+      <ShipmentModal
+        orderId={shipmentOrder?.id ?? null}
+        orderNumber={shipmentOrder?.orderNumber ?? null}
+        orderAmount={shipmentOrder?.orderAmount ?? 0}
+        currency={shipmentOrder?.country?.toUpperCase().includes('US') ? 'USD' : 'CAD'}
+        open={!!shipmentOrder}
+        onOpenChange={(open) => {
+          if (!open) setShipmentOrder(null)
         }}
       />
     </div>

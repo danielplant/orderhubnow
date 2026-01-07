@@ -47,7 +47,10 @@ model CustomerOrders {
   IsTransferredToShopify Boolean?
   CustomerID             Int?
   RepID                  Int?
+  ShopifyOrderID         String?                  @db.NVarChar(50)
   CustomerOrdersComments CustomerOrdersComments[]
+  CustomerOrdersItems    CustomerOrdersItems[]
+  Shipments              Shipments[]
 
   @@index([CustomerID], map: "IX_CustomerOrders_CustomerID")
   @@index([OrderDate], map: "IX_CustomerOrders_OrderDate")
@@ -64,15 +67,19 @@ model CustomerOrdersComments {
 }
 
 model CustomerOrdersItems {
-  ID              BigInt @id(map: "PK_CustomerOrdersItems") @default(autoincrement())
+  ID              BigInt          @id(map: "PK_CustomerOrdersItems") @default(autoincrement())
   CustomerOrderID BigInt
-  OrderNumber     String @db.NVarChar(50)
-  SKU             String @db.NVarChar(50)
+  OrderNumber     String          @db.NVarChar(50)
+  SKU             String          @db.NVarChar(50)
   SKUVariantID    BigInt
   Quantity        Int
   Price           Float
-  PriceCurrency   String @db.NVarChar(50)
-  Notes           String @db.NVarChar(Max)
+  PriceCurrency   String          @db.NVarChar(50)
+  Notes           String          @db.NVarChar(Max)
+  CustomerOrders  CustomerOrders  @relation(fields: [CustomerOrderID], references: [ID], onUpdate: NoAction, map: "FK_CustomerOrdersItems_CustomerOrders")
+  ShipmentItems   ShipmentItems[]
+
+  @@index([CustomerOrderID], map: "IX_CustomerOrdersItems_CustomerOrderID")
 }
 
 model Customers {
@@ -629,4 +636,50 @@ model AliasSignals {
   @@index([CreatedAt], map: "IX_AliasSignals_CreatedAt")
   @@index([EntityType], map: "IX_AliasSignals_EntityType")
   @@index([ReportType], map: "IX_AliasSignals_ReportType")
+}
+
+/// Shipment records for orders - tracks what was actually shipped vs ordered
+model Shipments {
+  ID               BigInt             @id(map: "PK_Shipments") @default(autoincrement())
+  CustomerOrderID  BigInt
+  ShippedSubtotal  Float              @default(0)
+  ShippingCost     Float              @default(0)
+  ShippedTotal     Float              @default(0)
+  ShipDate         DateTime?          @db.DateTime
+  InternalNotes    String?            @db.NVarChar(Max)
+  CreatedBy        String             @db.NVarChar(255)
+  CreatedAt        DateTime           @default(now()) @db.DateTime
+  UpdatedAt        DateTime?          @db.DateTime
+  ShopifyFulfillmentID String?        @db.NVarChar(50)
+  CustomerOrders   CustomerOrders     @relation(fields: [CustomerOrderID], references: [ID], onUpdate: NoAction, map: "FK_Shipments_CustomerOrders")
+  ShipmentItems    ShipmentItems[]
+  ShipmentTracking ShipmentTracking[]
+
+  @@index([CustomerOrderID], map: "IX_Shipments_CustomerOrderID")
+}
+
+/// Line items included in a shipment - links to order items with quantity shipped
+model ShipmentItems {
+  ID              BigInt              @id(map: "PK_ShipmentItems") @default(autoincrement())
+  ShipmentID      BigInt
+  OrderItemID     BigInt
+  QuantityShipped Int
+  PriceOverride   Float?
+  Shipment        Shipments           @relation(fields: [ShipmentID], references: [ID], onUpdate: NoAction, map: "FK_ShipmentItems_Shipments")
+  OrderItem       CustomerOrdersItems @relation(fields: [OrderItemID], references: [ID], onUpdate: NoAction, map: "FK_ShipmentItems_CustomerOrdersItems")
+
+  @@index([ShipmentID], map: "IX_ShipmentItems_ShipmentID")
+  @@index([OrderItemID], map: "IX_ShipmentItems_OrderItemID")
+}
+
+/// Tracking numbers for shipments - supports multiple tracking numbers per shipment
+model ShipmentTracking {
+  ID             BigInt    @id(map: "PK_ShipmentTracking") @default(autoincrement())
+  ShipmentID     BigInt
+  Carrier        String    @db.NVarChar(50)
+  TrackingNumber String    @db.NVarChar(100)
+  AddedAt        DateTime  @default(now()) @db.DateTime
+  Shipment       Shipments @relation(fields: [ShipmentID], references: [ID], onUpdate: NoAction, map: "FK_ShipmentTracking_Shipments")
+
+  @@index([ShipmentID], map: "IX_ShipmentTracking_ShipmentID")
 }

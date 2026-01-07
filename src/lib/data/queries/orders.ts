@@ -13,6 +13,7 @@ import type {
   OrdersSortColumn,
   SortDirection,
 } from '@/lib/types/order';
+import { getShipmentSummariesForOrders } from '@/lib/data/actions/shipments';
 
 // ============================================================================
 // Rep Orders Types
@@ -215,30 +216,56 @@ export async function getOrders(
     }
   }
 
+  // Get shipment summaries for these orders
+  const orderIds = orders.map((o) => String(o.ID));
+  const shipmentSummaries = await getShipmentSummariesForOrders(orderIds);
+
   // Map to frontend shape
   return {
     total,
     statusCounts,
-    orders: orders.map((o) => ({
-      id: String(o.ID),
-      orderNumber: o.OrderNumber,
-      status: o.OrderStatus as OrderStatus,
-      storeName: o.StoreName,
-      buyerName: o.BuyerName,
-      salesRep: o.SalesRep,
-      customerEmail: o.CustomerEmail,
-      country: o.Country,
-      orderAmount: o.OrderAmount,
-      orderAmountFormatted: formatCurrency(
-        o.OrderAmount,
-        o.Country?.toUpperCase().includes('US') ? 'USD' : 'CAD'
-      ),
-      shipStartDate: o.ShipStartDate ? o.ShipStartDate.toISOString().slice(0, 10) : null,
-      shipEndDate: o.ShipEndDate ? o.ShipEndDate.toISOString().slice(0, 10) : null,
-      orderDate: o.OrderDate.toISOString().slice(0, 10),
-      inShopify: !!o.IsTransferredToShopify,
-      isTransferredToShopify: o.IsTransferredToShopify,
-    })),
+    orders: orders.map((o) => {
+      const orderId = String(o.ID);
+      const summary = shipmentSummaries.get(orderId);
+      const currency = o.Country?.toUpperCase().includes('US') ? 'USD' : 'CAD';
+
+      // Calculate variance if shipments exist
+      let shippedTotal: number | null = null;
+      let variance: number | null = null;
+      let varianceFormatted: string | null = null;
+
+      if (summary) {
+        shippedTotal = summary.totalShipped;
+        variance = summary.totalShipped - o.OrderAmount;
+        const sign = variance >= 0 ? '+' : '';
+        varianceFormatted = `${sign}${formatCurrency(variance, currency)}`;
+      }
+
+      return {
+        id: orderId,
+        orderNumber: o.OrderNumber,
+        status: o.OrderStatus as OrderStatus,
+        storeName: o.StoreName,
+        buyerName: o.BuyerName,
+        salesRep: o.SalesRep,
+        customerEmail: o.CustomerEmail,
+        country: o.Country,
+        orderAmount: o.OrderAmount,
+        orderAmountFormatted: formatCurrency(o.OrderAmount, currency),
+        shipStartDate: o.ShipStartDate ? o.ShipStartDate.toISOString().slice(0, 10) : null,
+        shipEndDate: o.ShipEndDate ? o.ShipEndDate.toISOString().slice(0, 10) : null,
+        orderDate: o.OrderDate.toISOString().slice(0, 10),
+        inShopify: !!o.IsTransferredToShopify,
+        isTransferredToShopify: o.IsTransferredToShopify,
+        // Shipment summary fields
+        shippedTotal,
+        shippedTotalFormatted: shippedTotal !== null ? formatCurrency(shippedTotal, currency) : null,
+        variance,
+        varianceFormatted,
+        trackingCount: summary?.trackingCount ?? 0,
+        trackingNumbers: summary?.trackingNumbers ?? [],
+      };
+    }),
   };
 }
 
@@ -320,6 +347,23 @@ export async function getOrderById(orderId: string): Promise<AdminOrderRow | nul
     return null;
   }
 
+  // Get shipment summary for this order
+  const shipmentSummaries = await getShipmentSummariesForOrders([orderId]);
+  const summary = shipmentSummaries.get(orderId);
+  const currency = order.Country?.toUpperCase().includes('US') ? 'USD' : 'CAD';
+
+  // Calculate variance if shipments exist
+  let shippedTotal: number | null = null;
+  let variance: number | null = null;
+  let varianceFormatted: string | null = null;
+
+  if (summary) {
+    shippedTotal = summary.totalShipped;
+    variance = summary.totalShipped - order.OrderAmount;
+    const sign = variance >= 0 ? '+' : '';
+    varianceFormatted = `${sign}${formatCurrency(variance, currency)}`;
+  }
+
   return {
     id: String(order.ID),
     orderNumber: order.OrderNumber,
@@ -330,15 +374,19 @@ export async function getOrderById(orderId: string): Promise<AdminOrderRow | nul
     customerEmail: order.CustomerEmail,
     country: order.Country,
     orderAmount: order.OrderAmount,
-    orderAmountFormatted: formatCurrency(
-      order.OrderAmount,
-      order.Country?.toUpperCase().includes('US') ? 'USD' : 'CAD'
-    ),
+    orderAmountFormatted: formatCurrency(order.OrderAmount, currency),
     shipStartDate: order.ShipStartDate ? order.ShipStartDate.toISOString().slice(0, 10) : null,
     shipEndDate: order.ShipEndDate ? order.ShipEndDate.toISOString().slice(0, 10) : null,
     orderDate: order.OrderDate.toISOString().slice(0, 10),
     inShopify: !!order.IsTransferredToShopify,
     isTransferredToShopify: order.IsTransferredToShopify,
+    // Shipment summary fields
+    shippedTotal,
+    shippedTotalFormatted: shippedTotal !== null ? formatCurrency(shippedTotal, currency) : null,
+    variance,
+    varianceFormatted,
+    trackingCount: summary?.trackingCount ?? 0,
+    trackingNumbers: summary?.trackingNumbers ?? [],
   };
 }
 
@@ -546,35 +594,61 @@ export async function getOrdersByRep(
   const orderNumbers = orders.map((o) => o.OrderNumber);
   const categoryMap = await getOrderCategories(orderNumbers);
 
-  // 7. Map to frontend shape
+  // 7. Get shipment summaries for these orders
+  const orderIds = orders.map((o) => String(o.ID));
+  const shipmentSummaries = await getShipmentSummariesForOrders(orderIds);
+
+  // 8. Map to frontend shape
   return {
     total,
     statusCounts,
-    orders: orders.map((o) => ({
-      id: String(o.ID),
-      orderNumber: o.OrderNumber,
-      status: o.OrderStatus as OrderStatus,
-      storeName: o.StoreName,
-      buyerName: o.BuyerName,
-      salesRep: o.SalesRep,
-      customerEmail: o.CustomerEmail,
-      country: o.Country,
-      orderAmount: o.OrderAmount,
-      orderAmountFormatted: formatCurrency(
-        o.OrderAmount,
-        o.Country?.toUpperCase().includes('US') ? 'USD' : 'CAD'
-      ),
-      shipStartDate: o.ShipStartDate
-        ? o.ShipStartDate.toISOString().slice(0, 10)
-        : null,
-      shipEndDate: o.ShipEndDate
-        ? o.ShipEndDate.toISOString().slice(0, 10)
-        : null,
-      orderDate: o.OrderDate.toISOString().slice(0, 10),
-      inShopify: !!o.IsTransferredToShopify,
-      isTransferredToShopify: o.IsTransferredToShopify,
-      category: categoryMap.get(o.OrderNumber) ?? '',
-    })),
+    orders: orders.map((o) => {
+      const orderId = String(o.ID);
+      const summary = shipmentSummaries.get(orderId);
+      const currency = o.Country?.toUpperCase().includes('US') ? 'USD' : 'CAD';
+
+      // Calculate variance if shipments exist
+      let shippedTotal: number | null = null;
+      let variance: number | null = null;
+      let varianceFormatted: string | null = null;
+
+      if (summary) {
+        shippedTotal = summary.totalShipped;
+        variance = summary.totalShipped - o.OrderAmount;
+        const sign = variance >= 0 ? '+' : '';
+        varianceFormatted = `${sign}${formatCurrency(variance, currency)}`;
+      }
+
+      return {
+        id: orderId,
+        orderNumber: o.OrderNumber,
+        status: o.OrderStatus as OrderStatus,
+        storeName: o.StoreName,
+        buyerName: o.BuyerName,
+        salesRep: o.SalesRep,
+        customerEmail: o.CustomerEmail,
+        country: o.Country,
+        orderAmount: o.OrderAmount,
+        orderAmountFormatted: formatCurrency(o.OrderAmount, currency),
+        shipStartDate: o.ShipStartDate
+          ? o.ShipStartDate.toISOString().slice(0, 10)
+          : null,
+        shipEndDate: o.ShipEndDate
+          ? o.ShipEndDate.toISOString().slice(0, 10)
+          : null,
+        orderDate: o.OrderDate.toISOString().slice(0, 10),
+        inShopify: !!o.IsTransferredToShopify,
+        isTransferredToShopify: o.IsTransferredToShopify,
+        category: categoryMap.get(o.OrderNumber) ?? '',
+        // Shipment summary fields
+        shippedTotal,
+        shippedTotalFormatted: shippedTotal !== null ? formatCurrency(shippedTotal, currency) : null,
+        variance,
+        varianceFormatted,
+        trackingCount: summary?.trackingCount ?? 0,
+        trackingNumbers: summary?.trackingNumbers ?? [],
+      };
+    }),
   };
 }
 

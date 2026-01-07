@@ -61,6 +61,13 @@ export interface AdminOrderRow {
   orderDate: string;
   inShopify: boolean;
   isTransferredToShopify: boolean | null;
+  // Shipment summary fields (optional - populated when shipments exist)
+  shippedTotal: number | null;
+  shippedTotalFormatted: string | null;
+  variance: number | null;
+  varianceFormatted: string | null;
+  trackingCount: number;
+  trackingNumbers: string[];
 }
 
 /**

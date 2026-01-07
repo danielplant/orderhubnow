@@ -340,6 +340,79 @@ export async function listAllCustomers(
 }
 
 // ============================================================================
+// Fulfillments API
+// ============================================================================
+
+export interface ShopifyFulfillmentLineItem {
+  id: number
+  quantity?: number
+}
+
+export interface ShopifyFulfillmentRequest {
+  fulfillment: {
+    location_id?: number
+    tracking_number?: string
+    tracking_url?: string
+    tracking_company?: string
+    line_items?: ShopifyFulfillmentLineItem[]
+    notify_customer?: boolean
+  }
+}
+
+export interface ShopifyFulfillmentResponse {
+  fulfillment?: {
+    id: number
+    order_id: number
+    status: string
+    tracking_company?: string
+    tracking_number?: string
+    tracking_url?: string
+  }
+  errors?: Record<string, string[]> | string
+}
+
+/**
+ * Create a fulfillment for a Shopify order.
+ * See: https://shopify.dev/docs/api/admin-rest/2024-01/resources/fulfillment
+ */
+export async function createFulfillment(
+  orderId: string,
+  fulfillmentData: ShopifyFulfillmentRequest
+): Promise<{ fulfillment?: ShopifyFulfillmentResponse['fulfillment']; error?: string }> {
+  const { data, error } = await shopifyFetch<ShopifyFulfillmentResponse>(
+    `/orders/${orderId}/fulfillments.json`,
+    {
+      method: 'POST',
+      body: JSON.stringify(fulfillmentData),
+    }
+  )
+
+  if (error) {
+    return { error }
+  }
+
+  return { fulfillment: data?.fulfillment }
+}
+
+/**
+ * Get fulfillment orders for a Shopify order.
+ * Required for the modern fulfillment API (2023-01+).
+ */
+export async function getFulfillmentOrders(
+  orderId: string
+): Promise<{ fulfillment_orders?: Array<{ id: number; status: string }>; error?: string }> {
+  const { data, error } = await shopifyFetch<{ fulfillment_orders: Array<{ id: number; status: string }> }>(
+    `/orders/${orderId}/fulfillment_orders.json`
+  )
+
+  if (error) {
+    return { error }
+  }
+
+  return { fulfillment_orders: data?.fulfillment_orders }
+}
+
+// ============================================================================
 // Convenience Exports
 // ============================================================================
 
@@ -353,5 +426,9 @@ export const shopify = {
     findByEmail: findCustomerByEmail,
     list: listCustomers,
     listAll: listAllCustomers,
+  },
+  fulfillments: {
+    create: createFulfillment,
+    getFulfillmentOrders: getFulfillmentOrders,
   },
 }
