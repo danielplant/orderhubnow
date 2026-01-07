@@ -589,6 +589,236 @@ export async function getShippedTotalForOrder(orderId: string): Promise<number> 
 }
 
 // ============================================================================
+// Order Adjustments (Add/Edit/Remove Items)
+// ============================================================================
+
+export interface AddOrderItemInput {
+  orderId: string
+  sku: string
+  quantity: number
+  price: number
+  notes?: string
+}
+
+export interface AddOrderItemResult {
+  success: boolean
+  itemId?: string
+  error?: string
+}
+
+/**
+ * Add a new item to an existing order.
+ * Used for post-order adjustments (customer requests to add items).
+ */
+export async function addOrderItem(input: AddOrderItemInput): Promise<AddOrderItemResult> {
+  try {
+    const session = await requireAdmin()
+
+    const order = await prisma.customerOrders.findUnique({
+      where: { ID: BigInt(input.orderId) },
+      select: {
+        ID: true,
+        OrderNumber: true,
+        OrderStatus: true,
+        Country: true,
+      },
+    })
+
+    if (!order) {
+      return { success: false, error: 'Order not found' }
+    }
+
+    // Don't allow adjustments to invoiced or cancelled orders
+    if (order.OrderStatus === 'Invoiced' || order.OrderStatus === 'Cancelled') {
+      return { success: false, error: `Cannot modify ${order.OrderStatus.toLowerCase()} orders` }
+    }
+
+    const currency = order.Country?.toUpperCase().includes('CAD') ? 'CAD' : 'USD'
+
+    const item = await prisma.customerOrdersItems.create({
+      data: {
+        CustomerOrderID: BigInt(input.orderId),
+        OrderNumber: order.OrderNumber,
+        SKU: input.sku,
+        SKUVariantID: BigInt(0), // Manual adjustment - no variant
+        Quantity: input.quantity,
+        Price: input.price,
+        PriceCurrency: currency,
+        Notes: input.notes || `Added by ${session.user.name || session.user.loginId}`,
+      },
+    })
+
+    // Update order total
+    const newTotal = await recalculateOrderTotal(input.orderId)
+    await prisma.customerOrders.update({
+      where: { ID: BigInt(input.orderId) },
+      data: { OrderAmount: newTotal },
+    })
+
+    revalidatePath('/admin/orders')
+    revalidatePath(`/admin/orders/${input.orderId}`)
+
+    return { success: true, itemId: item.ID.toString() }
+  } catch (e) {
+    console.error('addOrderItem error:', e)
+    const message = e instanceof Error ? e.message : 'Failed to add item'
+    return { success: false, error: message }
+  }
+}
+
+export interface UpdateOrderItemInput {
+  itemId: string
+  quantity?: number
+  price?: number
+  notes?: string
+}
+
+export interface UpdateOrderItemResult {
+  success: boolean
+  error?: string
+}
+
+/**
+ * Update an existing order item's quantity, price, or notes.
+ */
+export async function updateOrderItem(input: UpdateOrderItemInput): Promise<UpdateOrderItemResult> {
+  try {
+    await requireAdmin()
+
+    const item = await prisma.customerOrdersItems.findUnique({
+      where: { ID: BigInt(input.itemId) },
+      select: {
+        ID: true,
+        CustomerOrderID: true,
+        CustomerOrders: {
+          select: { OrderStatus: true },
+        },
+      },
+    })
+
+    if (!item) {
+      return { success: false, error: 'Item not found' }
+    }
+
+    // Don't allow adjustments to invoiced or cancelled orders
+    const status = item.CustomerOrders.OrderStatus
+    if (status === 'Invoiced' || status === 'Cancelled') {
+      return { success: false, error: `Cannot modify ${status.toLowerCase()} orders` }
+    }
+
+    await prisma.customerOrdersItems.update({
+      where: { ID: BigInt(input.itemId) },
+      data: {
+        Quantity: input.quantity,
+        Price: input.price,
+        Notes: input.notes,
+      },
+    })
+
+    // Recalculate order total
+    const orderId = item.CustomerOrderID.toString()
+    const newTotal = await recalculateOrderTotal(orderId)
+    await prisma.customerOrders.update({
+      where: { ID: item.CustomerOrderID },
+      data: { OrderAmount: newTotal },
+    })
+
+    revalidatePath('/admin/orders')
+    revalidatePath(`/admin/orders/${orderId}`)
+
+    return { success: true }
+  } catch (e) {
+    console.error('updateOrderItem error:', e)
+    const message = e instanceof Error ? e.message : 'Failed to update item'
+    return { success: false, error: message }
+  }
+}
+
+export interface RemoveOrderItemResult {
+  success: boolean
+  error?: string
+}
+
+/**
+ * Remove an item from an order.
+ * Only allowed if the item hasn't been shipped yet.
+ */
+export async function removeOrderItem(itemId: string): Promise<RemoveOrderItemResult> {
+  try {
+    await requireAdmin()
+
+    const item = await prisma.customerOrdersItems.findUnique({
+      where: { ID: BigInt(itemId) },
+      select: {
+        ID: true,
+        SKU: true,
+        CustomerOrderID: true,
+        CustomerOrders: {
+          select: { OrderStatus: true },
+        },
+      },
+    })
+
+    if (!item) {
+      return { success: false, error: 'Item not found' }
+    }
+
+    // Don't allow adjustments to invoiced or cancelled orders
+    const status = item.CustomerOrders.OrderStatus
+    if (status === 'Invoiced' || status === 'Cancelled') {
+      return { success: false, error: `Cannot modify ${status.toLowerCase()} orders` }
+    }
+
+    // Check if item has been shipped
+    const shippedItems = await prisma.shipmentItems.findMany({
+      where: { OrderItemID: BigInt(itemId) },
+      select: { QuantityShipped: true },
+    })
+
+    const totalShipped = shippedItems.reduce((sum, si) => sum + si.QuantityShipped, 0)
+    if (totalShipped > 0) {
+      return {
+        success: false,
+        error: `Cannot remove ${item.SKU} - ${totalShipped} units have already been shipped`,
+      }
+    }
+
+    await prisma.customerOrdersItems.delete({
+      where: { ID: BigInt(itemId) },
+    })
+
+    // Recalculate order total
+    const orderId = item.CustomerOrderID.toString()
+    const newTotal = await recalculateOrderTotal(orderId)
+    await prisma.customerOrders.update({
+      where: { ID: item.CustomerOrderID },
+      data: { OrderAmount: newTotal },
+    })
+
+    revalidatePath('/admin/orders')
+    revalidatePath(`/admin/orders/${orderId}`)
+
+    return { success: true }
+  } catch (e) {
+    console.error('removeOrderItem error:', e)
+    const message = e instanceof Error ? e.message : 'Failed to remove item'
+    return { success: false, error: message }
+  }
+}
+
+/**
+ * Recalculate order total from line items.
+ */
+async function recalculateOrderTotal(orderId: string): Promise<number> {
+  const items = await prisma.customerOrdersItems.findMany({
+    where: { CustomerOrderID: BigInt(orderId) },
+    select: { Quantity: true, Price: true },
+  })
+
+  return items.reduce((sum, item) => sum + (item.Quantity * item.Price), 0)
+}
+
+// ============================================================================
 // Batch Get Shipment Summaries (for orders list)
 // ============================================================================
 
