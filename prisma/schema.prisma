@@ -505,8 +505,9 @@ model Warehouses {
 }
 
 model OrderNumberSequence {
-  Prefix     String @id @db.Char(1) // 'A' or 'P'
-  LastNumber Int    @default(10000)
+  Prefix     String   @id @db.Char(1) // 'A' or 'P'
+  LastNumber Int      @default(10000)
+  UpdatedAt  DateTime @default(now(), map: "DF__OrderNumb__Updat__631A7FBD") @db.DateTime
 }
 
 /// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
