@@ -49,6 +49,7 @@ model CustomerOrders {
   RepID                  Int?
   ShopifyOrderID         String?                  @db.NVarChar(50)
   CustomerOrdersComments CustomerOrdersComments[]
+  CustomerOrdersItems    CustomerOrdersItems[]
   Shipments              Shipments[]
 
   @@index([CustomerID], map: "IX_CustomerOrders_CustomerID")
@@ -75,6 +76,7 @@ model CustomerOrdersItems {
   Price           Float
   PriceCurrency   String          @db.NVarChar(50)
   Notes           String          @db.NVarChar(Max)
+  CustomerOrders  CustomerOrders  @relation(fields: [CustomerOrderID], references: [ID], onUpdate: NoAction, map: "FK_CustomerOrdersItems_CustomerOrders")
   ShipmentItems   ShipmentItems[]
 
   @@index([CustomerOrderID], map: "IX_CustomerOrdersItems_CustomerOrderID")
@@ -102,11 +104,11 @@ model Customers {
   ShippingCountry       String?   @db.NVarChar(500)
   Website               String?   @db.NVarChar(500)
   FirstOrderDate        DateTime? @db.DateTime
-  LastOrderDate         DateTime? @db.DateTime
   LTV                   Decimal?  @db.Decimal(18, 2)
   Segment               String?   @db.NVarChar(20)
-  OrderCount            Int?      @default(0, map: "DF__Customers__Order__1DB06A4F")
   UsualOrderCycle       Int?
+  LastOrderDate         DateTime? @db.DateTime
+  OrderCount            Int?      @default(0, map: "DF__Customers__Order__1DB06A4F")
   EstimatedPotential    Decimal?  @db.Decimal(18, 2)
 
   @@index([LastOrderDate], map: "IX_Customers_LastOrderDate")
@@ -229,6 +231,7 @@ model RawSkusFromShopify {
   VariantWeightUnit                 String? @db.NVarChar(50)
   VariantWeightInGrams              Float?
   productId                         String? @db.NVarChar(500)
+  ProductType                       String? @db.NVarChar(200)
   metafield_order_entry_collection  String? @db.NVarChar(200)
   metafield_order_entry_description String? @db.NVarChar(Max)
   metafield_msrp                    String? @db.NVarChar(Max)
@@ -242,7 +245,6 @@ model RawSkusFromShopify {
   metafield_msrp_us                 String? @db.NVarChar(Max)
   metafield_msrp_cad                String? @db.NVarChar(Max)
   ShopifyProductImageURL            String? @db.NVarChar(500)
-  ProductType                       String? @db.NVarChar(200)
   InventoryItemId                   String? @db.NVarChar(100)
 }
 
@@ -315,6 +317,7 @@ model Sku {
   Size                    String?        @db.NVarChar(50)
   FabricContent           String?        @db.NVarChar(Max)
   SkuColor                String?        @db.NVarChar(400)
+  ProductType             String?        @db.NVarChar(200)
   DateAdded               DateTime?      @default(now(), map: "DF_Sku_DateAdded") @db.DateTime
   DateModified            DateTime?      @default(now(), map: "DF_Sku_DateModified") @db.DateTime
   CategoryID              Int?
@@ -331,7 +334,6 @@ model Sku {
   ShopifyProductVariantId BigInt?
   SyncOrderTemp           Int?
   ShopifyImageURL         String?        @db.NVarChar(500)
-  ProductType             String?        @db.NVarChar(200)
   SkuCategories           SkuCategories? @relation(fields: [CategoryID], references: [ID], onDelete: NoAction, onUpdate: NoAction, map: "FK_Sku_SkuCategories")
 }
 
@@ -469,26 +471,28 @@ model tmpJSONOrders {
 }
 
 model Users {
-  ID                Int      @id(map: "PK_Users") @default(autoincrement())
-  LoginID           String   @db.NVarChar(50)
-  Password          String?  @db.NVarChar(50)
-  UserType          String   @db.NVarChar(50)
+  ID                Int          @id(map: "PK_Users") @default(autoincrement())
+  LoginID           String       @db.NVarChar(50)
+  Password          String?      @db.NVarChar(50) // Legacy plaintext - deprecated
+  PasswordHash      String?      @db.NVarChar(255) // bcrypt hash
+  UserType          String       @db.NVarChar(50)
   RepId             Int?
-  PasswordHash      String?  @db.NVarChar(255)
-  MustResetPassword Boolean? @default(true)
-  Email             String?  @db.NVarChar(255)
-  Status            String   @default("legacy") @db.NVarChar(20)
-  Reps              Reps?    @relation(fields: [RepId], references: [ID], onDelete: NoAction, onUpdate: NoAction, map: "FK_Users_Reps")
+  Status            String       @default("legacy") @db.NVarChar(20) // invited, active, legacy, disabled
+  MustResetPassword Boolean?     @default(true)
+  Email             String?      @db.NVarChar(255)
+  Reps              Reps?        @relation(fields: [RepId], references: [ID], onDelete: NoAction, onUpdate: NoAction, map: "FK_Users_Reps")
+  AuthTokens        AuthTokens[]
 }
 
 model AuthTokens {
   ID        Int       @id(map: "PK_AuthTokens") @default(autoincrement())
   UserID    Int
-  TokenType String    @db.NVarChar(20)
+  TokenHash String    @db.NVarChar(255)
+  TokenType String    @db.NVarChar(20) // 'invite' or 'password_reset'
   ExpiresAt DateTime  @db.DateTime
   UsedAt    DateTime? @db.DateTime
-  CreatedAt DateTime  @default(now(), map: "DF__AuthToken__Creat__5E55CAA0") @db.DateTime
-  TokenHash String    @db.NVarChar(255)
+  CreatedAt DateTime  @default(now()) @db.DateTime
+  User      Users     @relation(fields: [UserID], references: [ID], onDelete: Cascade, map: "FK_AuthTokens_Users")
 
   @@index([TokenHash], map: "IX_AuthTokens_TokenHash")
   @@index([UserID, TokenType], map: "IX_AuthTokens_UserID_Type")
@@ -501,7 +505,7 @@ model Warehouses {
 }
 
 model OrderNumberSequence {
-  Prefix     String   @id @db.Char(1)
+  Prefix     String   @id @db.Char(1) // 'A' or 'P'
   LastNumber Int      @default(10000)
   UpdatedAt  DateTime @default(now(), map: "DF__OrderNumb__Updat__631A7FBD") @db.DateTime
 }
@@ -616,7 +620,7 @@ model RepTargets {
   PeriodType   String    @db.NVarChar(20)
   PeriodStart  DateTime  @db.DateTime
   TargetAmount Decimal   @db.Decimal(18, 2)
-  CreatedAt    DateTime  @default(now(), map: "DF__RepTarget__Creat__67DF34DA") @db.DateTime
+  CreatedAt    DateTime  @default(now(), map: "DF__RepTarget__Creat__208CD6FA") @db.DateTime
   UpdatedAt    DateTime? @db.DateTime
   Reps         Reps      @relation(fields: [RepID], references: [ID], onUpdate: NoAction, map: "FK_RepTargets_Reps")
 
@@ -630,7 +634,7 @@ model AliasSignals {
   SelectedValues String    @db.NVarChar(Max)
   ReportType     String    @db.NVarChar(50)
   CreatedBy      Int?
-  CreatedAt      DateTime? @default(now(), map: "DF__AliasSign__Creat__5A8539BC")
+  CreatedAt      DateTime? @default(now(), map: "DF__AliasSign__Creat__245D67DE")
   SessionID      String?   @db.NVarChar(100)
 
   @@index([CreatedAt], map: "IX_AliasSignals_CreatedAt")
@@ -640,20 +644,20 @@ model AliasSignals {
 
 /// Shipment records for orders - tracks what was actually shipped vs ordered
 model Shipments {
-  ID                   BigInt             @id(map: "PK_Shipments") @default(autoincrement())
-  CustomerOrderID      BigInt
-  ShippedSubtotal      Float              @default(0)
-  ShippingCost         Float              @default(0)
-  ShippedTotal         Float              @default(0)
-  ShipDate             DateTime?          @db.DateTime
-  InternalNotes        String?            @db.NVarChar(Max)
-  CreatedBy            String             @db.NVarChar(255)
-  CreatedAt            DateTime           @default(now(), map: "DF__Shipments__Creat__7EC29A32") @db.DateTime
-  UpdatedAt            DateTime?          @db.DateTime
-  ShopifyFulfillmentID String?            @db.NVarChar(50)
-  ShipmentItems        ShipmentItems[]
-  CustomerOrders       CustomerOrders     @relation(fields: [CustomerOrderID], references: [ID], onUpdate: NoAction, map: "FK_Shipments_CustomerOrders")
-  ShipmentTracking     ShipmentTracking[]
+  ID               BigInt             @id(map: "PK_Shipments") @default(autoincrement())
+  CustomerOrderID  BigInt
+  ShippedSubtotal  Float              @default(0)
+  ShippingCost     Float              @default(0)
+  ShippedTotal     Float              @default(0)
+  ShipDate         DateTime?          @db.DateTime
+  InternalNotes    String?            @db.NVarChar(Max)
+  CreatedBy        String             @db.NVarChar(255)
+  CreatedAt        DateTime           @default(now()) @db.DateTime
+  UpdatedAt        DateTime?          @db.DateTime
+  ShopifyFulfillmentID String?        @db.NVarChar(50)
+  CustomerOrders   CustomerOrders     @relation(fields: [CustomerOrderID], references: [ID], onUpdate: NoAction, map: "FK_Shipments_CustomerOrders")
+  ShipmentItems    ShipmentItems[]
+  ShipmentTracking ShipmentTracking[]
 
   @@index([CustomerOrderID], map: "IX_Shipments_CustomerOrderID")
 }
@@ -665,8 +669,8 @@ model ShipmentItems {
   OrderItemID     BigInt
   QuantityShipped Int
   PriceOverride   Float?
-  OrderItem       CustomerOrdersItems @relation(fields: [OrderItemID], references: [ID], onUpdate: NoAction, map: "FK_ShipmentItems_CustomerOrdersItems")
   Shipment        Shipments           @relation(fields: [ShipmentID], references: [ID], onUpdate: NoAction, map: "FK_ShipmentItems_Shipments")
+  OrderItem       CustomerOrdersItems @relation(fields: [OrderItemID], references: [ID], onUpdate: NoAction, map: "FK_ShipmentItems_CustomerOrdersItems")
 
   @@index([ShipmentID], map: "IX_ShipmentItems_ShipmentID")
   @@index([OrderItemID], map: "IX_ShipmentItems_OrderItemID")
@@ -678,7 +682,7 @@ model ShipmentTracking {
   ShipmentID     BigInt
   Carrier        String    @db.NVarChar(50)
   TrackingNumber String    @db.NVarChar(100)
-  AddedAt        DateTime  @default(now(), map: "DF__ShipmentT__Added__0663BBFA") @db.DateTime
+  AddedAt        DateTime  @default(now()) @db.DateTime
   Shipment       Shipments @relation(fields: [ShipmentID], references: [ID], onUpdate: NoAction, map: "FK_ShipmentTracking_Shipments")
 
   @@index([ShipmentID], map: "IX_ShipmentTracking_ShipmentID")
