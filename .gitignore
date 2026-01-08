@@ -43,3 +43,8 @@ next-env.d.ts
 
 /src/generated/prisma
 scripts/fetch-all-metafields.js
+.playwright-mcp/
+EXTRACT_SESSION.md
+PROMPT.md
+VISION.md
+docker-compose.yml

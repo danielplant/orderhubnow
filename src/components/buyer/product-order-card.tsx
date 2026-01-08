@@ -308,17 +308,21 @@ export function ProductOrderCard({ product, isPreOrder = false }: ProductOrderCa
                 </div>
               ))}
 
-              <div className="bg-muted px-2 py-2 text-xs font-semibold border-b border-border">
-                On Route
-              </div>
-              {orderableVariants.map((variant) => (
-                <div
-                  key={`route-${variant.sku}`}
-                  className="px-2 py-2 text-xs text-center tabular-nums border-b border-border"
-                >
-                  {variant.onRoute > 0 ? variant.onRoute : ""}
-                </div>
-              ))}
+              {isPreOrder && (
+                <>
+                  <div className="bg-muted px-2 py-2 text-xs font-semibold border-b border-border">
+                    On Route
+                  </div>
+                  {orderableVariants.map((variant) => (
+                    <div
+                      key={`route-${variant.sku}`}
+                      className="px-2 py-2 text-xs text-center tabular-nums border-b border-border"
+                    >
+                      {variant.onRoute > 0 ? variant.onRoute : ""}
+                    </div>
+                  ))}
+                </>
+              )}
 
               <div className="bg-muted px-2 py-1.5 text-xs font-semibold">Order</div>
               {orderableVariants.map((variant) => {

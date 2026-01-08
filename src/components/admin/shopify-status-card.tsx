@@ -142,7 +142,15 @@ export function ShopifyStatusCard({ status }: ShopifyStatusCardProps) {
   )
 
   const lastSyncText = status.lastSyncTime
-    ? new Date(status.lastSyncTime).toLocaleString()
+    ? new Date(status.lastSyncTime).toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'numeric',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: true,
+      })
     : 'Never'
 
   const syncStatusBadge = {

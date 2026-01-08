@@ -807,13 +807,15 @@ export async function transformToSkuTable(options?: { skipBackup?: boolean }): P
       metafield_order_entry_description: string | null
       ShopifyProductImageURL: string | null
       Incoming: number | null
+      CommittedQuantity: number | null
     }>>(`
       SELECT r.SkuID, r.ShopifyId, r.DisplayName, r.Quantity, r.Size, r.ProductType,
              r.metafield_fabric, r.metafield_color, r.metafield_cad_ws_price_test,
              r.metafield_usd_ws_price, r.metafield_msrp_cad, r.metafield_msrp_us,
              r.metafield_order_entry_collection, r.metafield_order_entry_description,
              r.ShopifyProductImageURL,
-             inv.Incoming
+             inv.Incoming,
+             inv.CommittedQuantity
       FROM RawSkusFromShopify r
       LEFT JOIN RawSkusInventoryLevelFromShopify inv ON CAST(r.ShopifyId AS VARCHAR) = inv.ParentId
       WHERE r.SkuID LIKE '%-%'
@@ -889,8 +891,8 @@ export async function transformToSkuTable(options?: { skipBackup?: boolean }): P
             DisplayPriority: 10000,
             ShopifyProductVariantId: r.ShopifyId,
             ShopifyImageURL: r.ShopifyProductImageURL,
-            // OnRoute comes from Shopify "incoming" inventory quantity
-            OnRoute: r.Incoming ?? 0,
+            // OnRoute = incoming - committed (PO Quantity - Sold Quantity)
+            OnRoute: Math.max(0, (r.Incoming ?? 0) - (r.CommittedQuantity ?? 0)),
           })
         }
       }
