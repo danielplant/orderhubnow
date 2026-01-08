@@ -1,6 +1,36 @@
 const { PrismaClient } = require("@prisma/client");
 const p = new PrismaClient();
 
+/**
+ * Normalize category names to handle typos and variations in Shopify data.
+ */
+function normalizeCategoryName(name) {
+  let normalized = name.trim();
+
+  // Fix common typos
+  normalized = normalized.replace(/Jul 151/gi, "Jul 15"); // typo: 151 -> 15
+  normalized = normalized.replace(/PreOrderPreOrder/g, "PreOrder"); // double suffix
+
+  // Fix spacing issues
+  normalized = normalized.replace(/\s+/g, " "); // collapse multiple spaces to single
+  normalized = normalized.replace(/(\w)- /g, "$1 - "); // ensure space before dash
+  normalized = normalized.replace(/ -(\w)/g, " - $1"); // ensure space after dash
+
+  // Fix known naming variations
+  // "Holiday 2025Preppy Goose" -> "Holiday 2025 Preppy Goose"
+  normalized = normalized.replace(/(\d{4})([A-Z])/g, "$1 $2");
+
+  // "Holiday Preppy Goose 2025" -> "Holiday 2025 Preppy Goose"
+  if (/^Holiday Preppy Goose 2025$/i.test(normalized)) {
+    normalized = "Holiday 2025 Preppy Goose";
+  }
+
+  // "FW26 Preppy Goose 2026" -> "FW26 Preppy Goose" (redundant year)
+  normalized = normalized.replace(/^(FW\d{2} Preppy Goose) 20\d{2}$/i, "$1");
+
+  return normalized;
+}
+
 async function run() {
   const start = Date.now();
   
@@ -32,7 +62,7 @@ async function run() {
     
     for (const part of parts) {
       const isPreOrder = part.includes("PreOrder");
-      const catName = part.replace(/PreOrder/g, "").trim();
+      const catName = normalizeCategoryName(part.replace(/PreOrder/g, ""));
       const key = catName.toLowerCase() + "_" + (isPreOrder ? "1" : "0");
       const catId = catMap.get(key);
       

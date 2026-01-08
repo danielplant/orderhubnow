@@ -43,6 +43,7 @@ next-env.d.ts
 
 /src/generated/prisma
 scripts/fetch-all-metafields.js
+scripts/analysis-*/
 .playwright-mcp/
 EXTRACT_SESSION.md
 PROMPT.md

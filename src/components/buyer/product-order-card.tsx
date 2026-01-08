@@ -279,9 +279,9 @@ export function ProductOrderCard({ product, isPreOrder = false }: ProductOrderCa
             <span className="text-sm text-muted-foreground italic">No sizes available</span>
           ) : (
             <div
-              className="grid rounded-md overflow-hidden border border-border bg-background"
+              className="grid w-max rounded-md overflow-hidden border border-border bg-background"
               style={{
-                gridTemplateColumns: `6rem repeat(${orderableVariants.length}, minmax(var(--size-chip-min), 1fr))`,
+                gridTemplateColumns: `6rem repeat(${orderableVariants.length}, var(--size-chip-min))`,
               }}
             >
               <div className="bg-muted px-2 py-2 text-xs font-semibold border-b border-border">
