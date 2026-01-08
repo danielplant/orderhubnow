@@ -22,6 +22,8 @@ const SIZE_ORDER: string[] = [
   '18', '18/20', '20',
   // Letter sizes (small to large)
   'XXS', 'XS', 'S', 'M', 'M/L', 'L', 'XL', 'XXL',
+  // Letter sizes with parenthetical numeric (small to large)
+  'XS(6/6X)', 'S(7/8)', 'M(10/12)', 'L(14/16)',
   // Junior sizes
   'JR-XS', 'JR-S', 'JR-M', 'JR-L', 'JR-XL',
   // One-size
@@ -75,13 +77,25 @@ export function extractSize(variantTitle: string): string {
 
   const parts = variantTitle.split(' / ').map(p => p.trim());
 
-  // Check first part - if it's a known size (after normalization), use it
-  if (parts[0] && isKnownSize(parts[0])) {
+  // Helper to check if a part looks like a size (including parenthetical format like "XS(6/6X)")
+  const looksLikeSize = (s: string): boolean => {
+    // Check if it's a known size directly
+    if (isKnownSize(s)) return true;
+    // Check for parenthetical format: "XS(6/6X)", "S(7/8)", "M(10/12)", "L(14/16)"
+    const parenMatch = s.match(/^([A-Z]{1,3})\s*\(/i);
+    if (parenMatch && isKnownSize(parenMatch[1])) return true;
+    // Check if it starts with a number (like "6/6X", "7/8", "10/12")
+    if (/^\d/.test(s)) return true;
+    return false;
+  };
+
+  // Check first part - if it looks like a size, use it
+  if (parts[0] && looksLikeSize(parts[0])) {
     return normalizeSize(parts[0]);
   }
 
-  // Check second part - if it's a known size, use it (reversed format: Color / Size)
-  if (parts[1] && isKnownSize(parts[1])) {
+  // Check second part - if it looks like a size, use it (reversed format: Color / Size)
+  if (parts[1] && looksLikeSize(parts[1])) {
     return normalizeSize(parts[1]);
   }
 

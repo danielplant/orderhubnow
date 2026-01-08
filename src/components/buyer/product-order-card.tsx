@@ -290,7 +290,8 @@ export function ProductOrderCard({ product, isPreOrder = false }: ProductOrderCa
               {orderableVariants.map((variant) => (
                 <div
                   key={`size-${variant.sku}`}
-                  className="px-2 py-2 text-xs font-semibold text-center border-b border-border"
+                  className="px-2 py-2 text-xs font-semibold text-center border-b border-border truncate"
+                  title={variant.size || "OS"}
                 >
                   {variant.size || "OS"}
                 </div>
