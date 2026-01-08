@@ -125,13 +125,15 @@ export async function getOrders(
   const baseWhere: any = {};
 
   // Store search - matches .NET: StoreName.ToLower().Contains(storeNameSearch)
+  // Note: SQL Server collation is case-insensitive by default
   if (input.q) {
-    baseWhere.StoreName = { contains: input.q, mode: 'insensitive' };
+    baseWhere.StoreName = { contains: input.q };
   }
 
   // Optional rep filter (enhancement; CustomerOrders.SalesRep is a string)
+  // Note: SQL Server collation is case-insensitive by default
   if (input.rep) {
-    baseWhere.SalesRep = { contains: input.rep, mode: 'insensitive' };
+    baseWhere.SalesRep = { contains: input.rep };
   }
 
   // CRITICAL: Pending sync filter must handle nullable boolean
@@ -524,15 +526,17 @@ export async function getOrdersByRep(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const baseWhere: any = {
     // Rep filter: RepID match (fast, indexed) OR SalesRep contains name (fallback for legacy)
+    // Note: SQL Server collation is case-insensitive by default, no mode needed
     OR: [
       { RepID: repId },
-      { SalesRep: { contains: rep.Name, mode: 'insensitive' } },
+      { SalesRep: { contains: rep.Name } },
     ],
   };
 
   // Store search filter (AND with the OR above)
+  // Note: SQL Server collation is case-insensitive by default
   if (input.q) {
-    baseWhere.StoreName = { contains: input.q, mode: 'insensitive' };
+    baseWhere.StoreName = { contains: input.q };
   }
 
   // 3. Build status-specific where
