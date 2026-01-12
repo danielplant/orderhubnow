@@ -1,7 +1,7 @@
 import { BrandHeader } from "@/components/buyer/brand-header";
 import { CollectionCard } from "@/components/buyer/collection-card";
 import { Divider } from "@/components/ui";
-import { getCategoriesWithProductCount } from "@/lib/data/queries/categories";
+import { getATSCollectionsForBuyer } from "@/lib/data/queries/collections";
 import { buildRepQueryStringFromObject } from "@/lib/utils/rep-context";
 
 export const dynamic = 'force-dynamic'
@@ -11,17 +11,13 @@ interface Props {
 }
 
 export default async function ATSPage({ searchParams }: Props) {
-  const [categories, params] = await Promise.all([
-    getCategoriesWithProductCount(),
+  const [atsCollections, params] = await Promise.all([
+    getATSCollectionsForBuyer(),
     searchParams,
   ]);
-  
+
   // Build rep context query string to preserve through navigation
   const repQuery = buildRepQueryStringFromObject(params);
-  
-  // Filter to ATS categories (not pre-order) and with products
-  // Matches .NET behavior: only show categories with stock
-  const atsCategories = categories.filter(cat => !cat.isPreOrder && cat.productCount > 0);
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -35,7 +31,7 @@ export default async function ATSPage({ searchParams }: Props) {
               Available to Ship
             </h1>
             <span className="text-sm font-mono text-muted-foreground">
-              {atsCategories.length} Collections
+              {atsCollections.length} Collections
             </span>
           </div>
           <p className="text-base text-muted-foreground max-w-2xl">
@@ -45,15 +41,15 @@ export default async function ATSPage({ searchParams }: Props) {
         </div>
 
         {/* Collections Grid */}
-        {atsCategories.length > 0 ? (
+        {atsCollections.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8">
-            {atsCategories.map((category) => (
+            {atsCollections.map((collection) => (
               <CollectionCard
-                key={category.id}
-                name={category.name}
-                count={category.productCount}
-                href={`/buyer/ats/${category.id}${repQuery}`}
-                imageUrl={`/SkuImages/${category.id}.jpg`}
+                key={collection.id}
+                name={collection.name}
+                count={collection.productCount}
+                href={`/buyer/ats/${collection.id}${repQuery}`}
+                imageUrl={collection.imageUrl ?? `/SkuImages/${collection.id}.jpg`}
               />
             ))}
           </div>

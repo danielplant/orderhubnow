@@ -3,7 +3,7 @@ import { ArrowLeft } from "lucide-react";
 import { BrandHeader } from "@/components/buyer/brand-header";
 import { CollectionProductsGrid } from "@/components/buyer/collection-products-grid";
 import { Divider } from "@/components/ui";
-import { getSkusByCategory, getCategoryName } from "@/lib/data/queries/skus";
+import { getSkusByCollection, getCollectionName } from "@/lib/data/queries/collections";
 import { buildRepQueryStringFromObject } from "@/lib/utils/rep-context";
 
 interface PageProps {
@@ -13,20 +13,20 @@ interface PageProps {
 
 export const dynamic = 'force-dynamic';
 
-export default async function CategoryPage({ params, searchParams }: PageProps) {
+export default async function CollectionPage({ params, searchParams }: PageProps) {
   const [{ category }, queryParams] = await Promise.all([params, searchParams]);
-  const categoryId = parseInt(category, 10);
-  
+  const collectionId = parseInt(category, 10);
+
   // Build rep context query string to preserve through navigation
   const repQuery = buildRepQueryStringFromObject(queryParams);
-  
-  // Fetch category name and products in parallel
-  const [categoryName, products] = await Promise.all([
-    getCategoryName(categoryId),
-    getSkusByCategory(categoryId)
+
+  // Fetch collection name and products in parallel
+  const [collectionName, products] = await Promise.all([
+    getCollectionName(collectionId),
+    getSkusByCollection(collectionId)
   ]);
 
-  const displayName = categoryName ?? `Category ${categoryId}`;
+  const displayName = collectionName ?? `Collection ${collectionId}`;
 
   return (
     <div className="min-h-screen bg-background text-foreground">

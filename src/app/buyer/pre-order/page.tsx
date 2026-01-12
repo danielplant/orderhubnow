@@ -2,7 +2,7 @@ import Link from "next/link";
 import { ArrowRight, Calendar } from "lucide-react";
 import { BrandHeader } from "@/components/buyer/brand-header";
 import { Divider } from "@/components/ui";
-import { getPreOrderCategories } from "@/lib/data/queries/preorder";
+import { getPreOrderCollectionsForBuyer } from "@/lib/data/queries/collections";
 import { cn, getCategoryGradient } from "@/lib/utils";
 import { buildRepQueryStringFromObject } from "@/lib/utils/rep-context";
 
@@ -96,11 +96,11 @@ function PreOrderCollectionCard({
 }
 
 export default async function PreOrderPage({ searchParams }: Props) {
-  const [categories, params] = await Promise.all([
-    getPreOrderCategories(),
+  const [collections, params] = await Promise.all([
+    getPreOrderCollectionsForBuyer(),
     searchParams,
   ]);
-  
+
   // Build rep context query string to preserve through navigation
   const repQuery = buildRepQueryStringFromObject(params);
 
@@ -116,7 +116,7 @@ export default async function PreOrderPage({ searchParams }: Props) {
               Pre-Order Collections
             </h1>
             <span className="text-sm font-mono text-muted-foreground">
-              {categories.length} Collections
+              {collections.length} Collections
             </span>
           </div>
           <p className="text-base text-muted-foreground max-w-2xl">
@@ -127,17 +127,17 @@ export default async function PreOrderPage({ searchParams }: Props) {
         </div>
 
         {/* Collections Grid */}
-        {categories.length > 0 ? (
+        {collections.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8">
-            {categories.map((category) => (
+            {collections.map((collection) => (
               <PreOrderCollectionCard
-                key={category.id}
-                name={category.name}
-                count={category.productCount}
-                href={`/buyer/pre-order/${category.id}${repQuery}`}
-                imageUrl={category.imageUrl}
-                shipWindowStart={category.onRouteStartDate}
-                shipWindowEnd={category.onRouteEndDate}
+                key={collection.id}
+                name={collection.name}
+                count={collection.productCount}
+                href={`/buyer/pre-order/${collection.id}${repQuery}`}
+                imageUrl={collection.imageUrl}
+                shipWindowStart={collection.onRouteStartDate}
+                shipWindowEnd={collection.onRouteEndDate}
               />
             ))}
           </div>

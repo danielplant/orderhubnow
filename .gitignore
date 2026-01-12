@@ -49,3 +49,6 @@ EXTRACT_SESSION.md
 PROMPT.md
 VISION.md
 docker-compose.yml
+
+# Generated thumbnails
+/public/thumbnails/

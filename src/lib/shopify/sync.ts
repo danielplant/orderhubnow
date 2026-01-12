@@ -5,6 +5,7 @@
  */
 
 import { prisma } from '@/lib/prisma'
+import { saveThumbnailsBatch } from '@/lib/utils/thumbnails'
 
 // ============================================================================
 // GID Parsing
@@ -727,40 +728,9 @@ export async function processJsonlLines(
 
 // ============================================================================
 // Transform: RawSkusFromShopify → Sku Table
-// TypeScript port of .NET TransformShopifySkus stored procedure
-// Key difference: NO DU3/DU9 prefix - store clean SKU as-is
+// Uses new Collections system with explicit ShopifyValueMapping
+// Key principle: Raw Shopify values stored EXACTLY as-is, no normalization
 // ============================================================================
-
-/**
- * Normalize category names to handle typos and variations in Shopify data.
- * This allows products with slight naming differences to map to the same category.
- */
-function normalizeCategoryName(name: string): string {
-  let normalized = name.trim()
-
-  // Fix common typos
-  normalized = normalized.replace(/Jul 151/gi, 'Jul 15') // typo: 151 -> 15
-  normalized = normalized.replace(/PreOrderPreOrder/g, 'PreOrder') // double suffix
-
-  // Fix spacing issues
-  normalized = normalized.replace(/\s+/g, ' ') // collapse multiple spaces to single
-  normalized = normalized.replace(/(\w)- /g, '$1 - ') // ensure space before dash
-  normalized = normalized.replace(/ -(\w)/g, ' - $1') // ensure space after dash
-
-  // Fix known naming variations
-  // "Holiday 2025Preppy Goose" -> "Holiday 2025 Preppy Goose"
-  normalized = normalized.replace(/(\d{4})([A-Z])/g, '$1 $2')
-
-  // "Holiday Preppy Goose 2025" -> "Holiday 2025 Preppy Goose"
-  if (/^Holiday Preppy Goose 2025$/i.test(normalized)) {
-    normalized = 'Holiday 2025 Preppy Goose'
-  }
-
-  // "FW26 Preppy Goose 2026" -> "FW26 Preppy Goose" (redundant year)
-  normalized = normalized.replace(/^(FW\d{2} Preppy Goose) 20\d{2}$/i, '$1')
-
-  return normalized
-}
 
 /**
  * Create a backup of the Sku table before transformation.
@@ -784,18 +754,22 @@ export async function backupSkuTable(): Promise<string | null> {
 }
 
 /**
- * Transform raw Shopify data to the Sku table.
- * Matches .NET approach: exact category name matching after splitting comma-separated values.
+ * Transform raw Shopify data to the Sku table using the new Collections system.
  *
- * Key difference from .NET: We store CLEAN SKUs without DU3/DU9 prefix.
+ * Key principles:
+ * - Raw Shopify values stored EXACTLY as-is (no normalization)
+ * - Uses ShopifyValueMapping table for explicit admin-defined mappings
+ * - Only SKUs with mapped values become visible to buyers
+ * - Unmapped values are tracked but don't create SKUs
  */
 export async function transformToSkuTable(options?: { skipBackup?: boolean }): Promise<{
   processed: number
   errors: number
   skipped: number
+  unmappedValues: number
   backupTable?: string
 }> {
-  console.log('Starting transform: RawSkusFromShopify → Sku table')
+  console.log('Starting transform: RawSkusFromShopify → Sku table (using Collections)')
 
   let backupTable: string | undefined
 
@@ -810,17 +784,28 @@ export async function transformToSkuTable(options?: { skipBackup?: boolean }): P
   }
 
   try {
-    // 1. Get all categories and build lookup map (exact match like .NET)
-    const categories = await prisma.skuCategories.findMany()
-    const catMap = new Map<string, number>()
-    for (const c of categories) {
-      // Key: lowercase name + isPreOrder flag
-      const key = c.Name.toLowerCase().trim() + '_' + (c.IsPreOrder ? '1' : '0')
-      catMap.set(key, c.ID)
+    // 1. Get all ShopifyValueMappings that are mapped to collections
+    const mappings = await prisma.shopifyValueMapping.findMany({
+      where: { status: 'mapped', collectionId: { not: null } },
+    })
+    const mappingMap = new Map<string, number>()
+    for (const m of mappings) {
+      if (m.collectionId) {
+        mappingMap.set(m.rawValue, m.collectionId)
+      }
     }
-    console.log(`Loaded ${categories.length} categories`)
+    console.log(`Loaded ${mappings.length} mapped Shopify values`)
 
-    // 2. Get raw SKUs with required fields (same filters as .NET)
+    // 2. Get all collections to determine type (ATS vs PreOrder)
+    const collections = await prisma.collection.findMany({
+      select: { id: true, type: true },
+    })
+    const collectionTypeMap = new Map<number, string>()
+    for (const c of collections) {
+      collectionTypeMap.set(c.id, c.type)
+    }
+
+    // 3. Get raw SKUs with required fields
     const rawSkus = await prisma.$queryRawUnsafe<Array<{
       SkuID: string
       ShopifyId: bigint | null
@@ -860,7 +845,10 @@ export async function transformToSkuTable(options?: { skipBackup?: boolean }): P
     `)
     console.log(`Found ${rawSkus.length} raw SKUs to process`)
 
-    // 3. Build insert records - split collection by comma, exact match each (like .NET)
+    // 4. Track all raw values seen (for creating new unmapped entries)
+    const seenRawValues = new Map<string, number>() // rawValue → count
+
+    // 5. Build insert records - split collection by comma, exact match each
     const inserts: Array<{
       SkuID: string
       Description: string | null
@@ -870,7 +858,8 @@ export async function transformToSkuTable(options?: { skipBackup?: boolean }): P
       FabricContent: string | null
       SkuColor: string | null
       ProductType: string | null
-      CategoryID: number
+      CategoryID: number | null
+      CollectionID: number
       PriceCAD: string | null
       PriceUSD: string | null
       ShowInPreOrder: boolean
@@ -884,23 +873,22 @@ export async function transformToSkuTable(options?: { skipBackup?: boolean }): P
     }> = []
 
     for (const r of rawSkus) {
-      // Normalize Pre-Order → PreOrder (same as .NET)
-      const collection = (r.metafield_order_entry_collection || '').replace(/Pre-Order/g, 'PreOrder')
-      // Split by comma and process each category token
-      const parts = collection.split(',').map(s => s.trim()).filter(Boolean)
+      // Split by comma - keep values EXACTLY as-is (no normalization)
+      const rawCollection = r.metafield_order_entry_collection || ''
+      const parts = rawCollection.split(',').map(s => s.trim()).filter(Boolean)
 
-      for (const part of parts) {
-        const isPreOrder = part.includes('PreOrder')
-        const catName = normalizeCategoryName(part.replace(/PreOrder/g, ''))
+      for (const rawValue of parts) {
+        // Track this value
+        seenRawValues.set(rawValue, (seenRawValues.get(rawValue) || 0) + 1)
 
-        // Skip Defective
-        if (catName.toLowerCase() === 'defective') continue
+        // Look up mapping - exact match only
+        const collectionId = mappingMap.get(rawValue)
 
-        // Exact match lookup (like .NET)
-        const key = catName.toLowerCase() + '_' + (isPreOrder ? '1' : '0')
-        const catId = catMap.get(key)
+        if (collectionId) {
+          // Determine if PreOrder based on collection type
+          const collectionType = collectionTypeMap.get(collectionId)
+          const isPreOrder = collectionType === 'PreOrder'
 
-        if (catId) {
           inserts.push({
             SkuID: r.SkuID.toUpperCase(),
             Description: r.DisplayName,
@@ -912,7 +900,8 @@ export async function transformToSkuTable(options?: { skipBackup?: boolean }): P
             FabricContent: r.metafield_fabric,
             SkuColor: (r.metafield_color || '').replace(/[\[\]"]/g, ''),
             ProductType: r.ProductType,
-            CategoryID: catId,
+            CategoryID: null, // No longer using old CategoryID
+            CollectionID: collectionId,
             PriceCAD: r.metafield_cad_ws_price_test,
             PriceUSD: r.metafield_usd_ws_price,
             ShowInPreOrder: isPreOrder,
@@ -926,11 +915,44 @@ export async function transformToSkuTable(options?: { skipBackup?: boolean }): P
             OnRoute: Math.max(0, (r.Incoming ?? 0) - (r.CommittedQuantity ?? 0)),
           })
         }
+        // If not mapped, SKU is NOT created (invisible to buyers)
       }
     }
-    console.log(`Built ${inserts.length} Sku records`)
+    console.log(`Built ${inserts.length} Sku records from mapped values`)
 
-    // 4. Truncate and bulk insert
+    // 6. Upsert ShopifyValueMapping for all seen raw values
+    console.log(`Updating ShopifyValueMapping for ${seenRawValues.size} unique raw values`)
+    let newUnmapped = 0
+    for (const [rawValue, count] of seenRawValues) {
+      const existing = await prisma.shopifyValueMapping.findUnique({
+        where: { rawValue },
+      })
+
+      if (existing) {
+        // Update lastSeenAt and skuCount
+        await prisma.shopifyValueMapping.update({
+          where: { id: existing.id },
+          data: { lastSeenAt: new Date(), skuCount: count },
+        })
+      } else {
+        // Create new unmapped entry
+        await prisma.shopifyValueMapping.create({
+          data: {
+            rawValue,
+            status: 'unmapped',
+            skuCount: count,
+            firstSeenAt: new Date(),
+            lastSeenAt: new Date(),
+          },
+        })
+        newUnmapped++
+      }
+    }
+    if (newUnmapped > 0) {
+      console.log(`Created ${newUnmapped} new unmapped entries`)
+    }
+
+    // 7. Truncate and bulk insert
     await prisma.$executeRawUnsafe('TRUNCATE TABLE Sku')
 
     // Insert in batches
@@ -940,10 +962,10 @@ export async function transformToSkuTable(options?: { skipBackup?: boolean }): P
       await prisma.sku.createMany({ data: batch })
     }
 
-    // 5. Remove duplicates (keep first by ID, same as .NET)
+    // 8. Remove duplicates (keep first by ID)
     await prisma.$executeRawUnsafe(`
       WITH CTE AS (
-        SELECT *, ROW_NUMBER() OVER (PARTITION BY SkuID, CategoryID ORDER BY ID DESC) AS rn FROM Sku
+        SELECT *, ROW_NUMBER() OVER (PARTITION BY SkuID, CollectionID ORDER BY ID DESC) AS rn FROM Sku
       )
       DELETE FROM CTE WHERE rn > 1
     `)
@@ -951,7 +973,18 @@ export async function transformToSkuTable(options?: { skipBackup?: boolean }): P
     const count = await prisma.sku.count()
     console.log(`Transform complete: ${count} SKUs`)
 
-    return { processed: count, errors: 0, skipped: rawSkus.length - inserts.length, backupTable }
+    // Count unmapped values for stats
+    const unmappedCount = await prisma.shopifyValueMapping.count({
+      where: { status: 'unmapped' },
+    })
+
+    return {
+      processed: count,
+      errors: 0,
+      skipped: rawSkus.length - inserts.length,
+      unmappedValues: unmappedCount,
+      backupTable,
+    }
   } catch (err) {
     console.error('Transform failed:', err)
     throw err
@@ -1026,7 +1059,7 @@ export async function runFullSync(options?: {
     }
 
     // Step 1: Start bulk operation
-    onProgress('Step 1/4', 'Starting bulk operation')
+    onProgress('Step 1/5', 'Starting bulk operation')
     const result = await shopifyFetch(BULK_OPERATION_QUERY)
 
     if (result.error) {
@@ -1053,10 +1086,10 @@ export async function runFullSync(options?: {
 
     operationId = bulkOp.id
     await createSyncRun('on-demand', operationId)
-    onProgress('Step 1/4', `Bulk operation started: ${operationId}`)
+    onProgress('Step 1/5', `Bulk operation started: ${operationId}`)
 
     // Step 2: Poll until complete
-    onProgress('Step 2/4', 'Polling for completion (this may take a few minutes)')
+    onProgress('Step 2/5', 'Polling for completion (this may take a few minutes)')
 
     const statusQuery = `
       query($id: ID!) {
@@ -1092,7 +1125,7 @@ export async function runFullSync(options?: {
         return { success: false, message: 'Bulk operation not found', operationId }
       }
 
-      onProgress('Step 2/4', `Status: ${op.status}, Objects: ${op.objectCount || 0}`)
+      onProgress('Step 2/5', `Status: ${op.status}, Objects: ${op.objectCount || 0}`)
 
       if (op.status === 'COMPLETED') {
         if (!op.url) {
@@ -1123,10 +1156,10 @@ export async function runFullSync(options?: {
       return { success: false, message: 'Timeout waiting for bulk operation', operationId }
     }
 
-    onProgress('Step 2/4', `Complete - ${objectCount} objects`)
+    onProgress('Step 2/5', `Complete - ${objectCount} objects`)
 
     // Step 3: Download and process JSONL
-    onProgress('Step 3/4', 'Downloading and processing variants')
+    onProgress('Step 3/5', 'Downloading and processing variants')
     const jsonlResponse = await fetch(pollUrl)
     if (!jsonlResponse.ok) {
       await completeSyncRun(operationId, 'failed', 0, `Failed to download JSONL: ${jsonlResponse.status}`)
@@ -1134,14 +1167,41 @@ export async function runFullSync(options?: {
     }
 
     const processResult = await processJsonlStream(jsonlResponse, (n) => {
-      if (n % 500 === 0) onProgress('Step 3/4', `Processed ${n} variants`)
+      if (n % 500 === 0) onProgress('Step 3/5', `Processed ${n} variants`)
     })
-    onProgress('Step 3/4', `Complete - ${processResult.processed} variants processed`)
+    onProgress('Step 3/5', `Complete - ${processResult.processed} variants processed`)
 
     // Step 4: Transform to Sku table
-    onProgress('Step 4/4', 'Transforming to Sku table')
+    onProgress('Step 4/5', 'Transforming to Sku table')
     const transformResult = await transformToSkuTable()
-    onProgress('Step 4/4', `Complete - ${transformResult.processed} SKUs created`)
+    onProgress('Step 4/5', `Complete - ${transformResult.processed} SKUs created`)
+
+    // Step 5: Generate thumbnails for all SKUs with images
+    onProgress('Step 5/5', 'Generating thumbnails')
+    const skusWithImages = await prisma.sku.findMany({
+      where: { ShopifyImageURL: { not: null } },
+      select: { SkuID: true, ShopifyImageURL: true },
+    })
+    
+    const thumbnailItems = skusWithImages.map(s => ({
+      skuId: s.SkuID,
+      imageUrl: s.ShopifyImageURL,
+    }))
+    
+    let thumbnailsGenerated = 0
+    if (thumbnailItems.length > 0) {
+      const thumbnailResults = await saveThumbnailsBatch(thumbnailItems)
+      thumbnailsGenerated = thumbnailResults.size
+      
+      // Update SKUs with thumbnail paths
+      for (const [skuId, thumbnailPath] of thumbnailResults) {
+        await prisma.sku.updateMany({
+          where: { SkuID: skuId },
+          data: { ThumbnailPath: thumbnailPath },
+        })
+      }
+    }
+    onProgress('Step 5/5', `Complete - ${thumbnailsGenerated} thumbnails generated`)
 
     // Mark sync as complete
     await completeSyncRun(operationId, 'completed', transformResult.processed)

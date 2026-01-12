@@ -16,7 +16,7 @@ export const adminNav: NavItem[] = [
   { name: 'Reports', path: '/admin/reports' },  // NEW: Reports link
   { name: 'Orders', path: '/admin/orders' },
   { name: 'Products', path: '/admin/products' },
-  { name: 'Categories', path: '/admin/categories' },
+  { name: 'Collections', path: '/admin/collections' },
   { name: 'Inventory', path: '/admin/inventory' },
   { name: 'Customers', path: '/admin/customers' },
   { name: 'Reps', path: '/admin/reps' },

@@ -1,13 +1,14 @@
 /**
- * Products Export API - XLSX generation
- * Matches admin products page filters
+ * Products Export API - XLSX generation with thumbnails
+ * Columns: Image | SKU | Color | Description | Material | Available | On Route | Wholesale Price | Retail Price | Collection | Status
  */
 
 import { NextRequest, NextResponse } from 'next/server'
 import ExcelJS from 'exceljs'
 import { auth } from '@/lib/auth/providers'
 import { prisma } from '@/lib/prisma'
-import { getEffectiveQuantity, parsePrice, parseSkuId } from '@/lib/utils'
+import { parsePrice } from '@/lib/utils'
+import { readThumbnail, fetchThumbnail } from '@/lib/utils/thumbnails'
 
 // ============================================================================
 // Helpers
@@ -18,6 +19,9 @@ function getString(value: unknown): string | undefined {
   const t = value.trim()
   return t || undefined
 }
+
+const THUMBNAIL_SIZE = 100
+const ROW_HEIGHT = 80
 
 // ============================================================================
 // Main Handler
@@ -61,7 +65,7 @@ export async function GET(request: NextRequest) {
       where.ShowInPreOrder = true
     }
 
-    // Fetch SKUs
+    // Fetch SKUs with all required fields including category name
     const skus = await prisma.sku.findMany({
       where,
       orderBy: { SkuID: 'asc' },
@@ -71,14 +75,20 @@ export async function GET(request: NextRequest) {
         Description: true,
         OrderEntryDescription: true,
         SkuColor: true,
+        FabricContent: true,
         CategoryID: true,
         ShowInPreOrder: true,
         Quantity: true,
         OnRoute: true,
         PriceCAD: true,
         PriceUSD: true,
-        DateAdded: true,
-        DateModified: true,
+        MSRPCAD: true,
+        MSRPUSD: true,
+        ShopifyImageURL: true,
+        ThumbnailPath: true,
+        SkuCategories: {
+          select: { Name: true },
+        },
       },
     })
 
@@ -89,24 +99,22 @@ export async function GET(request: NextRequest) {
 
     const sheet = workbook.addWorksheet('Products')
 
-    // Headers
+    // Headers: Image | SKU | Color | Description | Material | Available | On Route | Wholesale Price | Retail Price | Collection | Status
     sheet.columns = [
-      { header: 'SKU ID', key: 'skuId', width: 25 },
-      { header: 'Base SKU', key: 'baseSku', width: 20 },
-      { header: 'Size', key: 'size', width: 10 },
-      { header: 'Description', key: 'description', width: 40 },
+      { header: 'Image', key: 'image', width: 14 },
+      { header: 'SKU', key: 'sku', width: 25 },
       { header: 'Color', key: 'color', width: 15 },
-      { header: 'Quantity', key: 'quantity', width: 12 },
-      { header: 'Effective Qty', key: 'effectiveQty', width: 12 },
+      { header: 'Description', key: 'description', width: 45 },
+      { header: 'Material', key: 'material', width: 25 },
+      { header: 'Available', key: 'available', width: 12 },
       { header: 'On Route', key: 'onRoute', width: 12 },
-      { header: 'Price CAD', key: 'priceCad', width: 12 },
-      { header: 'Price USD', key: 'priceUsd', width: 12 },
+      { header: 'Wholesale Price', key: 'wholesalePrice', width: 25 },
+      { header: 'Retail Price', key: 'retailPrice', width: 20 },
+      { header: 'Collection', key: 'collection', width: 25 },
       { header: 'Status', key: 'status', width: 12 },
-      { header: 'Date Added', key: 'dateAdded', width: 12 },
-      { header: 'Date Modified', key: 'dateModified', width: 12 },
     ]
 
-    // Style header
+    // Style header row
     const headerRow = sheet.getRow(1)
     headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } }
     headerRow.fill = {
@@ -114,26 +122,73 @@ export async function GET(request: NextRequest) {
       pattern: 'solid',
       fgColor: { argb: 'FF4F81BD' },
     }
+    headerRow.height = 25
+    headerRow.alignment = { vertical: 'middle' }
 
-    // Data rows
-    for (const sku of skus) {
-      const qty = sku.Quantity ?? 0
-      const { baseSku, parsedSize } = parseSkuId(sku.SkuID)
-      sheet.addRow({
-        skuId: sku.SkuID,
-        baseSku,
-        size: parsedSize,
-        description: sku.OrderEntryDescription ?? sku.Description ?? '',
+    // Data rows with thumbnails
+    for (let i = 0; i < skus.length; i++) {
+      const sku = skus[i]
+      const rowIndex = i + 2 // 1-based, skip header
+
+      // Format prices
+      const priceCad = parsePrice(sku.PriceCAD)
+      const priceUsd = parsePrice(sku.PriceUSD)
+      const msrpCad = parsePrice(sku.MSRPCAD)
+      const msrpUsd = parsePrice(sku.MSRPUSD)
+
+      const wholesalePrice =
+        priceCad > 0 || priceUsd > 0
+          ? `CAD: ${priceCad.toFixed(2)} / USD: ${priceUsd.toFixed(2)}`
+          : ''
+      const retailPrice =
+        msrpCad > 0 || msrpUsd > 0
+          ? `C: ${msrpCad.toFixed(2)}, U: ${msrpUsd.toFixed(2)}`
+          : ''
+
+      // Add row data (image cell left empty for now)
+      const row = sheet.addRow({
+        image: '',
+        sku: sku.SkuID,
         color: sku.SkuColor ?? '',
-        quantity: qty,
-        effectiveQty: getEffectiveQuantity(sku.SkuID, qty),
+        description: sku.OrderEntryDescription ?? sku.Description ?? '',
+        material: sku.FabricContent ?? '',
+        available: sku.Quantity ?? 0,
         onRoute: sku.OnRoute ?? 0,
-        priceCad: parsePrice(sku.PriceCAD),
-        priceUsd: parsePrice(sku.PriceUSD),
+        wholesalePrice,
+        retailPrice,
+        collection: sku.SkuCategories?.Name ?? '',
         status: sku.ShowInPreOrder ? 'Pre-Order' : 'ATS',
-        dateAdded: sku.DateAdded ? sku.DateAdded.toISOString().split('T')[0] : '',
-        dateModified: sku.DateModified ? sku.DateModified.toISOString().split('T')[0] : '',
       })
+
+      // Set consistent row height
+      row.height = ROW_HEIGHT
+      row.alignment = { vertical: 'middle' }
+
+      // Add thumbnail image if available (prefer local, fallback to fetch)
+      let thumbnailBuffer: Buffer | null = null
+      
+      // Try to read pre-generated thumbnail from disk
+      if (sku.ThumbnailPath) {
+        thumbnailBuffer = readThumbnail(sku.SkuID)
+      }
+      
+      // Fallback: fetch from Shopify URL if no local thumbnail
+      if (!thumbnailBuffer && sku.ShopifyImageURL) {
+        thumbnailBuffer = await fetchThumbnail(sku.ShopifyImageURL)
+      }
+      
+      if (thumbnailBuffer) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const imageId = workbook.addImage({
+          buffer: thumbnailBuffer as any,
+          extension: 'png',
+        })
+
+        sheet.addImage(imageId, {
+          tl: { col: 0, row: rowIndex - 1 },
+          ext: { width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE },
+        })
+      }
     }
 
     // Generate buffer

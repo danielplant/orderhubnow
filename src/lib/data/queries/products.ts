@@ -4,7 +4,7 @@
  */
 
 import { prisma } from '@/lib/prisma'
-import { getEffectiveQuantity, parsePrice, parseSkuId } from '@/lib/utils'
+import { parsePrice, parseSkuId } from '@/lib/utils'
 import type {
   ProductsListInput,
   ProductsListResult,
@@ -150,15 +150,19 @@ export async function getProducts(
         Description: true,
         OrderEntryDescription: true,
         SkuColor: true,
+        FabricContent: true,
         CategoryID: true,
         ShowInPreOrder: true,
         Quantity: true,
         OnRoute: true,
         PriceCAD: true,
         PriceUSD: true,
+        MSRPCAD: true,
+        MSRPUSD: true,
         ShopifyImageURL: true,
-        DateAdded: true,
-        DateModified: true,
+        SkuCategories: {
+          select: { Name: true },
+        },
       },
     }),
     prisma.sku.count({ where: atsCountWhere }),
@@ -183,19 +187,21 @@ export async function getProducts(
         parsedSize,
         description: (r.OrderEntryDescription ?? r.Description ?? skuId) as string,
         color: r.SkuColor ?? '',
+        material: r.FabricContent ?? '',
         categoryId: r.CategoryID ?? null,
-        categoryName: null, // Could join if needed; for now filter dropdown handles names
+        categoryName: r.SkuCategories?.Name ?? null,
         showInPreOrder: r.ShowInPreOrder ?? null,
         quantity: qty,
         onRoute: r.OnRoute ?? 0,
-        effectiveQuantity: getEffectiveQuantity(skuId, qty),
         priceCadRaw: r.PriceCAD,
         priceUsdRaw: r.PriceUSD,
         priceCad: parsePrice(r.PriceCAD),
         priceUsd: parsePrice(r.PriceUSD),
+        msrpCadRaw: r.MSRPCAD,
+        msrpUsdRaw: r.MSRPUSD,
+        msrpCad: parsePrice(r.MSRPCAD),
+        msrpUsd: parsePrice(r.MSRPUSD),
         imageUrl: r.ShopifyImageURL ?? null,
-        dateAdded: r.DateAdded ? r.DateAdded.toISOString().slice(0, 10) : null,
-        dateModified: r.DateModified ? r.DateModified.toISOString().slice(0, 10) : null,
       }
     }),
   }
@@ -267,5 +273,67 @@ export async function getSkuById(id: string) {
     imageUrl: row.ShopifyImageURL,
     dateAdded: row.DateAdded?.toISOString() ?? null,
     dateModified: row.DateModified?.toISOString() ?? null,
+  }
+}
+
+/**
+ * Get all SKU variants for a base SKU (for product detail modal)
+ * Groups all size variants under a single product view
+ */
+export async function getProductByBaseSku(baseSku: string) {
+  // Find all SKUs that start with baseSku followed by a dash
+  const skus = await prisma.sku.findMany({
+    where: {
+      SkuID: { startsWith: `${baseSku}-` },
+    },
+    orderBy: { SkuID: 'asc' },
+    select: {
+      ID: true,
+      SkuID: true,
+      Description: true,
+      OrderEntryDescription: true,
+      SkuColor: true,
+      FabricContent: true,
+      CategoryID: true,
+      ShowInPreOrder: true,
+      Quantity: true,
+      OnRoute: true,
+      PriceCAD: true,
+      PriceUSD: true,
+      MSRPCAD: true,
+      MSRPUSD: true,
+      ShopifyImageURL: true,
+    },
+  })
+
+  if (skus.length === 0) return null
+
+  const first = skus[0]
+  
+  // Build variants array with size info
+  const variants = skus.map((sku) => {
+    const { parsedSize } = parseSkuId(sku.SkuID)
+    return {
+      sku: sku.SkuID,
+      size: parsedSize,
+      available: sku.Quantity ?? 0,
+      onRoute: sku.OnRoute ?? 0,
+      priceCad: parsePrice(sku.PriceCAD),
+      priceUsd: parsePrice(sku.PriceUSD),
+    }
+  })
+
+  return {
+    baseSku,
+    title: first.OrderEntryDescription ?? first.Description ?? baseSku,
+    color: first.SkuColor ?? '',
+    material: first.FabricContent ?? '',
+    imageUrl: first.ShopifyImageURL ?? null,
+    isPreOrder: first.ShowInPreOrder ?? false,
+    priceCad: parsePrice(first.PriceCAD),
+    priceUsd: parsePrice(first.PriceUSD),
+    msrpCad: parsePrice(first.MSRPCAD),
+    msrpUsd: parsePrice(first.MSRPUSD),
+    variants,
   }
 }

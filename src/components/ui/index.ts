@@ -1,5 +1,6 @@
 // shadcn/ui components (Radix-based, accessible)
 export { Button, buttonVariants } from "./button";
+export { Input } from "./input";
 export { Popover, PopoverTrigger, PopoverContent, PopoverAnchor } from "./popover";
 export { Card, CardHeader, CardFooter, CardTitle, CardDescription, CardContent } from "./card";
 export { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "./tooltip";

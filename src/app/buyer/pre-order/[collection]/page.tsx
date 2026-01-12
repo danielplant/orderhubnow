@@ -5,9 +5,9 @@ import { BrandHeader } from "@/components/buyer/brand-header";
 import { Divider } from "@/components/ui";
 import { CollectionProductsGrid } from "@/components/buyer/collection-products-grid";
 import {
-  getPreOrderCategoryById,
-  getPreOrderProductsWithVariants,
-} from "@/lib/data/queries/preorder";
+  getPreOrderCollectionById,
+  getPreOrderProductsByCollection,
+} from "@/lib/data/queries/collections";
 import { buildRepQueryStringFromObject } from "@/lib/utils/rep-context";
 
 interface Props {
@@ -39,30 +39,30 @@ function formatShipWindow(start: string | null, end: string | null): string {
 export const dynamic = "force-dynamic";
 
 export default async function PreOrderCollectionPage({ params, searchParams }: Props) {
-  const [{ collection }, queryParams] = await Promise.all([params, searchParams]);
-  const categoryId = parseInt(collection, 10);
+  const [{ collection: collectionParam }, queryParams] = await Promise.all([params, searchParams]);
+  const collectionId = parseInt(collectionParam, 10);
 
-  if (Number.isNaN(categoryId)) {
+  if (Number.isNaN(collectionId)) {
     notFound();
   }
 
   // Build rep context query string to preserve through navigation
   const repQuery = buildRepQueryStringFromObject(queryParams);
 
-  // Fetch category and products in parallel
-  const [category, products] = await Promise.all([
-    getPreOrderCategoryById(categoryId),
-    getPreOrderProductsWithVariants(categoryId),
+  // Fetch collection and products in parallel
+  const [collection, products] = await Promise.all([
+    getPreOrderCollectionById(collectionId),
+    getPreOrderProductsByCollection(collectionId),
   ]);
 
-  // Validate category exists and is a pre-order category
-  if (!category) {
+  // Validate collection exists and is a pre-order collection
+  if (!collection) {
     notFound();
   }
 
   const shipWindow = formatShipWindow(
-    category.onRouteStartDate,
-    category.onRouteEndDate
+    collection.onRouteStartDate,
+    collection.onRouteEndDate
   );
 
   return (
@@ -82,7 +82,7 @@ export default async function PreOrderCollectionPage({ params, searchParams }: P
 
           <div>
             <h1 className="text-3xl md:text-4xl font-medium tracking-tight text-foreground">
-              {category.name}
+              {collection.name}
             </h1>
             <div className="flex items-center gap-2 mt-2 text-primary">
               <Calendar className="h-5 w-5" />

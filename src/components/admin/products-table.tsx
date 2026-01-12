@@ -1,6 +1,7 @@
 'use client'
 
 import * as React from 'react'
+import Image from 'next/image'
 import { useRouter, useSearchParams } from 'next/navigation'
 import {
   DataTable,
@@ -12,7 +13,8 @@ import {
   DropdownMenuItem,
 } from '@/components/ui'
 import { BulkActionsBar } from '@/components/admin/bulk-actions-bar'
-import { cn, formatCurrency, getEffectiveQuantity } from '@/lib/utils'
+import { ProductDetailModal } from '@/components/admin/product-detail-modal'
+import { cn } from '@/lib/utils'
 import type { AdminSkuRow, InventoryTab, CategoryForFilter, ProductsListResult } from '@/lib/types'
 import {
   deleteSku,
@@ -60,6 +62,10 @@ export function ProductsTable({
   const [selectedIds, setSelectedIds] = React.useState<string[]>([])
   const [isLoading, setIsLoading] = React.useState(false)
   const [showUploadModal, setShowUploadModal] = React.useState(false)
+  const [productModalOpen, setProductModalOpen] = React.useState(false)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [selectedProduct, setSelectedProduct] = React.useState<any | null>(null)
+  const [highlightedSku, setHighlightedSku] = React.useState<string | undefined>()
 
   // Parse current filter state from URL
   const tab = (searchParams.get('tab') || 'all') as InventoryTab
@@ -169,20 +175,63 @@ export function ProductsTable({
     window.location.href = `/api/products/export?${params.toString()}`
   }, [searchParams])
 
-  // Table columns
+  const handleSkuClick = React.useCallback(async (row: AdminSkuRow) => {
+    setIsLoading(true)
+    try {
+      const response = await fetch(`/api/products/${encodeURIComponent(row.baseSku)}`)
+      if (response.ok) {
+        const product = await response.json()
+        setSelectedProduct(product)
+        setHighlightedSku(row.skuId)
+        setProductModalOpen(true)
+      }
+    } finally {
+      setIsLoading(false)
+    }
+  }, [])
+
+  // Table columns - Image | SKU | Color | Description | Material | Available | On Route | Wholesale Price | Retail Price
   const columns = React.useMemo<Array<DataTableColumn<AdminSkuRow>>>(
     () => [
+      {
+        id: 'image',
+        header: 'Image',
+        cell: (r) => (
+          <div className="w-24 h-24 relative bg-muted rounded overflow-hidden flex-shrink-0">
+            {r.imageUrl ? (
+              <Image
+                src={r.imageUrl}
+                alt={r.description}
+                fill
+                className="object-contain"
+                sizes="48px"
+              />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center text-muted-foreground">
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+              </div>
+            )}
+          </div>
+        ),
+      },
       {
         id: 'skuId',
         header: 'SKU',
         cell: (r) => (
-          <div>
-            <span className="font-medium">{r.skuId}</span>
-            {r.skuId.toLowerCase().includes('pp-') && (
-              <span className="ml-2 text-xs text-muted-foreground">(PP)</span>
-            )}
-          </div>
+          <button
+            onClick={() => handleSkuClick(r)}
+            className="font-medium text-primary hover:underline cursor-pointer text-left"
+          >
+            {r.skuId}
+          </button>
         ),
+      },
+      {
+        id: 'color',
+        header: 'Color',
+        cell: (r) => <span className="text-sm">{r.color || '—'}</span>,
       },
       {
         id: 'description',
@@ -190,50 +239,52 @@ export function ProductsTable({
         cell: (r) => <span className="text-sm">{r.description}</span>,
       },
       {
-        id: 'size',
-        header: 'Size',
-        cell: (r) => <span className="text-muted-foreground">{r.parsedSize}</span>,
+        id: 'material',
+        header: 'Material',
+        cell: (r) => <span className="text-sm text-muted-foreground">{r.material || '—'}</span>,
       },
       {
         id: 'quantity',
-        header: 'Qty',
-        cell: (r) => {
-          const isPrepack = r.skuId.toLowerCase().includes('pp-')
-          const multiplier = isPrepack ? Math.round(r.effectiveQuantity / (r.quantity || 1)) : 1
-          return (
-            <div className="text-right">
-              <span className="font-medium">{r.effectiveQuantity}</span>
-              {isPrepack && multiplier > 1 && (
-                <span className="ml-1 text-xs text-muted-foreground">
-                  (×{multiplier})
-                </span>
-              )}
-            </div>
-          )
-        },
+        header: 'Available',
+        cell: (r) => (
+          <span className="text-right tabular-nums font-medium">{r.quantity}</span>
+        ),
       },
       {
         id: 'onRoute',
         header: 'On Route',
         cell: (r) => (
-          <span className={cn('text-right', r.onRoute > 0 ? 'text-info' : 'text-muted-foreground')}>
+          <span className={cn('text-right tabular-nums', r.onRoute > 0 ? 'text-blue-600 font-medium' : 'text-muted-foreground')}>
             {r.onRoute}
           </span>
         ),
       },
       {
-        id: 'priceCad',
-        header: 'CAD',
+        id: 'wholesalePrice',
+        header: 'Wholesale Price',
         cell: (r) => (
-          <span className="text-muted-foreground">{r.priceCad > 0 ? formatCurrency(r.priceCad, 'CAD') : '—'}</span>
+          <span className="text-sm text-muted-foreground">
+            {r.priceCad > 0 || r.priceUsd > 0
+              ? `CAD: ${r.priceCad.toFixed(2)} / USD: ${r.priceUsd.toFixed(2)}`
+              : '—'}
+          </span>
         ),
       },
       {
-        id: 'priceUsd',
-        header: 'USD',
+        id: 'retailPrice',
+        header: 'Retail Price',
         cell: (r) => (
-          <span className="text-muted-foreground">{r.priceUsd > 0 ? formatCurrency(r.priceUsd, 'USD') : '—'}</span>
+          <span className="text-sm text-muted-foreground">
+            {r.msrpCad > 0 || r.msrpUsd > 0
+              ? `C: ${r.msrpCad.toFixed(2)}, U: ${r.msrpUsd.toFixed(2)}`
+              : '—'}
+          </span>
         ),
+      },
+      {
+        id: 'collection',
+        header: 'Collection',
+        cell: (r) => <span className="text-sm">{r.categoryName || '—'}</span>,
       },
       {
         id: 'status',
@@ -241,10 +292,10 @@ export function ProductsTable({
         cell: (r) => (
           <span
             className={cn(
-              'inline-flex rounded-full px-2 py-0.5 text-xs font-medium',
+              'inline-flex rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap',
               r.showInPreOrder
-                ? 'bg-preorder-bg text-preorder-text'
-                : 'bg-ats-bg text-ats-text'
+                ? 'bg-purple-100 text-purple-700'
+                : 'bg-green-100 text-green-700'
             )}
           >
             {r.showInPreOrder ? 'Pre-Order' : 'ATS'}
@@ -279,7 +330,7 @@ export function ProductsTable({
         ),
       },
     ],
-    [handleDelete, handleTogglePreOrder]
+    [handleDelete, handleTogglePreOrder, handleSkuClick]
   )
 
   // Bulk actions
@@ -405,6 +456,14 @@ export function ProductsTable({
       <UploadProductsModal
         open={showUploadModal}
         onOpenChange={setShowUploadModal}
+      />
+
+      {/* Product Detail Modal */}
+      <ProductDetailModal
+        open={productModalOpen}
+        onOpenChange={setProductModalOpen}
+        product={selectedProduct}
+        highlightedSku={highlightedSku}
       />
     </div>
   )

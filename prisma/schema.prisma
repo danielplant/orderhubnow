@@ -334,7 +334,10 @@ model Sku {
   ShopifyProductVariantId BigInt?
   SyncOrderTemp           Int?
   ShopifyImageURL         String?        @db.NVarChar(500)
+  ThumbnailPath           String?        @db.NVarChar(500)
+  CollectionID            Int?
   SkuCategories           SkuCategories? @relation(fields: [CategoryID], references: [ID], onDelete: NoAction, onUpdate: NoAction, map: "FK_Sku_SkuCategories")
+  Collection              Collection?    @relation(fields: [CollectionID], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "FK_Sku_Collection")
 }
 
 /// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
@@ -508,6 +511,37 @@ model OrderNumberSequence {
   Prefix     String   @id @db.Char(1) // 'A' or 'P'
   LastNumber Int      @default(10000)
   UpdatedAt  DateTime @default(now(), map: "DF__OrderNumb__Updat__631A7FBD") @db.DateTime
+}
+
+model Collection {
+  id              Int                   @id @default(autoincrement()) @map("ID")
+  name            String                @map("Name") @db.NVarChar(500)
+  type            String                @map("Type") @db.NVarChar(20) // 'ATS' or 'PreOrder'
+  sortOrder       Int                   @default(0) @map("SortOrder")
+  imageUrl        String?               @map("ImageUrl") @db.NVarChar(500)
+  shipWindowStart DateTime?             @map("ShipWindowStart") @db.DateTime
+  shipWindowEnd   DateTime?             @map("ShipWindowEnd") @db.DateTime
+  isActive        Boolean               @default(true) @map("IsActive")
+  createdAt       DateTime              @default(now()) @map("CreatedAt") @db.DateTime
+  updatedAt       DateTime              @default(now()) @map("UpdatedAt") @db.DateTime
+  skus            Sku[]
+  mappings        ShopifyValueMapping[]
+
+  @@map("Collection")
+}
+
+model ShopifyValueMapping {
+  id           Int         @id @default(autoincrement()) @map("ID")
+  rawValue     String      @unique @map("RawValue") @db.NVarChar(1000)
+  collectionId Int?        @map("CollectionID")
+  status       String      @default("unmapped") @map("Status") @db.NVarChar(20) // 'mapped', 'unmapped', 'deferred'
+  note         String?     @map("Note") @db.NVarChar(500)
+  skuCount     Int         @default(0) @map("SkuCount")
+  firstSeenAt  DateTime    @default(now()) @map("FirstSeenAt") @db.DateTime
+  lastSeenAt   DateTime    @default(now()) @map("LastSeenAt") @db.DateTime
+  collection   Collection? @relation(fields: [collectionId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "FK_ShopifyValueMapping_Collection")
+
+  @@map("ShopifyValueMapping")
 }
 
 /// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.

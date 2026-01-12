@@ -34,19 +34,23 @@ export interface AdminSkuRow {
   parsedSize: string
   description: string
   color: string
+  material: string // FabricContent
   categoryId: number | null
   categoryName: string | null
   showInPreOrder: boolean | null
-  quantity: number
+  quantity: number // Available
   onRoute: number
-  effectiveQuantity: number
+  // Wholesale price (CAD/USD)
   priceCadRaw: string | null
   priceUsdRaw: string | null
   priceCad: number
   priceUsd: number
+  // Retail price (MSRP CAD/USD)
+  msrpCadRaw: string | null
+  msrpUsdRaw: string | null
+  msrpCad: number
+  msrpUsd: number
   imageUrl: string | null
-  dateAdded: string | null
-  dateModified: string | null
 }
 
 export interface ProductsListResult {
