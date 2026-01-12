@@ -20,7 +20,7 @@ export type SortDirection = 'asc' | 'desc'
 export interface ProductsListInput {
   tab: InventoryTab
   q?: string
-  categoryId?: number
+  collectionId?: number
   page: number
   pageSize: number
   sort: ProductsSortColumn

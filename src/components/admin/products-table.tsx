@@ -70,7 +70,7 @@ export function ProductsTable({
   // Parse current filter state from URL
   const tab = (searchParams.get('tab') || 'all') as InventoryTab
   const q = searchParams.get('q') || ''
-  const categoryId = searchParams.get('categoryId') || ''
+  const collectionId = searchParams.get('collectionId') || ''
   const page = Number(searchParams.get('page') || '1')
   const pageSize = Number(searchParams.get('pageSize') || '50')
   const sort = searchParams.get('sort') || 'dateModified'
@@ -394,11 +394,11 @@ export function ProductsTable({
           />
 
           <select
-            value={categoryId}
-            onChange={(e) => setParam('categoryId', e.target.value || null)}
+            value={collectionId}
+            onChange={(e) => setParam('collectionId', e.target.value || null)}
             className="h-10 rounded-md border border-input bg-background px-3 text-sm"
           >
-            <option value="">All categories</option>
+            <option value="">All collections</option>
             {categories.map((c) => (
               <option key={c.id} value={String(c.id)}>
                 {c.name}

@@ -4,7 +4,7 @@
  * Replaces the mock client page
  */
 
-import { getProducts, getCategoriesForFilter } from '@/lib/data/queries/products'
+import { getProducts, getCollectionsForFilter } from '@/lib/data/queries/products'
 import { ProductsTable } from '@/components/admin/products-table'
 
 export const dynamic = 'force-dynamic'
@@ -13,7 +13,7 @@ interface ProductsPageProps {
   searchParams: Promise<{
     tab?: string
     q?: string
-    categoryId?: string
+    collectionId?: string
     sort?: string
     dir?: string
     page?: string
@@ -25,9 +25,9 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
   const params = await searchParams
 
   // Fetch data in parallel
-  const [productsResult, categories] = await Promise.all([
+  const [productsResult, collections] = await Promise.all([
     getProducts(params),
-    getCategoriesForFilter(),
+    getCollectionsForFilter(),
   ])
 
   return (
@@ -42,7 +42,7 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
         initialRows={productsResult.rows}
         total={productsResult.total}
         tabCounts={productsResult.tabCounts}
-        categories={categories}
+        categories={collections}
       />
     </main>
   )

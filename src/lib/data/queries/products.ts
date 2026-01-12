@@ -43,8 +43,8 @@ export function parseProductsListInput(
   const tab = tabRaw === 'ats' || tabRaw === 'preorder' ? tabRaw : 'all'
 
   const q = getString(getParam('q'))
-  const categoryIdStr = getString(getParam('categoryId'))
-  const categoryId = categoryIdStr ? parseInt(categoryIdStr, 10) : undefined
+  const collectionIdStr = getString(getParam('collectionId'))
+  const collectionId = collectionIdStr ? parseInt(collectionIdStr, 10) : undefined
 
   const sort = (getString(getParam('sort')) as ProductsSortColumn | undefined) ?? 'dateModified'
   const dir = (getString(getParam('dir')) as SortDirection | undefined) ?? 'desc'
@@ -54,7 +54,7 @@ export function parseProductsListInput(
   return {
     tab,
     q,
-    categoryId: Number.isFinite(categoryId) ? categoryId : undefined,
+    collectionId: Number.isFinite(collectionId) ? collectionId : undefined,
     sort,
     dir,
     page,
@@ -112,9 +112,9 @@ export async function getProducts(
     ]
   }
 
-  // Category filter
-  if (typeof input.categoryId === 'number') {
-    baseWhere.CategoryID = input.categoryId
+  // Collection filter
+  if (typeof input.collectionId === 'number') {
+    baseWhere.CollectionID = input.collectionId
   }
 
   // Tab-specific where clauses
@@ -160,8 +160,9 @@ export async function getProducts(
         MSRPCAD: true,
         MSRPUSD: true,
         ShopifyImageURL: true,
-        SkuCategories: {
-          select: { Name: true },
+        CollectionID: true,
+        Collection: {
+          select: { name: true },
         },
       },
     }),
@@ -188,8 +189,8 @@ export async function getProducts(
         description: (r.OrderEntryDescription ?? r.Description ?? skuId) as string,
         color: r.SkuColor ?? '',
         material: r.FabricContent ?? '',
-        categoryId: r.CategoryID ?? null,
-        categoryName: r.SkuCategories?.Name ?? null,
+        categoryId: r.CollectionID ?? null,
+        categoryName: r.Collection?.name ?? null,
         showInPreOrder: r.ShowInPreOrder ?? null,
         quantity: qty,
         onRoute: r.OnRoute ?? 0,
@@ -212,24 +213,25 @@ export async function getProducts(
 // ============================================================================
 
 /**
- * Get categories for filter dropdown.
- * Returns categories that have at least one SKU.
+ * Get collections for filter dropdown.
+ * Returns collections that have at least one SKU.
  */
-export async function getCategoriesForFilter(): Promise<CategoryForFilter[]> {
-  const categories = await prisma.skuCategories.findMany({
+export async function getCollectionsForFilter(): Promise<CategoryForFilter[]> {
+  const collections = await prisma.collection.findMany({
     where: {
-      Sku: { some: {} }, // Only categories with SKUs
+      skus: { some: {} }, // Only collections with SKUs
     },
     select: {
-      ID: true,
-      Name: true,
+      id: true,
+      name: true,
+      type: true,
     },
-    orderBy: { Name: 'asc' },
+    orderBy: [{ type: 'asc' }, { sortOrder: 'asc' }, { name: 'asc' }],
   })
 
-  return categories.map((c) => ({
-    id: c.ID,
-    name: c.Name,
+  return collections.map((c) => ({
+    id: c.id,
+    name: `${c.name} (${c.type})`,
   }))
 }
 
