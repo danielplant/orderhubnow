@@ -45,7 +45,7 @@ export async function POST(request: NextRequest) {
     }
     
     return NextResponse.json(
-      { success: true, id: result.id, inviteUrl: result.inviteUrl },
+      { success: true, id: result.id },
       { status: 201 }
     )
   } catch (error) {

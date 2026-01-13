@@ -58,24 +58,40 @@ function isKnownSize(s: string): boolean {
 }
 
 /**
+ * Strip prepack suffix like "(PP 2pc)" from size strings.
+ * Examples:
+ * - "10/12(PP 2pc)" → "10/12"
+ * - "6/6X(PP 2pc)" → "6/6X"
+ * - "O/S" → "O/S" (unchanged)
+ */
+function stripPrepackSuffix(size: string): string {
+  // Remove (PP Xpc) suffix - matches patterns like "(PP 2pc)", "(PP 3pc)", etc.
+  return size.replace(/\s*\(PP\s*\d+pc\)\s*$/i, '').trim();
+}
+
+/**
  * Extract just the size from a Shopify variant title.
  * Shopify variant titles may be formatted as:
  * - "5/6 / Black" (Size / Color)
  * - "Fuchsia / 4" (Color / Size)
  * - "5/6" (Size only)
+ * - "10/12(PP 2pc)" (Size with prepack suffix)
  *
  * This function detects which part is the size and returns just that.
- * Also normalizes the size (e.g., "12-18M" → "12/18M").
+ * Also normalizes the size (e.g., "12-18M" → "12/18M") and strips prepack suffixes.
  */
 export function extractSize(variantTitle: string): string {
   if (!variantTitle) return '';
 
+  // First strip any prepack suffix
+  let cleaned = stripPrepackSuffix(variantTitle);
+
   // If it doesn't contain " / ", normalize and return as-is
-  if (!variantTitle.includes(' / ')) {
-    return normalizeSize(variantTitle);
+  if (!cleaned.includes(' / ')) {
+    return normalizeSize(cleaned);
   }
 
-  const parts = variantTitle.split(' / ').map(p => p.trim());
+  const parts = cleaned.split(' / ').map(p => p.trim());
 
   // Helper to check if a part looks like a size (including parenthetical format like "XS(6/6X)")
   const looksLikeSize = (s: string): boolean => {

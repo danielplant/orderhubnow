@@ -45,6 +45,23 @@ describe('extractSize', () => {
   it('should handle empty input', () => {
     expect(extractSize('')).toBe('')
   })
+
+  it('should strip prepack suffix (PP 2pc)', () => {
+    expect(extractSize('10/12(PP 2pc)')).toBe('10/12')
+    expect(extractSize('6/6X(PP 2pc)')).toBe('6/6X')
+    expect(extractSize('2/3(PP 2pc)')).toBe('2/3')
+    expect(extractSize('14/16(PP 2pc)')).toBe('14/16')
+  })
+
+  it('should strip prepack suffix with varying pc counts', () => {
+    expect(extractSize('7/8(PP 3pc)')).toBe('7/8')
+    expect(extractSize('4/5(PP 4pc)')).toBe('4/5')
+  })
+
+  it('should handle prepack suffix with spaces', () => {
+    expect(extractSize('10/12 (PP 2pc)')).toBe('10/12')
+    expect(extractSize('6/6X  (PP 2pc)')).toBe('6/6X')
+  })
 })
 
 describe('sortBySize', () => {

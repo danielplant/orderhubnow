@@ -9,7 +9,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import ExcelJS from 'exceljs'
 import { auth } from '@/lib/auth/providers'
 import { prisma } from '@/lib/prisma'
-import { parsePrice, parseSkuId } from '@/lib/utils'
+import { parsePrice, parseSkuId, resolveColor } from '@/lib/utils'
 import { readThumbnail, fetchThumbnail } from '@/lib/utils/thumbnails'
 
 // ============================================================================
@@ -194,11 +194,15 @@ export async function GET(request: NextRequest) {
           : ''
 
       // Add row data (image cell left empty for now)
+      // Resolve color with fallbacks (SkuColor → SKU ID → Description)
+      const description = sku.OrderEntryDescription ?? sku.Description ?? ''
+      const color = resolveColor(sku.SkuColor, sku.SkuID, description)
+
       const row = sheet.addRow({
         image: '',
         sku: sku.SkuID,
-        color: sku.SkuColor ?? '',
-        description: sku.OrderEntryDescription ?? sku.Description ?? '',
+        color,
+        description,
         material: sku.FabricContent ?? '',
         available: sku.Quantity ?? 0,
         onRoute: sku.OnRoute ?? 0,

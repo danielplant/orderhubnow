@@ -109,3 +109,216 @@ export function parseSkuId(skuId: string): { baseSku: string; parsedSize: string
   }
   return { baseSku: skuId, parsedSize: skuId }
 }
+
+// ============================================================================
+// Color Resolution with Fallbacks
+// ============================================================================
+
+/**
+ * Common color code mappings found in SKU IDs.
+ * Format: SKU often contains color code like "STYLE-RD-SIZE" where RD = Red
+ */
+const COLOR_CODE_MAP: Record<string, string> = {
+  // Basic colors
+  'RD': 'Red',
+  'RED': 'Red',
+  'BL': 'Blue',
+  'BLU': 'Blue',
+  'BLUE': 'Blue',
+  'BK': 'Black',
+  'BLK': 'Black',
+  'BLACK': 'Black',
+  'WH': 'White',
+  'WHT': 'White',
+  'WHITE': 'White',
+  'PK': 'Pink',
+  'PNK': 'Pink',
+  'PINK': 'Pink',
+  'GR': 'Green',
+  'GRN': 'Green',
+  'GREEN': 'Green',
+  'YL': 'Yellow',
+  'YLW': 'Yellow',
+  'YELLOW': 'Yellow',
+  'OR': 'Orange',
+  'ORG': 'Orange',
+  'ORANGE': 'Orange',
+  'PR': 'Purple',
+  'PRP': 'Purple',
+  'PURPLE': 'Purple',
+  'GY': 'Grey',
+  'GRY': 'Grey',
+  'GREY': 'Grey',
+  'GRAY': 'Grey',
+  'NV': 'Navy',
+  'NVY': 'Navy',
+  'NAVY': 'Navy',
+  'BR': 'Brown',
+  'BRN': 'Brown',
+  'BROWN': 'Brown',
+  'BG': 'Beige',
+  'BEIGE': 'Beige',
+  'CR': 'Cream',
+  'CRM': 'Cream',
+  'CREAM': 'Cream',
+  'TN': 'Tan',
+  'TAN': 'Tan',
+  'IV': 'Ivory',
+  'IVORY': 'Ivory',
+  'GD': 'Gold',
+  'GOLD': 'Gold',
+  'SV': 'Silver',
+  'SILVER': 'Silver',
+  'TL': 'Teal',
+  'TEAL': 'Teal',
+  'CRL': 'Coral',
+  'CORAL': 'Coral',
+  'MV': 'Mauve',
+  'MAUVE': 'Mauve',
+  'LV': 'Lavender',
+  'LAV': 'Lavender',
+  'LAVENDER': 'Lavender',
+  'MN': 'Mint',
+  'MINT': 'Mint',
+  'PC': 'Peach',
+  'PEACH': 'Peach',
+  'RS': 'Rose',
+  'ROSE': 'Rose',
+  'BRG': 'Burgundy',
+  'BURGUNDY': 'Burgundy',
+  'OL': 'Olive',
+  'OLIVE': 'Olive',
+  'KH': 'Khaki',
+  'KHAKI': 'Khaki',
+  'DN': 'Denim',
+  'DENIM': 'Denim',
+  'CH': 'Charcoal',
+  'CHARCOAL': 'Charcoal',
+  'AQ': 'Aqua',
+  'AQUA': 'Aqua',
+  'TQ': 'Turquoise',
+  'TURQ': 'Turquoise',
+  'TURQUOISE': 'Turquoise',
+  'FU': 'Fuchsia',
+  'FUCHSIA': 'Fuchsia',
+  'MG': 'Magenta',
+  'MAGENTA': 'Magenta',
+  'LM': 'Lime',
+  'LIME': 'Lime',
+  'SK': 'Sky',
+  'SKY': 'Sky',
+  'ORCHID': 'Orchid',
+  'ORCH': 'Orchid',
+  'ORC': 'Orchid',
+  // Multi-word / specialty
+  'HTPK': 'Hot Pink',
+  'HOTPINK': 'Hot Pink',
+  'LTBL': 'Light Blue',
+  'LTPK': 'Light Pink',
+  'DKBL': 'Dark Blue',
+  'DKGR': 'Dark Green',
+  'MULTI': 'Multi',
+  'MLT': 'Multi',
+  'FLORAL': 'Floral',
+  'STRIPE': 'Stripe',
+  'STRP': 'Stripe',
+  'PRINT': 'Print',
+  'PRNT': 'Print',
+}
+
+/**
+ * Try to extract color code from SKU ID.
+ * SKU format is typically: STYLE-COLOR-SIZE (e.g., "ADDISON-RD-10")
+ * Returns the mapped color name or null if not found.
+ */
+function extractColorFromSkuId(skuId: string): string | null {
+  // Split by hyphen and look for color code (typically second segment)
+  const parts = skuId.toUpperCase().split('-')
+
+  // Try each part (skip first which is usually style, skip last which is usually size)
+  for (let i = 1; i < parts.length - 1; i++) {
+    const part = parts[i]
+    if (COLOR_CODE_MAP[part]) {
+      return COLOR_CODE_MAP[part]
+    }
+  }
+
+  // Also try second-to-last part (for STYLE-COLOR-SIZE format)
+  if (parts.length >= 2) {
+    const secondToLast = parts[parts.length - 2]
+    if (COLOR_CODE_MAP[secondToLast]) {
+      return COLOR_CODE_MAP[secondToLast]
+    }
+  }
+
+  return null
+}
+
+/**
+ * Try to extract color from description.
+ * Common patterns:
+ * - "Product Name - Size / Color" (e.g., "Candy Cane Pant - 2/3 / Pink")
+ * - "Product Name / Color / Size"
+ * - "Product Name - Color"
+ */
+function extractColorFromDescription(description: string): string | null {
+  if (!description) return null
+
+  // Pattern 1: "... / Color" at end (most common)
+  const slashMatch = description.match(/\/\s*([A-Za-z\s]+)\s*$/)
+  if (slashMatch) {
+    const color = slashMatch[1].trim()
+    // Verify it looks like a color (not a size like "2/3")
+    if (color && !/^\d/.test(color) && color.length > 1) {
+      return color
+    }
+  }
+
+  // Pattern 2: "... - Color" at end
+  const dashMatch = description.match(/-\s*([A-Za-z\s]+)\s*$/)
+  if (dashMatch) {
+    const color = dashMatch[1].trim()
+    // Verify it looks like a color (not a size)
+    if (color && !/^\d/.test(color) && color.length > 1 && !color.match(/^[XSML]+$/i)) {
+      return color
+    }
+  }
+
+  return null
+}
+
+/**
+ * Resolve color with fallbacks:
+ * 1. Use SkuColor if available
+ * 2. Try to extract from SKU ID (color codes like RD, BL, PK)
+ * 3. Try to parse from Description
+ *
+ * @param skuColor - The SkuColor field from database
+ * @param skuId - The SKU ID (e.g., "ADDISON-RD-10")
+ * @param description - The product description
+ * @returns The resolved color or empty string
+ */
+export function resolveColor(
+  skuColor: string | null | undefined,
+  skuId: string,
+  description: string | null | undefined
+): string {
+  // 1. Use SkuColor if available
+  if (skuColor && skuColor.trim()) {
+    return skuColor.trim()
+  }
+
+  // 2. Try to extract from SKU ID
+  const fromSkuId = extractColorFromSkuId(skuId)
+  if (fromSkuId) {
+    return fromSkuId
+  }
+
+  // 3. Try to parse from Description
+  const fromDescription = extractColorFromDescription(description ?? '')
+  if (fromDescription) {
+    return fromDescription
+  }
+
+  return ''
+}

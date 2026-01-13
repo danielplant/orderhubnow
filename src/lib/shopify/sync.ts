@@ -128,6 +128,10 @@ export const BULK_OPERATION_QUERY = `
               inventoryQuantity
               displayName
               title
+              selectedOptions {
+                name
+                value
+              }
               image {
                 url
               }
@@ -570,13 +574,18 @@ async function processJsonlItem(item: Record<string, unknown>): Promise<boolean>
     // Extract weight data
     const weight = inventoryItem?.measurement?.weight
 
+    // Extract size from selectedOptions (preferred) or fall back to variant title
+    const selectedOptions = item.selectedOptions as Array<{ name: string; value: string }> | undefined
+    const sizeOption = selectedOptions?.find(opt => opt.name.toLowerCase() === 'size')
+    const size = sizeOption?.value || (item.title as string) || ''
+
     await upsertShopifyVariant({
       gid: itemId,
       sku: (item.sku as string) || '',
       price: (item.price as string) || '0',
       inventoryQuantity: (item.inventoryQuantity as number) ?? 0,
       displayName: (item.displayName as string) || '',
-      size: (item.title as string) || '', // variant title is usually the size
+      size,
       productTitle: product?.title,
       productGid: product?.id,
       productType: product?.productType,

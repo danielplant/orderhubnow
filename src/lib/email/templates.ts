@@ -2,8 +2,9 @@
  * Email HTML Templates
  *
  * Plain HTML templates matching .NET EmailTemplates structure.
- * No external dependencies.
  */
+
+import { APP_NAME } from '@/lib/constants/brand'
 
 interface OrderEmailData {
   orderNumber: string
@@ -66,7 +67,7 @@ export function customerConfirmationHtml(data: OrderEmailData): string {
         <table width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 8px; overflow: hidden;">
           <tr>
             <td style="padding: 32px; text-align: center; border-bottom: 1px solid #e5e5e5;">
-              <h1 style="margin: 0; font-size: 28px; font-weight: 700; color: #171717;">MyOrderHub</h1>
+              <h1 style="margin: 0; font-size: 28px; font-weight: 700; color: #171717;">${APP_NAME}</h1>
             </td>
           </tr>
           <tr>
@@ -185,7 +186,7 @@ export function salesNotificationHtml(data: OrderEmailData & { adminUrl: string 
         <table width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 8px; overflow: hidden;">
           <tr>
             <td style="padding: 24px; text-align: center; border-bottom: 1px solid #e5e5e5;">
-              <h1 style="margin: 0; font-size: 24px; font-weight: 700; color: #171717;">MyOrderHub</h1>
+              <h1 style="margin: 0; font-size: 24px; font-weight: 700; color: #171717;">${APP_NAME}</h1>
               <p style="margin: 4px 0 0 0; font-size: 14px; color: #64748b;">New Order Notification</p>
             </td>
           </tr>
@@ -265,7 +266,7 @@ export function salesNotificationHtml(data: OrderEmailData & { adminUrl: string 
           <tr>
             <td style="padding: 24px; text-align: center; border-top: 1px solid #e5e5e5; background-color: #f8fafc;">
               <p style="margin: 0; font-size: 12px; color: #94a3b8;">
-                This is an automated notification from MyOrderHub.
+                This is an automated notification from ${APP_NAME}.
               </p>
             </td>
           </tr>

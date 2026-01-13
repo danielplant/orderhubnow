@@ -21,11 +21,8 @@ import {
   createRep,
   updateRep,
   deleteRep,
-  resendInvite,
-  forcePasswordReset,
   disableRep,
   enableRep,
-  getInviteLink,
 } from '@/lib/data/actions/reps'
 import {
   MoreHorizontal,
@@ -33,11 +30,8 @@ import {
   Pencil,
   Trash2,
   ExternalLink,
-  Mail,
-  Link2,
   ShieldOff,
   ShieldCheck,
-  RotateCcw,
 } from 'lucide-react'
 
 // ============================================================================
@@ -48,7 +42,7 @@ export interface RepsTableProps {
   items: RepWithLogin[]
 }
 
-type ModalMode = 'add' | 'edit' | 'delete' | 'invite-success' | null
+type ModalMode = 'add' | 'edit' | 'delete' | null
 
 // ============================================================================
 // Status Badge Component
@@ -109,16 +103,10 @@ export function RepsTable({ items }: RepsTableProps) {
     country: '',
   })
 
-  // Invite success state
-  const [inviteUrl, setInviteUrl] = React.useState<string | null>(null)
-  const [copySuccess, setCopySuccess] = React.useState(false)
-
   const openModal = (mode: ModalMode, rep?: RepWithLogin) => {
     setModalMode(mode)
     setSelectedRep(rep ?? null)
     setError(null)
-    setInviteUrl(null)
-    setCopySuccess(false)
 
     if (mode === 'edit' && rep) {
       setFormData({
@@ -153,8 +141,6 @@ export function RepsTable({ items }: RepsTableProps) {
     setModalMode(null)
     setSelectedRep(null)
     setError(null)
-    setInviteUrl(null)
-    setCopySuccess(false)
   }
 
   const handleSubmit = async () => {
@@ -179,11 +165,6 @@ export function RepsTable({ items }: RepsTableProps) {
           setError(result.error ?? 'Failed to add rep')
           return
         }
-        // Show success modal with invite URL
-        setInviteUrl(result.inviteUrl ?? null)
-        setModalMode('invite-success')
-        router.refresh()
-        return
       } else if (modalMode === 'edit' && selectedRep) {
         const result = await updateRep(String(selectedRep.id), {
           name: formData.name,
@@ -218,7 +199,7 @@ export function RepsTable({ items }: RepsTableProps) {
 
   const handleAction = React.useCallback(
     async (
-      action: 'resend' | 'reset' | 'disable' | 'enable' | 'copyLink',
+      action: 'disable' | 'enable',
       rep: RepWithLogin
     ) => {
       if (!rep.userId) return
@@ -227,26 +208,14 @@ export function RepsTable({ items }: RepsTableProps) {
       setError(null)
 
       try {
-        let result: { success: boolean; inviteUrl?: string; resetUrl?: string; error?: string }
+        let result: { success: boolean; error?: string }
 
         switch (action) {
-          case 'resend':
-            result = await resendInvite(rep.userId)
-            break
-          case 'reset':
-            result = await forcePasswordReset(rep.userId)
-            break
           case 'disable':
             result = await disableRep(rep.userId)
             break
           case 'enable':
             result = await enableRep(rep.userId)
-            break
-          case 'copyLink':
-            result = await getInviteLink(rep.userId)
-            if (result.success && result.inviteUrl) {
-              await navigator.clipboard.writeText(result.inviteUrl)
-            }
             break
           default:
             return
@@ -257,17 +226,6 @@ export function RepsTable({ items }: RepsTableProps) {
           return
         }
 
-        // Show success with invite URL if available
-        if ((action === 'resend' || action === 'enable') && result.inviteUrl) {
-          setSelectedRep(rep)
-          setInviteUrl(result.inviteUrl)
-          setModalMode('invite-success')
-        } else if (action === 'reset' && result.resetUrl) {
-          setSelectedRep(rep)
-          setInviteUrl(result.resetUrl)
-          setModalMode('invite-success')
-        }
-
         router.refresh()
       } finally {
         setIsSubmitting(false)
@@ -275,25 +233,6 @@ export function RepsTable({ items }: RepsTableProps) {
     },
     [router]
   )
-
-  const copyToClipboard = async () => {
-    if (!inviteUrl) return
-    try {
-      await navigator.clipboard.writeText(inviteUrl)
-      setCopySuccess(true)
-      setTimeout(() => setCopySuccess(false), 2000)
-    } catch {
-      // Fallback for older browsers
-      const textArea = document.createElement('textarea')
-      textArea.value = inviteUrl
-      document.body.appendChild(textArea)
-      textArea.select()
-      document.execCommand('copy')
-      document.body.removeChild(textArea)
-      setCopySuccess(true)
-      setTimeout(() => setCopySuccess(false), 2000)
-    }
-  }
 
   const columns = React.useMemo<Array<DataTableColumn<RepWithLogin>>>(
     () => [
@@ -344,40 +283,6 @@ export function RepsTable({ items }: RepsTableProps) {
                 Edit
               </DropdownMenuItem>
 
-              {/* Status-specific actions */}
-              {r.status === 'invited' && (
-                <>
-                  <DropdownMenuItem onClick={() => handleAction('resend', r)}>
-                    <Mail className="h-4 w-4 mr-2" />
-                    Resend Invite
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => handleAction('copyLink', r)}>
-                    <Link2 className="h-4 w-4 mr-2" />
-                    Copy Invite Link
-                  </DropdownMenuItem>
-                </>
-              )}
-
-              {r.status === 'active' && (
-                <DropdownMenuItem onClick={() => handleAction('reset', r)}>
-                  <RotateCcw className="h-4 w-4 mr-2" />
-                  Force Password Reset
-                </DropdownMenuItem>
-              )}
-
-              {r.status === 'legacy' && (
-                <>
-                  <DropdownMenuItem onClick={() => handleAction('resend', r)}>
-                    <Mail className="h-4 w-4 mr-2" />
-                    Send Reset Link
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => handleAction('copyLink', r)}>
-                    <Link2 className="h-4 w-4 mr-2" />
-                    Copy Reset Link
-                  </DropdownMenuItem>
-                </>
-              )}
-
               {r.status === 'disabled' && (
                 <DropdownMenuItem onClick={() => handleAction('enable', r)}>
                   <ShieldCheck className="h-4 w-4 mr-2" />
@@ -394,7 +299,7 @@ export function RepsTable({ items }: RepsTableProps) {
 
               <DropdownMenuSeparator />
 
-              {(r.status === 'active' || r.status === 'invited' || r.status === 'legacy') && (
+              {r.status !== 'disabled' && (
                 <DropdownMenuItem
                   onClick={() => handleAction('disable', r)}
                   className="text-destructive"
@@ -453,12 +358,6 @@ export function RepsTable({ items }: RepsTableProps) {
           </DialogHeader>
 
           <div className="grid gap-4 mt-4">
-            {modalMode === 'add' && (
-              <p className="text-sm text-muted-foreground">
-                An invite email will be sent to set up their password.
-              </p>
-            )}
-
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium mb-1">Name *</label>
@@ -575,48 +474,9 @@ export function RepsTable({ items }: RepsTableProps) {
                 {isSubmitting
                   ? 'Saving...'
                   : modalMode === 'add'
-                    ? 'Add Rep & Send Invite'
+                    ? 'Add Rep'
                     : 'Save Changes'}
               </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Invite Success Modal */}
-      <Dialog open={modalMode === 'invite-success'} onOpenChange={closeModal}>
-        <DialogContent className="bg-background sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Invite Sent</DialogTitle>
-          </DialogHeader>
-
-          <div className="mt-4 space-y-4">
-            <p className="text-muted-foreground">
-              An invite email has been sent to{' '}
-              <strong>{selectedRep?.email1 || 'the rep'}</strong>.
-            </p>
-
-            {inviteUrl && (
-              <div className="space-y-2">
-                <p className="text-sm text-muted-foreground">
-                  If the email does not arrive, you can copy the invite link:
-                </p>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={inviteUrl}
-                    readOnly
-                    className="flex-1 h-10 rounded-md border border-input bg-muted px-3 text-sm"
-                  />
-                  <Button variant="secondary" onClick={copyToClipboard}>
-                    {copySuccess ? 'Copied!' : 'Copy'}
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            <div className="flex justify-end">
-              <Button onClick={closeModal}>Done</Button>
             </div>
           </div>
         </DialogContent>
