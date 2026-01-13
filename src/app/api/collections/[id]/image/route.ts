@@ -54,7 +54,18 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     return Response.json({ success: true, imageUrl })
   } catch (error) {
     console.error('[S3 Upload] ERROR:', error)
-    return Response.json({ error: 'Failed to upload image' }, { status: 500 })
+
+    // Provide helpful error message
+    let errorMessage = 'Failed to upload image'
+    if (error instanceof Error) {
+      if (error.name === 'CredentialsProviderError' || error.message.includes('credentials')) {
+        errorMessage = 'AWS credentials not configured. Attach IAM role to EC2 or add AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY to environment.'
+      } else {
+        errorMessage = error.message
+      }
+    }
+
+    return Response.json({ error: errorMessage }, { status: 500 })
   }
 }
 
