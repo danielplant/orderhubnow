@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import type { OrderQuantities, Product, Currency } from "@/lib/types";
+import type { OrderForEditing } from "@/lib/data/queries/orders";
 
 /**
  * Pre-order metadata for tracking category/ship window per item.
@@ -71,7 +72,7 @@ interface OrderContextValue {
   orders: Record<string, OrderQuantities>;
   totalItems: number;
   totalPrice: number;
-  
+
   // Cart mutations
   addItem: (productId: string, sku: string, qty: number, price: number, preOrderMeta?: PreOrderItemMetadata, lineMeta?: OrderLineMetadata) => void;
   removeItem: (productId: string, sku: string) => void;
@@ -81,33 +82,43 @@ interface OrderContextValue {
   undo: () => void;
   canUndo: boolean;
   getProductTotal: (product: Product, currency: Currency) => { items: number; price: number };
-  
+
   // Pre-order metadata accessors
   preOrderMetadata: Record<string, PreOrderItemMetadata>;
   getPreOrderShipWindow: () => { start: string | null; end: string | null } | null;
-  
+
   // Order line metadata (isOnRoute tracking)
   orderLineMetadata: Record<string, OrderLineMetadata>;
-  
+
   // Draft state (server-side persistence)
   draftId: string | null;
   saveStatus: SaveStatus;
   lastSaved: Date | null;
   formData: DraftFormData;
   isLoadingDraft: boolean;
-  
+
   // Draft methods
   setFormData: (data: DraftFormData) => void;
   updateFormField: (field: keyof DraftFormData, value: string) => void;
   loadDraft: (id: string) => Promise<boolean>;
   clearDraft: () => Promise<void>;
   getDraftUrl: () => string | null;
+
+  // Edit mode state (for editing existing orders)
+  editOrderId: string | null;
+  editOrderCurrency: Currency | null;
+  isEditMode: boolean;
+
+  // Edit mode methods
+  loadOrderForEdit: (order: OrderForEditing) => void;
+  clearEditMode: () => void;
 }
 
 const OrderContext = createContext<OrderContextValue | null>(null);
 
 const STORAGE_KEY = "draft-order";
 const DRAFT_ID_KEY = "draft-id";
+const EDIT_STATE_KEY = "edit-order-state";
 const MAX_HISTORY = 10;
 const DEBOUNCE_MS = 1000; // Auto-save debounce
 

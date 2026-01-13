@@ -29,6 +29,7 @@ export interface RepWithLogin extends Rep {
   userId: number | null // Users.ID (if exists)
   loginEmail: string | null // Users.Email or Users.LoginID
   status: UserStatus // Users.Status
+  orderCount: number // Count of orders assigned to this rep
 }
 
 export interface RepsListResult {

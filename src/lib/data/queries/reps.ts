@@ -6,19 +6,36 @@ import type { Rep, RepWithLogin, RepsListResult, UserStatus } from '@/lib/types/
  * Note: Password is never exposed - only status.
  */
 export async function getReps(): Promise<RepsListResult> {
-  const rows = await prisma.reps.findMany({
-    orderBy: { Name: 'asc' },
-    include: {
-      Users: {
-        select: {
-          ID: true,
-          Email: true,
-          LoginID: true,
-          Status: true,
+  // Fetch reps and order counts in parallel
+  const [rows, orderCounts] = await Promise.all([
+    prisma.reps.findMany({
+      orderBy: { Name: 'asc' },
+      include: {
+        Users: {
+          select: {
+            ID: true,
+            Email: true,
+            LoginID: true,
+            Status: true,
+          },
         },
       },
-    },
-  })
+    }),
+    // Count orders per rep
+    prisma.customerOrders.groupBy({
+      by: ['RepID'],
+      where: { RepID: { not: null } },
+      _count: { _all: true },
+    }),
+  ])
+
+  // Build map of RepID -> order count
+  const countMap = new Map<number, number>()
+  for (const g of orderCounts) {
+    if (g.RepID !== null) {
+      countMap.set(g.RepID, g._count._all)
+    }
+  }
 
   const items: RepWithLogin[] = rows.map((r) => {
     // A rep may have multiple users, but typically just one
@@ -39,6 +56,7 @@ export async function getReps(): Promise<RepsListResult> {
       userId: user?.ID ?? null,
       loginEmail: user?.Email || user?.LoginID || null,
       status: (user?.Status as UserStatus) ?? 'invited',
+      orderCount: countMap.get(r.ID) ?? 0,
     }
   })
 

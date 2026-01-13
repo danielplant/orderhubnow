@@ -239,7 +239,14 @@ export function RepsTable({ items }: RepsTableProps) {
       {
         id: 'name',
         header: 'Name',
-        cell: (r) => <span className="font-medium">{r.name}</span>,
+        cell: (r) => (
+          <button
+            onClick={() => openModal('edit', r)}
+            className="font-medium text-primary hover:underline cursor-pointer text-left"
+          >
+            {r.name}
+          </button>
+        ),
       },
       {
         id: 'code',
@@ -255,6 +262,18 @@ export function RepsTable({ items }: RepsTableProps) {
         id: 'email1',
         header: 'Email',
         cell: (r) => <span className="text-muted-foreground">{r.email1}</span>,
+      },
+      {
+        id: 'orderCount',
+        header: 'Orders',
+        cell: (r) => (
+          <button
+            onClick={() => router.push(`/admin/orders?rep=${encodeURIComponent(r.name)}`)}
+            className="text-primary hover:underline cursor-pointer"
+          >
+            {r.orderCount}
+          </button>
+        ),
       },
       {
         id: 'phone',
