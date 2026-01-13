@@ -14,7 +14,7 @@ const nextConfig: NextConfig = {
       },
       {
         protocol: 'https',
-        hostname: 'orderhub-uploads.s3.us-east-2.amazonaws.com',
+        hostname: 'orderhub-uploads.s3.us-east-1.amazonaws.com',
       },
     ],
   },

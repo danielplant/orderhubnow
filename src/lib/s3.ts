@@ -1,7 +1,7 @@
 import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3'
 
 const bucket = process.env.AWS_S3_BUCKET_NAME
-const region = process.env.AWS_REGION || 'us-east-2'
+const region = process.env.AWS_REGION || 'us-east-1'
 
 // S3 client - uses IAM instance role on EC2, or access keys from env
 const s3Client = new S3Client({
