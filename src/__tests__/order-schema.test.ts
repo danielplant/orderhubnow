@@ -5,7 +5,7 @@ describe('orderFormSchema', () => {
   const validFormData = {
     storeName: 'Test Store',
     buyerName: 'John Doe',
-    salesRep: 'Jane Smith',
+    salesRepId: 'rep-123',
     customerPhone: '555-555-5555',
     customerEmail: 'buyer@store.com',
     website: '',
@@ -49,10 +49,10 @@ describe('orderFormSchema', () => {
   })
 
   it('should require sales rep', () => {
-    const result = orderFormSchema.safeParse({ ...validFormData, salesRep: '' })
+    const result = orderFormSchema.safeParse({ ...validFormData, salesRepId: '' })
     expect(result.success).toBe(false)
     if (!result.success) {
-      expect(result.error.issues[0].path).toContain('salesRep')
+      expect(result.error.issues[0].path).toContain('salesRepId')
     }
   })
 
@@ -109,7 +109,7 @@ describe('createOrderInputSchema', () => {
   const validInput = {
     storeName: 'Test Store',
     buyerName: 'John Doe',
-    salesRep: 'Jane Smith',
+    salesRepId: 'rep-123',
     customerPhone: '555-555-5555',
     customerEmail: 'buyer@store.com',
     website: '',
