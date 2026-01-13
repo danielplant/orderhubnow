@@ -23,17 +23,21 @@ export function BrandHeader({ userInitials = "?" }: BrandHeaderProps) {
   // Determine if we're in pre-order flow
   const isPreOrder = pathname.startsWith("/buyer/pre-order");
   
-  // Build my-order href preserving rep context params
+  // Build my-order href preserving rep context and edit order params
   const buildMyOrderHref = () => {
     const params = new URLSearchParams();
     if (isPreOrder) params.set("isPreOrder", "true");
-    
+
     // Preserve rep context params
     const repId = searchParams.get("repId");
     const returnTo = searchParams.get("returnTo");
     if (repId) params.set("repId", repId);
     if (returnTo) params.set("returnTo", returnTo);
-    
+
+    // Preserve edit order context
+    const editOrder = searchParams.get("editOrder");
+    if (editOrder) params.set("editOrder", editOrder);
+
     const qs = params.toString();
     return `/buyer/my-order${qs ? `?${qs}` : ""}`;
   };

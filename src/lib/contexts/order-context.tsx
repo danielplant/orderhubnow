@@ -137,17 +137,52 @@ function calculateTotals(
   return { items, price };
 }
 
-function loadFromStorage(): {
+interface StorageData {
   orders: Record<string, OrderQuantities>;
   prices: Map<string, number>;
   preOrderMeta: Record<string, PreOrderItemMetadata>;
   lineMeta: Record<string, OrderLineMetadata>;
   formData: DraftFormData;
   draftId: string | null;
-} {
+  editOrderId: string | null;
+  editOrderCurrency: Currency | null;
+}
+
+function loadFromStorage(): StorageData {
   if (typeof window === "undefined") {
-    return { orders: {}, prices: new Map(), preOrderMeta: {}, lineMeta: {}, formData: {}, draftId: null };
+    return {
+      orders: {},
+      prices: new Map(),
+      preOrderMeta: {},
+      lineMeta: {},
+      formData: {},
+      draftId: null,
+      editOrderId: null,
+      editOrderCurrency: null,
+    };
   }
+
+  // Check for edit state first (takes priority)
+  try {
+    const editStored = localStorage.getItem(EDIT_STATE_KEY);
+    if (editStored) {
+      const editState = JSON.parse(editStored);
+      return {
+        orders: editState.orders || {},
+        prices: new Map(Object.entries(editState.prices || {})),
+        preOrderMeta: {},
+        lineMeta: {},
+        formData: {},
+        draftId: null,
+        editOrderId: editState.orderId || null,
+        editOrderCurrency: editState.currency || null,
+      };
+    }
+  } catch {
+    // Invalid edit state, continue to draft
+  }
+
+  // Load draft state
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     const draftId = localStorage.getItem(DRAFT_ID_KEY);
@@ -160,12 +195,23 @@ function loadFromStorage(): {
         lineMeta: parsed.lineMeta || {},
         formData: parsed.formData || {},
         draftId: draftId || null,
+        editOrderId: null,
+        editOrderCurrency: null,
       };
     }
   } catch {
     // Invalid storage, start fresh
   }
-  return { orders: {}, prices: new Map(), preOrderMeta: {}, lineMeta: {}, formData: {}, draftId: null };
+  return {
+    orders: {},
+    prices: new Map(),
+    preOrderMeta: {},
+    lineMeta: {},
+    formData: {},
+    draftId: null,
+    editOrderId: null,
+    editOrderCurrency: null,
+  };
 }
 
 interface OrderProviderProps {
@@ -199,13 +245,34 @@ export function OrderProvider({ children, initialDraftId }: OrderProviderProps) 
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [isLoadingDraft, setIsLoadingDraft] = useState<boolean>(!!initialDraftId);
-  
+
+  // Edit mode state (for editing existing orders)
+  const [editOrderId, setEditOrderId] = useState<string | null>(
+    () => loadFromStorage().editOrderId
+  );
+  const [editOrderCurrency, setEditOrderCurrency] = useState<Currency | null>(
+    () => loadFromStorage().editOrderCurrency
+  );
+
   // Refs for debounced auto-save
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const pendingSaveRef = useRef(false);
 
   // Save state to localStorage (optimistic cache)
   const saveToLocalStorage = useCallback(() => {
+    // In edit mode, save to edit-specific storage
+    if (editOrderId) {
+      const editData = {
+        orderId: editOrderId,
+        currency: editOrderCurrency,
+        orders,
+        prices: Object.fromEntries(priceMap),
+      };
+      localStorage.setItem(EDIT_STATE_KEY, JSON.stringify(editData));
+      return;
+    }
+
+    // Normal draft mode storage
     const data = {
       orders,
       prices: Object.fromEntries(priceMap),
@@ -217,7 +284,7 @@ export function OrderProvider({ children, initialDraftId }: OrderProviderProps) 
     if (draftId) {
       localStorage.setItem(DRAFT_ID_KEY, draftId);
     }
-  }, [orders, priceMap, preOrderMetadata, orderLineMetadata, formData, draftId]);
+  }, [orders, priceMap, preOrderMetadata, orderLineMetadata, formData, draftId, editOrderId, editOrderCurrency]);
 
   // Sync to localStorage when state changes
   useEffect(() => {
@@ -278,19 +345,22 @@ export function OrderProvider({ children, initialDraftId }: OrderProviderProps) 
     }
   }, [orders, priceMap, preOrderMetadata, orderLineMetadata, formData]);
 
-  // Debounced auto-save to server
+  // Debounced auto-save to server (skip in edit mode)
   const scheduleServerSync = useCallback(() => {
+    // Skip server sync in edit mode - edit state is only stored locally
+    if (editOrderId) return;
+
     // Clear any pending timeout
     if (saveTimeoutRef.current) {
       clearTimeout(saveTimeoutRef.current);
     }
-    
+
     pendingSaveRef.current = true;
-    
+
     saveTimeoutRef.current = setTimeout(async () => {
       if (!pendingSaveRef.current) return;
       pendingSaveRef.current = false;
-      
+
       try {
         const id = await ensureDraft();
         await syncToServer(id);
@@ -298,7 +368,7 @@ export function OrderProvider({ children, initialDraftId }: OrderProviderProps) 
         // Error already logged
       }
     }, DEBOUNCE_MS);
-  }, [ensureDraft, syncToServer]);
+  }, [ensureDraft, syncToServer, editOrderId]);
 
   // Load draft from server
   const loadDraft = useCallback(async (id: string): Promise<boolean> => {
@@ -375,6 +445,57 @@ export function OrderProvider({ children, initialDraftId }: OrderProviderProps) 
     if (typeof window === 'undefined') return null;
     return `${window.location.origin}/draft/${draftId}`;
   }, [draftId]);
+
+  // Load existing order into cart for editing
+  const loadOrderForEdit = useCallback((order: OrderForEditing) => {
+    // Clear any existing cart state
+    setOrders({});
+    setPriceMap(new Map());
+    setPreOrderMetadata({});
+    setOrderLineMetadata({});
+    setHistory([]);
+
+    // Set edit mode state
+    setEditOrderId(order.id);
+    setEditOrderCurrency(order.currency);
+
+    // Populate cart with order items
+    const newOrders: Record<string, OrderQuantities> = {};
+    const newPrices = new Map<string, number>();
+
+    order.items.forEach((item) => {
+      // Use SKU as productId since we don't have the original productId in edit mode
+      if (!newOrders[item.sku]) {
+        newOrders[item.sku] = {};
+      }
+      newOrders[item.sku][item.sku] = item.quantity;
+      newPrices.set(item.sku, item.price);
+    });
+
+    setOrders(newOrders);
+    setPriceMap(newPrices);
+
+    // Save edit state to localStorage
+    const editData = {
+      orderId: order.id,
+      currency: order.currency,
+      orders: newOrders,
+      prices: Object.fromEntries(newPrices),
+    };
+    localStorage.setItem(EDIT_STATE_KEY, JSON.stringify(editData));
+  }, []);
+
+  // Clear edit mode and return to normal cart state
+  const clearEditMode = useCallback(() => {
+    setEditOrderId(null);
+    setEditOrderCurrency(null);
+    setOrders({});
+    setPriceMap(new Map());
+    setHistory([]);
+
+    // Clear edit state from localStorage
+    localStorage.removeItem(EDIT_STATE_KEY);
+  }, []);
 
   // Load initial draft from URL param or localStorage
   useEffect(() => {
@@ -608,6 +729,13 @@ export function OrderProvider({ children, initialDraftId }: OrderProviderProps) 
         loadDraft,
         clearDraft,
         getDraftUrl,
+        // Edit mode state
+        editOrderId,
+        editOrderCurrency,
+        isEditMode: !!editOrderId,
+        // Edit mode methods
+        loadOrderForEdit,
+        clearEditMode,
       }}
     >
       {children}

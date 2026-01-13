@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { useOrder } from '@/lib/contexts/order-context'
 import { useCurrency } from '@/lib/contexts/currency-context'
@@ -9,6 +9,7 @@ import { DraftToolbar } from '@/components/buyer/draft-toolbar'
 import { DraftRecoveryBanner } from '@/components/buyer/draft-recovery-banner'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { formatCurrency } from '@/lib/utils'
 import { Trash2 } from 'lucide-react'
 import type { OrderForEditing } from '@/lib/data/queries/orders'
@@ -40,34 +41,48 @@ export function MyOrderClient({
   draftId: urlDraftId = null,
 }: MyOrderClientProps) {
   const router = useRouter()
-  const { orders, totalItems, removeItem, loadDraft, draftId } = useOrder()
+  const {
+    orders,
+    totalItems,
+    removeItem,
+    setQuantity,
+    loadDraft,
+    draftId,
+    loadOrderForEdit,
+    clearEditMode,
+    editOrderId,
+    editOrderCurrency,
+    isEditMode: contextIsEditMode,
+  } = useOrder()
   const { currency } = useCurrency()
+  const hasLoadedOrderRef = useRef(false)
 
-  // Load draft from URL param if present
+  // Load draft from URL param if present (only for non-edit mode)
   useEffect(() => {
-    if (urlDraftId && urlDraftId !== draftId) {
+    if (!existingOrder && urlDraftId && urlDraftId !== draftId) {
       loadDraft(urlDraftId)
     }
-  }, [urlDraftId, draftId, loadDraft])
+  }, [urlDraftId, draftId, loadDraft, existingOrder])
 
-  // Determine if we're in edit mode
-  const isEditMode = !!existingOrder
-
-  // In edit mode, use existing order items; otherwise use cart
-  const cartItems = useMemo(() => {
-    if (isEditMode && existingOrder) {
-      // Use items from existing order
-      return existingOrder.items.map((item) => ({
-        productId: item.sku, // Use SKU as productId for edit mode
-        sku: item.sku,
-        skuVariantId: item.skuVariantId,
-        quantity: item.quantity,
-        price: item.price,
-        description: item.description,
-      }))
+  // Load existing order into context when entering edit mode
+  useEffect(() => {
+    if (existingOrder && !hasLoadedOrderRef.current) {
+      // Only load if we haven't already or if it's a different order
+      if (editOrderId !== existingOrder.id) {
+        loadOrderForEdit(existingOrder)
+      }
+      hasLoadedOrderRef.current = true
     }
+  }, [existingOrder, editOrderId, loadOrderForEdit])
 
-    // Normal cart flow
+  // Determine if we're in edit mode (from props or context)
+  const isEditMode = !!existingOrder || contextIsEditMode
+
+  // For edit mode, use the order's currency; otherwise use context
+  const effectiveCurrency = editOrderCurrency || (existingOrder?.currency) || currency
+
+  // Unified cart items from context - works for both new and edit mode
+  const cartItems = useMemo(() => {
     const items: Array<{
       productId: string
       sku: string
@@ -86,7 +101,7 @@ export function MyOrderClient({
             sku,
             skuVariantId: skuData.skuVariantId,
             quantity,
-            price: currency === 'CAD' ? skuData.priceCAD : skuData.priceUSD,
+            price: effectiveCurrency === 'CAD' ? skuData.priceCAD : skuData.priceUSD,
             description: skuData.description,
           })
         }
@@ -94,10 +109,7 @@ export function MyOrderClient({
     })
 
     return items
-  }, [orders, skuMap, currency, isEditMode, existingOrder])
-
-  // For edit mode, use the order's currency; otherwise use context
-  const effectiveCurrency = isEditMode && existingOrder ? existingOrder.currency : currency
+  }, [orders, skuMap, effectiveCurrency])
 
   // Calculate totals
   const orderTotal = cartItems.reduce(
@@ -105,17 +117,30 @@ export function MyOrderClient({
     0
   )
 
-  // Build rep query string for navigation
-  const repQuery = repContext?.repId 
-    ? `?repId=${repContext.repId}${returnTo !== '/buyer/select-journey' ? `&returnTo=${encodeURIComponent(returnTo)}` : ''}`
-    : ''
+  // Build query string for navigation (includes editOrder when in edit mode)
+  const buildNavigationQuery = () => {
+    const params = new URLSearchParams()
+    if (repContext?.repId) {
+      params.set('repId', repContext.repId)
+    }
+    if (returnTo !== '/buyer/select-journey') {
+      params.set('returnTo', returnTo)
+    }
+    // Include editOrder param when in edit mode so we can return to editing
+    if (editOrderId) {
+      params.set('editOrder', editOrderId)
+    }
+    const qs = params.toString()
+    return qs ? `?${qs}` : ''
+  }
+  const navigationQuery = buildNavigationQuery()
 
   // Redirect to collections if cart is empty (only in non-edit mode)
   useEffect(() => {
     if (!isEditMode && totalItems === 0) {
-      router.replace(`/buyer/select-journey${repQuery}`)
+      router.replace(`/buyer/select-journey${navigationQuery}`)
     }
-  }, [totalItems, router, isEditMode, repQuery])
+  }, [totalItems, router, isEditMode, navigationQuery])
 
   // Don't render form until we've checked cart (only in non-edit mode)
   if (!isEditMode && totalItems === 0) {
@@ -176,25 +201,37 @@ export function MyOrderClient({
                           {item.description}
                         </div>
                       )}
-                      <div className="text-xs text-muted-foreground mt-1">
-                        {item.quantity} x {formatCurrency(item.price, effectiveCurrency)}
+                      <div className="flex items-center gap-2 mt-1">
+                        <Input
+                          type="number"
+                          min="1"
+                          value={item.quantity}
+                          onChange={(e) => {
+                            const newQty = parseInt(e.target.value, 10)
+                            if (!isNaN(newQty) && newQty > 0) {
+                              setQuantity(item.productId, item.sku, newQty, item.price)
+                            }
+                          }}
+                          className="w-16 h-7 text-center text-xs"
+                        />
+                        <span className="text-xs text-muted-foreground">
+                          x {formatCurrency(item.price, effectiveCurrency)}
+                        </span>
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="font-medium text-sm">
                         {formatCurrency(item.price * item.quantity, effectiveCurrency)}
                       </span>
-                      {!isEditMode && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-sm"
-                          onClick={() => removeItem(item.productId, item.sku)}
-                          className="text-muted-foreground hover:text-destructive"
-                        >
-                          <Trash2 className="size-4" />
-                        </Button>
-                      )}
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => removeItem(item.productId, item.sku)}
+                        className="text-muted-foreground hover:text-destructive"
+                      >
+                        <Trash2 className="size-4" />
+                      </Button>
                     </div>
                   </div>
                 ))}
@@ -207,21 +244,24 @@ export function MyOrderClient({
                 </div>
               </div>
 
-              {!isEditMode && (
-                <Button
-                  variant="outline"
-                  className="w-full"
-                  onClick={() => router.push((isPreOrder ? '/buyer/pre-order' : '/buyer/ats') + repQuery)}
-                >
-                  Continue Shopping
-                </Button>
-              )}
+              {/* Continue Shopping - available in both modes */}
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={() => router.push((isPreOrder ? '/buyer/pre-order' : '/buyer/ats') + navigationQuery)}
+              >
+                {isEditMode ? 'Add More Items' : 'Continue Shopping'}
+              </Button>
 
+              {/* Cancel Edit - only in edit mode */}
               {isEditMode && (
                 <Button
                   variant="outline"
                   className="w-full"
-                  onClick={() => router.push(returnTo)}
+                  onClick={() => {
+                    clearEditMode()
+                    router.push(returnTo)
+                  }}
                 >
                   Cancel Edit
                 </Button>

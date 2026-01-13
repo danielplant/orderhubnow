@@ -75,7 +75,7 @@ export function OrderForm({
   repContext = null,
 }: OrderFormProps) {
   const router = useRouter()
-  const { clearDraft, getPreOrderShipWindow, formData: draftFormData, setFormData, isLoadingDraft } = useOrder()
+  const { clearDraft, clearEditMode, getPreOrderShipWindow, formData: draftFormData, setFormData, isLoadingDraft } = useOrder()
   const [isPending, startTransition] = useTransition()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const formSyncRef = useRef<NodeJS.Timeout | null>(null)
@@ -421,6 +421,7 @@ export function OrderForm({
           })
 
           if (result.success) {
+            clearEditMode() // Clear edit state from context
             toast.success(`Order ${result.orderNumber} updated successfully!`)
             router.push(returnTo)
           } else {

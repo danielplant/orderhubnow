@@ -7,21 +7,23 @@
  */
 
 /**
- * Build a query string preserving rep context params.
- * Used throughout the buyer flow to maintain rep attribution.
- * 
+ * Build a query string preserving rep context params and edit order context.
+ * Used throughout the buyer flow to maintain rep attribution and edit state.
+ *
  * @param searchParams - Current URL search params
- * @returns Query string with rep params (e.g., "?repId=123&returnTo=/rep/orders") or empty string
+ * @returns Query string with context params (e.g., "?repId=123&returnTo=/rep/orders&editOrder=456") or empty string
  */
 export function buildRepQueryString(searchParams: URLSearchParams): string {
   const params = new URLSearchParams()
-  
+
   const repId = searchParams.get('repId')
   const returnTo = searchParams.get('returnTo')
-  
+  const editOrder = searchParams.get('editOrder')
+
   if (repId) params.set('repId', repId)
   if (returnTo) params.set('returnTo', returnTo)
-  
+  if (editOrder) params.set('editOrder', editOrder)
+
   const qs = params.toString()
   return qs ? `?${qs}` : ''
 }
@@ -29,21 +31,23 @@ export function buildRepQueryString(searchParams: URLSearchParams): string {
 /**
  * Build rep context query string for server components.
  * Accepts a plain object from Next.js searchParams.
- * 
+ *
  * @param searchParams - Object from page props
- * @returns Query string with rep params or empty string
+ * @returns Query string with context params or empty string
  */
 export function buildRepQueryStringFromObject(
   searchParams: Record<string, string | string[] | undefined>
 ): string {
   const params = new URLSearchParams()
-  
+
   const repId = typeof searchParams.repId === 'string' ? searchParams.repId : undefined
   const returnTo = typeof searchParams.returnTo === 'string' ? searchParams.returnTo : undefined
-  
+  const editOrder = typeof searchParams.editOrder === 'string' ? searchParams.editOrder : undefined
+
   if (repId) params.set('repId', repId)
   if (returnTo) params.set('returnTo', returnTo)
-  
+  if (editOrder) params.set('editOrder', editOrder)
+
   const qs = params.toString()
   return qs ? `?${qs}` : ''
 }
