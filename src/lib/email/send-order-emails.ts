@@ -94,7 +94,8 @@ export async function sendOrderEmails(data: OrderEmailData): Promise<SendOrderEm
         shipEndDate: data.shipEndDate,
         orderDate: data.orderDate,
         website: '',
-        orderStatus: 'Pending',
+        billingAddress: null,
+        shippingAddress: null,
       },
       items: data.items.map((item) => ({
         sku: item.sku,
@@ -102,7 +103,22 @@ export async function sendOrderEmails(data: OrderEmailData): Promise<SendOrderEm
         price: item.price,
         currency: data.currency,
         lineTotal: item.lineTotal,
+        imageUrl: null,
+        size: '',
+        description: '',
+        category: '',
       })),
+      company: {
+        name: 'limeapple',
+        addressLine1: '31 COUNTRY LANE TERRACE',
+        addressLine2: 'CALGARY, AB CANADA T3Z 1H8',
+        phone: '1 800 359 5171',
+        fax: '1 888 226 7189',
+        email: 'sales@limeapple.com',
+        website: 'www.limeapple.com',
+        logoUrl: '',
+      },
+      totalUnits: data.items.reduce((sum, item) => sum + item.quantity, 0),
     })
 
     const pdfUint8 = await generatePdf(pdfHtml, {

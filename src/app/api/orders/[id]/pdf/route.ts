@@ -1,14 +1,15 @@
 /**
- * Order PDF Confirmation API
+ * Order PDF Summary API
  *
  * GET /api/orders/[id]/pdf
- * Returns a PDF confirmation for the specified order.
+ * Returns a PDF order summary matching the old limeapple format.
  */
 
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { generatePdf } from '@/lib/pdf/generate'
-import { generateOrderConfirmationHtml } from '@/lib/pdf/order-confirmation'
+import { generateOrderSummaryHtml } from '@/lib/pdf/order-confirmation'
+import { getCompanySettings } from '@/lib/data/queries/settings'
 
 interface RouteContext {
   params: Promise<{ id: string }>
@@ -47,15 +48,62 @@ export async function GET(
       )
     }
 
-    // Fetch order items separately (no relation defined in schema)
+    // Fetch customer for addresses (if CustomerID exists)
+    let customer = null
+    if (order.CustomerID) {
+      customer = await prisma.customers.findUnique({
+        where: { ID: order.CustomerID },
+      })
+    }
+
+    // Fetch order items
     const orderItems = await prisma.customerOrdersItems.findMany({
       where: { CustomerOrderID: BigInt(orderId) },
     })
 
     console.log('Order items count:', orderItems.length)
 
+    // Fetch SKU details for each order item (image, size, description, category)
+    const skuIds = orderItems.map((item) => item.SKU).filter(Boolean)
+    const skus = await prisma.sku.findMany({
+      where: { SkuID: { in: skuIds } },
+      include: {
+        SkuCategories: true,
+      },
+    })
+
+    // Create a map for quick SKU lookup
+    const skuMap = new Map(skus.map((sku) => [sku.SkuID, sku]))
+
+    // Fetch company settings
+    const companySettings = await getCompanySettings()
+
     // Determine currency from Country field (legacy behavior)
     const currency = order.Country?.toUpperCase().includes('CAD') ? 'CAD' : 'USD'
+
+    // Build billing address
+    const billingAddress = customer
+      ? {
+          street1: customer.Street1 || '',
+          street2: customer.Street2 || '',
+          city: customer.City || '',
+          state: customer.StateProvince || '',
+          zip: customer.ZipPostal || '',
+          country: customer.Country || '',
+        }
+      : null
+
+    // Build shipping address
+    const shippingAddress = customer
+      ? {
+          street1: customer.ShippingStreet1 || customer.Street1 || '',
+          street2: customer.ShippingStreet2 || customer.Street2 || '',
+          city: customer.ShippingCity || customer.City || '',
+          state: customer.ShippingStateProvince || customer.StateProvince || '',
+          zip: customer.ShippingZipPostal || customer.ZipPostal || '',
+          country: customer.ShippingCountry || customer.Country || '',
+        }
+      : null
 
     // Build order data for PDF
     const orderData = {
@@ -73,22 +121,48 @@ export async function GET(
       shipEndDate: order.ShipEndDate || new Date(),
       orderDate: order.OrderDate || new Date(),
       website: order.Website || '',
-      orderStatus: order.OrderStatus || 'Pending',
+      billingAddress,
+      shippingAddress,
     }
 
-    // Build line items
-    const items = orderItems.map((item) => ({
-      sku: item.SKU || 'Unknown SKU',
-      quantity: item.Quantity || 0,
-      price: item.Price || 0,
-      currency: currency,
-      lineTotal: (item.Quantity || 0) * (item.Price || 0),
-    }))
+    // Build line items with SKU details
+    const items = orderItems.map((item) => {
+      const sku = skuMap.get(item.SKU || '')
+      return {
+        sku: item.SKU || 'Unknown SKU',
+        quantity: item.Quantity || 0,
+        price: item.Price || 0,
+        currency: currency,
+        lineTotal: (item.Quantity || 0) * (item.Price || 0),
+        // Enhanced SKU details
+        imageUrl: sku?.ShopifyImageURL || null,
+        size: sku?.Size || '',
+        description: sku?.OrderEntryDescription || sku?.Description || '',
+        category: sku?.SkuCategories?.Name || '',
+      }
+    })
+
+    // Calculate total units
+    const totalUnits = items.reduce((sum, item) => sum + item.quantity, 0)
+
+    // Build company info
+    const company = {
+      name: companySettings.CompanyName,
+      addressLine1: companySettings.AddressLine1 || '',
+      addressLine2: companySettings.AddressLine2 || '',
+      phone: companySettings.Phone || '',
+      fax: companySettings.Fax || '',
+      email: companySettings.Email || '',
+      website: companySettings.Website || '',
+      logoUrl: companySettings.LogoUrl || '',
+    }
 
     // Generate HTML
-    const html = generateOrderConfirmationHtml({
+    const html = generateOrderSummaryHtml({
       order: orderData,
       items,
+      company,
+      totalUnits,
     })
 
     console.log('HTML length:', html.length)
@@ -100,20 +174,20 @@ export async function GET(
       })
     }
 
-    // Generate PDF (portrait orientation for confirmation)
+    // Generate PDF (portrait orientation)
     const pdfBuffer = await generatePdf(html, {
       format: 'Letter',
       landscape: false,
       margin: {
-        top: '0.5in',
-        right: '0.5in',
-        bottom: '0.5in',
-        left: '0.5in',
+        top: '0.25in',
+        right: '0.25in',
+        bottom: '0.25in',
+        left: '0.25in',
       },
     })
 
     // Build filename
-    const filename = `${order.OrderNumber || orderId}-Confirmation.pdf`
+    const filename = `${order.OrderNumber || orderId}-OrderSubmitted.pdf`
 
     // Return PDF response - convert Uint8Array to Buffer
     const buffer = Buffer.from(pdfBuffer)

@@ -28,6 +28,26 @@ export type InventorySettingsRecord = InventorySettingsEditableFields & {
 }
 
 /**
+ * Company settings for PDF generation and branding.
+ */
+export type CompanySettingsRecord = {
+  ID: number
+  CompanyName: string
+  AddressLine1: string | null
+  AddressLine2: string | null
+  Phone: string | null
+  Fax: string | null
+  Email: string | null
+  Website: string | null
+  LogoUrl: string | null
+}
+
+/**
+ * Editable fields for company settings.
+ */
+export type CompanySettingsEditableFields = Omit<CompanySettingsRecord, 'ID'>
+
+/**
  * Standard action result for server actions.
  */
 export type ActionResult =

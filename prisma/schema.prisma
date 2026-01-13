@@ -149,6 +149,19 @@ model InventorySettings {
   ShowShopifyImages   Boolean?
 }
 
+/// Company settings for PDF generation and branding
+model CompanySettings {
+  ID           Int     @id(map: "PK_CompanySettings") @default(autoincrement())
+  CompanyName  String  @db.NVarChar(200)
+  AddressLine1 String? @db.NVarChar(200)
+  AddressLine2 String? @db.NVarChar(200)
+  Phone        String? @db.NVarChar(50)
+  Fax          String? @db.NVarChar(50)
+  Email        String? @db.NVarChar(200)
+  Website      String? @db.NVarChar(200)
+  LogoUrl      String? @db.NVarChar(500)
+}
+
 model MissingShopifySkus {
   ID                      BigInt   @id(map: "PK_MissingShopifySkus") @default(autoincrement())
   SkuID                   String   @db.NVarChar(50)

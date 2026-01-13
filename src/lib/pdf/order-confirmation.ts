@@ -1,11 +1,25 @@
 /**
- * Order Confirmation PDF Template
+ * Order Summary PDF Template
  *
- * Generates customer-facing order confirmation HTML.
- * Design: Clean, professional, portrait orientation.
+ * Generates order summary HTML matching the old limeapple PDF format.
+ * Features: Pink header, company logo/contact, billing/shipping addresses,
+ * product images, sizes, descriptions, categories, and total units.
  */
 
 import { wrapHtml } from './generate'
+
+// ============================================================================
+// Types
+// ============================================================================
+
+interface Address {
+  street1: string
+  street2: string
+  city: string
+  state: string
+  zip: string
+  country: string
+}
 
 interface OrderData {
   orderNumber: string
@@ -22,7 +36,8 @@ interface OrderData {
   shipEndDate: Date
   orderDate: Date
   website: string
-  orderStatus: string
+  billingAddress: Address | null
+  shippingAddress: Address | null
 }
 
 interface LineItem {
@@ -31,12 +46,33 @@ interface LineItem {
   price: number
   currency: string
   lineTotal: number
+  imageUrl: string | null
+  size: string
+  description: string
+  category: string
 }
 
-interface OrderConfirmationInput {
+interface CompanyInfo {
+  name: string
+  addressLine1: string
+  addressLine2: string
+  phone: string
+  fax: string
+  email: string
+  website: string
+  logoUrl: string
+}
+
+interface OrderSummaryInput {
   order: OrderData
   items: LineItem[]
+  company: CompanyInfo
+  totalUnits: number
 }
+
+// ============================================================================
+// Helpers
+// ============================================================================
 
 function formatCurrency(amount: number, currency: 'USD' | 'CAD'): string {
   return new Intl.NumberFormat('en-US', {
@@ -50,361 +86,453 @@ function formatCurrency(amount: number, currency: 'USD' | 'CAD'): string {
 function formatDate(date: Date): string {
   return date.toLocaleDateString('en-US', {
     year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  })
+    month: '2-digit',
+    day: '2-digit',
+  }).replace(/\//g, '/')
 }
 
 function formatShipWindow(start: Date, end: Date): string {
-  const startStr = start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-  const endStr = end.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-  return `${startStr} - ${endStr}`
+  const fmt = (d: Date) =>
+    d.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })
+  return `${fmt(start)} - ${fmt(end)}`
 }
 
-export function generateOrderConfirmationHtml(input: OrderConfirmationInput): string {
-  const { order, items } = input
+// ============================================================================
+// Main Template
+// ============================================================================
+
+export function generateOrderSummaryHtml(input: OrderSummaryInput): string {
+  const { order, items, company, totalUnits } = input
 
   // Generate line items rows
   const itemRows = items
     .map(
       (item) => `
       <tr>
-        <td class="item-sku">${item.sku}</td>
-        <td class="text-center">${item.quantity}</td>
-        <td class="text-right">${formatCurrency(item.price, order.currency)}</td>
-        <td class="text-right font-medium">${formatCurrency(item.lineTotal, order.currency)}</td>
+        <td class="image-cell">
+          ${
+            item.imageUrl
+              ? `<img src="${item.imageUrl}" alt="${item.sku}" class="product-image" />`
+              : `<div class="no-image">No Image</div>`
+          }
+        </td>
+        <td class="sku-cell">
+          <div class="sku-id">${item.sku}</div>
+          ${item.description ? `<div class="sku-desc">Description: ${item.description}</div>` : ''}
+          ${item.category ? `<div class="sku-category">Category: ${item.category}</div>` : ''}
+        </td>
+        <td class="size-cell">${item.size || ''}</td>
+        <td class="qty-cell">${item.quantity}</td>
+        <td class="price-cell">${formatCurrency(item.price, order.currency)}</td>
+        <td class="total-cell">${formatCurrency(item.lineTotal, order.currency)}</td>
       </tr>
     `
     )
     .join('')
 
+  // Build address rows helper
+  const addressRows = (addr: Address | null, label: string) => {
+    if (!addr) {
+      return `
+        <td colspan="4" class="section-header">${label}</td>
+        </tr><tr>
+        <td class="label-cell">Address Street 1:</td>
+        <td class="value-cell"></td>
+        <td class="label-cell">Address Street 2:</td>
+        <td class="value-cell"></td>
+        </tr><tr>
+        <td class="label-cell">City:</td>
+        <td class="value-cell"></td>
+        <td class="label-cell">State:</td>
+        <td class="value-cell"></td>
+        </tr><tr>
+        <td class="label-cell">Zip:</td>
+        <td class="value-cell"></td>
+        <td class="label-cell">Country:</td>
+        <td class="value-cell"></td>
+      `
+    }
+    return `
+      <td colspan="4" class="section-header">${label}</td>
+      </tr><tr>
+      <td class="label-cell">Address Street 1:</td>
+      <td class="value-cell">${addr.street1}</td>
+      <td class="label-cell">Address Street 2:</td>
+      <td class="value-cell">${addr.street2}</td>
+      </tr><tr>
+      <td class="label-cell">City:</td>
+      <td class="value-cell">${addr.city}</td>
+      <td class="label-cell">State:</td>
+      <td class="value-cell">${addr.state}</td>
+      </tr><tr>
+      <td class="label-cell">Zip:</td>
+      <td class="value-cell">${addr.zip}</td>
+      <td class="label-cell">Country:</td>
+      <td class="value-cell">${addr.country}</td>
+    `
+  }
+
   const content = `
-    <div class="confirmation-container">
-      <!-- Header -->
-      <div class="confirmation-header">
-        <div class="logo-section">
-          <div class="logo">MyOrderHub</div>
-          <div class="tagline">Wholesale Order Management</div>
-        </div>
-        <div class="order-info">
-          <div class="order-number">Order #${order.orderNumber}</div>
-          <div class="order-date">${formatDate(order.orderDate)}</div>
-          <div class="order-status status-${order.orderStatus.toLowerCase()}">${order.orderStatus}</div>
-        </div>
+    <div class="order-summary">
+      <!-- Pink Header Banner -->
+      <div class="header-banner">
+        <h1>ORDER SUMMARY</h1>
       </div>
 
-      <!-- Thank You Message -->
-      <div class="thank-you-section">
-        <h1>Thank You for Your Order!</h1>
-        <p>We've received your order and it's being processed. You'll receive a confirmation email at <strong>${order.customerEmail}</strong>.</p>
-      </div>
-
-      <!-- Customer & Order Details -->
-      <div class="details-grid">
-        <div class="details-card">
-          <h3>Customer Information</h3>
-          <div class="detail-row">
-            <span class="label">Store:</span>
-            <span class="value">${order.storeName}</span>
+      <!-- Company Header -->
+      <div class="company-header">
+        <div class="company-left">
+          ${
+            company.logoUrl
+              ? `<img src="${company.logoUrl}" alt="${company.name}" class="company-logo" />`
+              : `<div class="company-name-text">${company.name}</div>`
+          }
+          <div class="company-address">
+            ${company.addressLine1 ? `<div>${company.addressLine1}</div>` : ''}
+            ${company.addressLine2 ? `<div>${company.addressLine2}</div>` : ''}
           </div>
-          <div class="detail-row">
-            <span class="label">Contact:</span>
-            <span class="value">${order.buyerName}</span>
-          </div>
-          <div class="detail-row">
-            <span class="label">Email:</span>
-            <span class="value">${order.customerEmail}</span>
-          </div>
-          <div class="detail-row">
-            <span class="label">Phone:</span>
-            <span class="value">${order.customerPhone}</span>
-          </div>
-          ${order.website ? `
-          <div class="detail-row">
-            <span class="label">Website:</span>
-            <span class="value">${order.website}</span>
-          </div>
-          ` : ''}
         </div>
-
-        <div class="details-card">
-          <h3>Order Details</h3>
-          <div class="detail-row">
-            <span class="label">Sales Rep:</span>
-            <span class="value">${order.salesRep}</span>
-          </div>
-          <div class="detail-row">
-            <span class="label">Ship Window:</span>
-            <span class="value">${formatShipWindow(order.shipStartDate, order.shipEndDate)}</span>
-          </div>
-          ${order.customerPO ? `
-          <div class="detail-row">
-            <span class="label">Customer PO:</span>
-            <span class="value">${order.customerPO}</span>
-          </div>
-          ` : ''}
-          <div class="detail-row">
-            <span class="label">Currency:</span>
-            <span class="value">${order.currency}</span>
-          </div>
+        <div class="company-right">
+          ${company.website ? `<div><span class="contact-label">WEB:</span> ${company.website}</div>` : ''}
+          ${company.phone ? `<div><span class="contact-label">TEL:</span> ${company.phone}</div>` : ''}
+          ${company.fax ? `<div><span class="contact-label">FAX:</span> ${company.fax}</div>` : ''}
+          ${company.email ? `<div><span class="contact-label">EMAIL:</span> ${company.email}</div>` : ''}
         </div>
       </div>
 
-      <!-- Line Items -->
-      <div class="items-section">
-        <h3>Order Items</h3>
-        <table class="items-table">
-          <thead>
-            <tr>
-              <th>SKU</th>
-              <th class="text-center">Qty</th>
-              <th class="text-right">Unit Price</th>
-              <th class="text-right">Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${itemRows}
-          </tbody>
-        </table>
+      <!-- Order Info Table -->
+      <table class="info-table">
+        <tbody>
+          <!-- Order Number -->
+          <tr>
+            <td colspan="4" class="order-number-cell">Order Number: ${order.orderNumber}</td>
+          </tr>
+
+          <!-- Customer Information Section -->
+          <tr>
+            <td colspan="4" class="section-header">Customer Information</td>
+          </tr>
+          <tr>
+            <td class="label-cell">Store Name:</td>
+            <td class="value-cell">${order.storeName}</td>
+            <td class="label-cell">Buyer Name:</td>
+            <td class="value-cell">${order.buyerName}</td>
+          </tr>
+          <tr>
+            <td class="label-cell">Sales Rep:</td>
+            <td class="value-cell">${order.salesRep}</td>
+            <td class="label-cell">Customer Phone:</td>
+            <td class="value-cell">${order.customerPhone}</td>
+          </tr>
+          <tr>
+            <td class="label-cell">Customer Email:</td>
+            <td class="value-cell">${order.customerEmail}</td>
+            <td class="label-cell">Website:</td>
+            <td class="value-cell">${order.website}</td>
+          </tr>
+
+          <!-- Billing Address Section -->
+          <tr>
+            ${addressRows(order.billingAddress, 'Billing Address')}
+          </tr>
+
+          <!-- Shipping Address Section -->
+          <tr>
+            ${addressRows(order.shippingAddress, 'Shipping Address')}
+          </tr>
+
+          <!-- Order Information Section -->
+          <tr>
+            <td colspan="4" class="section-header">Order Information</td>
+          </tr>
+          <tr>
+            <td class="label-cell">Order Date:</td>
+            <td class="value-cell">${formatDate(order.orderDate)}</td>
+            <td class="label-cell">Order Amount:</td>
+            <td class="value-cell">${formatCurrency(order.orderAmount, order.currency)}</td>
+          </tr>
+          <tr>
+            <td class="label-cell">Customer PO #:</td>
+            <td class="value-cell">${order.customerPO}</td>
+            <td class="label-cell">Requested Ship Window:<br/><span class="date-format">(MM/dd/yyyy)</span></td>
+            <td class="value-cell">${formatShipWindow(order.shipStartDate, order.shipEndDate)}</td>
+          </tr>
+
+          <!-- Order Notes -->
+          ${
+            order.orderNotes
+              ? `
+          <tr>
+            <td class="label-cell">Order Notes & Payment Info:</td>
+            <td colspan="3" class="value-cell notes-cell">${order.orderNotes}</td>
+          </tr>
+          `
+              : ''
+          }
+        </tbody>
+      </table>
+
+      <!-- Order Details Header -->
+      <div class="order-details-header">
+        <h2>ORDER DETAILS</h2>
       </div>
 
-      <!-- Order Total -->
-      <div class="total-section">
-        <div class="total-row">
-          <span class="total-label">Order Total:</span>
-          <span class="total-value">${formatCurrency(order.orderAmount, order.currency)}</span>
-        </div>
-      </div>
+      <!-- Order Details Table -->
+      <table class="details-table">
+        <thead>
+          <tr>
+            <th class="image-header">Image</th>
+            <th class="sku-header">Sku</th>
+            <th class="size-header">Size</th>
+            <th class="qty-header">Quantity Ordered</th>
+            <th class="price-header">Price</th>
+            <th class="total-header">Total Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${itemRows}
+        </tbody>
+      </table>
 
-      ${order.orderNotes ? `
-      <!-- Order Notes -->
-      <div class="notes-section">
-        <h3>Order Notes</h3>
-        <p>${order.orderNotes}</p>
-      </div>
-      ` : ''}
-
-      <!-- Footer -->
-      <div class="confirmation-footer">
-        <p>Questions about your order? Contact your sales representative or email us at orders@myorderhub.com</p>
-        <p class="footer-date">Generated on ${formatDate(new Date())}</p>
+      <!-- Total Units -->
+      <div class="total-units">
+        Total # of Units: ${totalUnits}
       </div>
     </div>
 
     <style>
-      .confirmation-container {
+      .order-summary {
+        font-family: Arial, Helvetica, sans-serif;
+        font-size: 10pt;
+        color: #000;
         max-width: 100%;
-        padding: 0;
       }
 
-      .confirmation-header {
+      /* Header Banner */
+      .header-banner {
+        background-color: #FFB6C1;
+        text-align: center;
+        padding: 8px;
+        margin-bottom: 16px;
+      }
+
+      .header-banner h1 {
+        margin: 0;
+        font-size: 18pt;
+        font-weight: normal;
+        color: #000;
+      }
+
+      /* Company Header */
+      .company-header {
         display: flex;
         justify-content: space-between;
         align-items: flex-start;
-        padding-bottom: 20px;
-        border-bottom: 3px solid #171717;
-        margin-bottom: 24px;
-      }
-
-      .logo-section .logo {
-        font-size: 24pt;
-        font-weight: 700;
-        color: #171717;
-      }
-
-      .logo-section .tagline {
-        font-size: 9pt;
-        color: #666;
-        margin-top: 2px;
-      }
-
-      .order-info {
-        text-align: right;
-      }
-
-      .order-number {
-        font-size: 14pt;
-        font-weight: 600;
-        color: #171717;
-      }
-
-      .order-date {
-        font-size: 10pt;
-        color: #666;
-        margin-top: 4px;
-      }
-
-      .order-status {
-        display: inline-block;
-        margin-top: 8px;
-        padding: 4px 12px;
-        border-radius: 4px;
-        font-size: 9pt;
-        font-weight: 500;
-      }
-
-      .status-pending { background: #fef3c7; color: #92400e; }
-      .status-processing { background: #dbeafe; color: #1e40af; }
-      .status-shipped { background: #d1fae5; color: #065f46; }
-      .status-invoiced { background: #f3e8ff; color: #6b21a8; }
-
-      .thank-you-section {
-        text-align: center;
-        padding: 24px;
-        background: #f8fafc;
-        border-radius: 8px;
-        margin-bottom: 24px;
-      }
-
-      .thank-you-section h1 {
-        font-size: 18pt;
-        color: #16a34a;
-        margin-bottom: 8px;
-      }
-
-      .thank-you-section p {
-        font-size: 10pt;
-        color: #475569;
-      }
-
-      .details-grid {
-        display: flex;
-        gap: 24px;
-        margin-bottom: 24px;
-      }
-
-      .details-card {
-        flex: 1;
-        padding: 16px;
-        background: #f8fafc;
-        border-radius: 6px;
-      }
-
-      .details-card h3 {
-        font-size: 11pt;
-        font-weight: 600;
-        margin-bottom: 12px;
+        margin-bottom: 16px;
         padding-bottom: 8px;
-        border-bottom: 1px solid #e2e8f0;
       }
 
-      .detail-row {
+      .company-left {
         display: flex;
-        justify-content: space-between;
-        padding: 4px 0;
-        font-size: 9pt;
+        flex-direction: column;
       }
 
-      .detail-row .label {
-        color: #64748b;
-      }
-
-      .detail-row .value {
-        font-weight: 500;
-        color: #1e293b;
-      }
-
-      .items-section {
-        margin-bottom: 24px;
-      }
-
-      .items-section h3 {
-        font-size: 11pt;
-        font-weight: 600;
-        margin-bottom: 12px;
-      }
-
-      .items-table {
-        width: 100%;
-        border-collapse: collapse;
-      }
-
-      .items-table th {
-        background: #f1f5f9;
-        font-weight: 600;
-        font-size: 8pt;
-        text-align: left;
-        padding: 8px 10px;
-        border-bottom: 2px solid #e2e8f0;
-      }
-
-      .items-table td {
-        padding: 6px 10px;
-        font-size: 8pt;
-        border-bottom: 1px solid #e2e8f0;
-      }
-
-      .items-table .item-sku {
-        font-weight: 500;
-        font-size: 8pt;
-        white-space: nowrap;
-      }
-
-      .items-table .text-center { text-align: center; }
-      .items-table .text-right { text-align: right; }
-      .items-table .font-medium { font-weight: 500; }
-
-      .total-section {
-        text-align: right;
-        padding: 16px 0;
-        border-top: 2px solid #171717;
-      }
-
-      .total-row {
-        display: inline-flex;
-        gap: 24px;
-        align-items: center;
-      }
-
-      .total-label {
-        font-size: 10pt;
-        font-weight: 500;
-      }
-
-      .total-value {
-        font-size: 14pt;
-        font-weight: 700;
-        color: #171717;
-      }
-
-      .notes-section {
-        margin-top: 24px;
-        padding: 16px;
-        background: #fffbeb;
-        border-radius: 6px;
-        border-left: 4px solid #f59e0b;
-      }
-
-      .notes-section h3 {
-        font-size: 10pt;
-        font-weight: 600;
-        margin-bottom: 8px;
-      }
-
-      .notes-section p {
-        font-size: 9pt;
-        color: #78350f;
-        white-space: pre-wrap;
-      }
-
-      .confirmation-footer {
-        margin-top: 32px;
-        padding-top: 16px;
-        border-top: 1px solid #e2e8f0;
-        text-align: center;
-      }
-
-      .confirmation-footer p {
-        font-size: 8pt;
-        color: #64748b;
+      .company-logo {
+        max-height: 50px;
+        max-width: 200px;
         margin-bottom: 4px;
       }
 
-      .footer-date {
+      .company-name-text {
+        font-size: 24pt;
+        font-weight: bold;
         font-style: italic;
+        color: #000;
+        margin-bottom: 4px;
+      }
+
+      .company-address {
+        font-size: 9pt;
+        color: #333;
+        text-transform: uppercase;
+      }
+
+      .company-right {
+        text-align: right;
+        font-size: 9pt;
+      }
+
+      .contact-label {
+        font-weight: bold;
+        color: #666;
+      }
+
+      /* Info Table */
+      .info-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 16px;
+        border: 1px solid #000;
+      }
+
+      .info-table td {
+        border: 1px solid #000;
+        padding: 4px 8px;
+        vertical-align: top;
+      }
+
+      .order-number-cell {
+        text-align: center;
+        font-weight: bold;
+        background-color: #f5f5f5;
+        padding: 8px;
+      }
+
+      .section-header {
+        background-color: #f0f0f0;
+        font-weight: bold;
+        padding: 6px 8px;
+      }
+
+      .label-cell {
+        width: 15%;
+        font-weight: normal;
+        white-space: nowrap;
+      }
+
+      .value-cell {
+        width: 35%;
+      }
+
+      .notes-cell {
+        white-space: pre-wrap;
+      }
+
+      .date-format {
+        font-size: 8pt;
+        color: #666;
+      }
+
+      /* Order Details Header */
+      .order-details-header {
+        text-align: center;
+        margin: 16px 0;
+      }
+
+      .order-details-header h2 {
+        margin: 0;
+        font-size: 14pt;
+        font-weight: bold;
+      }
+
+      /* Details Table */
+      .details-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 8px;
+      }
+
+      .details-table th,
+      .details-table td {
+        border: 1px solid #000;
+        padding: 6px 8px;
+        vertical-align: top;
+      }
+
+      .details-table th {
+        background-color: #f5f5f5;
+        font-weight: bold;
+        text-align: center;
+        font-size: 9pt;
+      }
+
+      .image-header { width: 80px; }
+      .sku-header { width: auto; }
+      .size-header { width: 60px; }
+      .qty-header { width: 80px; }
+      .price-header { width: 70px; }
+      .total-header { width: 80px; }
+
+      .image-cell {
+        text-align: center;
+        vertical-align: middle;
+        width: 80px;
+      }
+
+      .product-image {
+        max-width: 70px;
+        max-height: 90px;
+        object-fit: contain;
+      }
+
+      .no-image {
+        width: 70px;
+        height: 70px;
+        background-color: #f0f0f0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 8pt;
+        color: #999;
+      }
+
+      .sku-cell {
+        vertical-align: top;
+      }
+
+      .sku-id {
+        font-weight: bold;
+        margin-bottom: 4px;
+      }
+
+      .sku-desc,
+      .sku-category {
+        font-size: 9pt;
+        color: #333;
+        margin-bottom: 2px;
+      }
+
+      .size-cell,
+      .qty-cell {
+        text-align: center;
+        vertical-align: middle;
+      }
+
+      .price-cell,
+      .total-cell {
+        text-align: right;
+        vertical-align: middle;
+      }
+
+      /* Total Units */
+      .total-units {
+        text-align: right;
+        font-weight: bold;
+        padding: 8px;
+        border: 1px solid #000;
+        border-top: none;
+      }
+
+      /* Print styles */
+      @media print {
+        body {
+          -webkit-print-color-adjust: exact;
+          print-color-adjust: exact;
+        }
+
+        .details-table {
+          page-break-inside: auto;
+        }
+
+        .details-table tr {
+          page-break-inside: avoid;
+        }
       }
     </style>
   `
 
-  return wrapHtml(content, `Order Confirmation - ${order.orderNumber}`)
+  return wrapHtml(content, `Order Summary - ${order.orderNumber}`)
 }
+
+// Export alias for backwards compatibility
+export const generateOrderConfirmationHtml = generateOrderSummaryHtml

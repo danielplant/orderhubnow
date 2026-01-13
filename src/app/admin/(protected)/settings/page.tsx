@@ -1,6 +1,6 @@
 import { auth } from '@/lib/auth/providers'
 import { redirect } from 'next/navigation'
-import { getInventorySettings } from '@/lib/data/queries/settings'
+import { getInventorySettings, getCompanySettings } from '@/lib/data/queries/settings'
 import { SettingsForm } from '@/components/admin/settings-form'
 
 export const dynamic = 'force-dynamic'
@@ -11,7 +11,10 @@ export default async function SettingsPage() {
     redirect('/admin/login')
   }
 
-  const settings = await getInventorySettings()
+  const [settings, companySettings] = await Promise.all([
+    getInventorySettings(),
+    getCompanySettings(),
+  ])
 
   return (
     <div className="space-y-6">
@@ -22,7 +25,7 @@ export default async function SettingsPage() {
         </p>
       </div>
 
-      <SettingsForm initial={settings} />
+      <SettingsForm initial={settings} companySettings={companySettings} />
     </div>
   )
 }

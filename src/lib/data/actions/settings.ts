@@ -2,7 +2,7 @@
 
 import { prisma } from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
-import type { ActionResult, InventorySettingsEditableFields } from '@/lib/types/settings'
+import type { ActionResult, InventorySettingsEditableFields, CompanySettingsEditableFields } from '@/lib/types/settings'
 
 /**
  * Parse a value that may be number or string to a valid number, or null.
@@ -86,10 +86,50 @@ export async function resizeSkuImages300x450(): Promise<ActionResult> {
 /**
  * Minimize/recompress big images.
  * .NET ResizeBigImages() in InventorySettings.aspx.cs.
- * 
+ *
  * Same limitation as above - placeholder for now.
  */
 export async function minimizeBigImages(): Promise<ActionResult> {
   // Placeholder until storage + image processing is defined
   return bumpImageRefreshCounter()
+}
+
+/**
+ * Update company settings for PDF generation.
+ */
+export async function updateCompanySettings(
+  input: CompanySettingsEditableFields
+): Promise<ActionResult> {
+  try {
+    if (!input.CompanyName || input.CompanyName.trim().length === 0) {
+      return { success: false, error: 'Company name is required' }
+    }
+
+    const existing = await prisma.companySettings.findFirst()
+
+    const data = {
+      CompanyName: input.CompanyName.trim(),
+      AddressLine1: input.AddressLine1?.trim() || null,
+      AddressLine2: input.AddressLine2?.trim() || null,
+      Phone: input.Phone?.trim() || null,
+      Fax: input.Fax?.trim() || null,
+      Email: input.Email?.trim() || null,
+      Website: input.Website?.trim() || null,
+      LogoUrl: input.LogoUrl?.trim() || null,
+    }
+
+    if (existing) {
+      await prisma.companySettings.update({
+        where: { ID: existing.ID },
+        data,
+      })
+    } else {
+      await prisma.companySettings.create({ data })
+    }
+
+    revalidatePath('/admin/settings')
+    return { success: true, message: 'Company settings have been updated successfully.' }
+  } catch {
+    return { success: false, error: 'Sorry, there was an error, please try again.' }
+  }
 }
