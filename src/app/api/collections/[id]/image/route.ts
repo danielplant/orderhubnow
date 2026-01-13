@@ -1,6 +1,5 @@
-import { mkdir, writeFile, unlink } from 'node:fs/promises'
-import path from 'node:path'
 import { prisma } from '@/lib/prisma'
+import { uploadToS3, deleteFromS3, getKeyFromS3Url } from '@/lib/s3'
 
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
   try {
@@ -27,15 +26,13 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     const bytes = await file.arrayBuffer()
     const buffer = Buffer.from(bytes)
 
-    // Store in same location as category images for compatibility
-    const dir = path.join(process.cwd(), 'public', 'SkuImages')
-    await mkdir(dir, { recursive: true })
+    // Determine content type
+    const contentType = file.type || 'image/jpeg'
+    const extension = contentType.split('/')[1] || 'jpg'
 
-    const filename = `collection-${collectionId}.jpg`
-    const out = path.join(dir, filename)
-    await writeFile(out, buffer)
-
-    const imageUrl = `/SkuImages/${filename}`
+    // Upload to S3
+    const key = `uploads/collections/collection-${collectionId}.${extension}`
+    const imageUrl = await uploadToS3(buffer, key, contentType)
 
     // Update collection with new image URL
     await prisma.collection.update({
@@ -44,7 +41,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     })
 
     return Response.json({ success: true, imageUrl })
-  } catch {
+  } catch (error) {
+    console.error('Failed to upload collection image:', error)
     return Response.json({ error: 'Failed to upload image' }, { status: 500 })
   }
 }
@@ -64,14 +62,13 @@ export async function DELETE(_: Request, ctx: { params: Promise<{ id: string }> 
     })
 
     if (collection?.imageUrl) {
-      // Extract filename from URL
-      const filename = collection.imageUrl.split('/').pop()
-      if (filename) {
-        const out = path.join(process.cwd(), 'public', 'SkuImages', filename)
+      // Extract S3 key from URL and delete
+      const key = getKeyFromS3Url(collection.imageUrl)
+      if (key) {
         try {
-          await unlink(out)
+          await deleteFromS3(key)
         } catch {
-          // Ignore if file doesn't exist
+          // Ignore if file doesn't exist in S3
         }
       }
     }
@@ -83,7 +80,8 @@ export async function DELETE(_: Request, ctx: { params: Promise<{ id: string }> 
     })
 
     return Response.json({ success: true })
-  } catch {
+  } catch (error) {
+    console.error('Failed to delete collection image:', error)
     return Response.json({ error: 'Failed to delete image' }, { status: 500 })
   }
 }

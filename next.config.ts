@@ -12,6 +12,10 @@ const nextConfig: NextConfig = {
         protocol: 'http',
         hostname: 'inventory.limeapple.ca',
       },
+      {
+        protocol: 'https',
+        hostname: 'orderhub-uploads.s3.us-east-2.amazonaws.com',
+      },
     ],
   },
   async rewrites() {
