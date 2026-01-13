@@ -37,8 +37,8 @@ export async function GET(request: NextRequest) {
     const searchParams = Object.fromEntries(request.nextUrl.searchParams.entries())
     const tab = getString(searchParams.tab) ?? 'all'
     const q = getString(searchParams.q)
-    const categoryIdStr = getString(searchParams.categoryId)
-    const categoryId = categoryIdStr ? parseInt(categoryIdStr, 10) : undefined
+    const collectionIdStr = getString(searchParams.collectionId)
+    const collectionId = collectionIdStr ? parseInt(collectionIdStr, 10) : undefined
 
     // Build where clause
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -52,8 +52,8 @@ export async function GET(request: NextRequest) {
       ]
     }
 
-    if (typeof categoryId === 'number' && Number.isFinite(categoryId)) {
-      where.CategoryID = categoryId
+    if (typeof collectionId === 'number' && Number.isFinite(collectionId)) {
+      where.CollectionID = collectionId
     }
 
     // Tab filter
@@ -74,7 +74,7 @@ export async function GET(request: NextRequest) {
         Description: true,
         OrderEntryDescription: true,
         SkuColor: true,
-        CategoryID: true,
+        CollectionID: true,
         ShowInPreOrder: true,
         Quantity: true,
         OnRoute: true,
@@ -83,14 +83,14 @@ export async function GET(request: NextRequest) {
       },
     })
 
-    // Get category name if filtered
-    let categoryName: string | null = null
-    if (categoryId) {
-      const category = await prisma.skuCategories.findUnique({
-        where: { ID: categoryId },
-        select: { Name: true },
+    // Get collection name if filtered
+    let collectionName: string | null = null
+    if (collectionId) {
+      const collection = await prisma.collection.findUnique({
+        where: { id: collectionId },
+        select: { name: true },
       })
-      categoryName = category?.Name ?? null
+      collectionName = collection?.name ?? null
     }
 
     // Calculate summary stats
@@ -103,7 +103,7 @@ export async function GET(request: NextRequest) {
       totalProducts,
       totalQuantity,
       totalOnRoute,
-      categoryName,
+      collectionName,
       tab,
     })
 
@@ -153,7 +153,7 @@ function generateProductsPdfHtml(
     totalProducts: number
     totalQuantity: number
     totalOnRoute: number
-    categoryName: string | null
+    collectionName: string | null
     tab: string
   }
 ): string {
@@ -181,8 +181,8 @@ function generateProductsPdfHtml(
     })
     .join('')
 
-  const subtitle = summary.categoryName
-    ? `Category: ${summary.categoryName}`
+  const subtitle = summary.collectionName
+    ? `Collection: ${summary.collectionName}`
     : summary.tab === 'ats'
       ? 'Available to Ship'
       : summary.tab === 'preorder'

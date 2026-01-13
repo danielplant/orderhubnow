@@ -37,43 +37,45 @@ export interface InventoryListResult {
 // ============================================================================
 
 /**
- * Get inventory metrics for ATS and PreOrder categories
+ * Get inventory metrics for ATS and PreOrder collections
  */
 export async function getInventoryMetrics(): Promise<DashboardMetrics> {
-  // Get ATS categories with SKU counts
-  const atsCategories = await prisma.skuCategories.findMany({
-    where: { 
-      IsPreOrder: false 
+  // Get ATS collections with SKU counts (only active, visible collections)
+  const atsCollections = await prisma.collection.findMany({
+    where: {
+      type: 'ATS',
+      isActive: true,
     },
     include: {
       _count: {
-        select: { Sku: true }
+        select: { skus: true }
       }
     },
-    orderBy: { SortOrder: 'asc' }
+    orderBy: { sortOrder: 'asc' }
   })
 
-  // Get PreOrder categories with SKU counts
-  const preOrderCategories = await prisma.skuCategories.findMany({
-    where: { 
-      IsPreOrder: true 
+  // Get PreOrder collections with SKU counts (only active, visible collections)
+  const preOrderCollections = await prisma.collection.findMany({
+    where: {
+      type: 'PreOrder',
+      isActive: true,
     },
     include: {
       _count: {
-        select: { Sku: true }
+        select: { skus: true }
       }
     },
-    orderBy: { SortOrder: 'asc' }
+    orderBy: { sortOrder: 'asc' }
   })
 
   // Transform to CategoryMetric format
-  const mapToMetric = (cat: { Name: string; _count: { Sku: number } }): CategoryMetric => ({
-    name: cat.Name,
-    count: cat._count.Sku
+  const mapToMetric = (col: { name: string; _count: { skus: number } }): CategoryMetric => ({
+    name: col.name,
+    count: col._count.skus
   })
 
-  const atsMetrics = atsCategories.map(mapToMetric).filter(c => c.count > 0)
-  const preOrderMetrics = preOrderCategories.map(mapToMetric).filter(c => c.count > 0)
+  const atsMetrics = atsCollections.map(mapToMetric).filter(c => c.count > 0)
+  const preOrderMetrics = preOrderCollections.map(mapToMetric).filter(c => c.count > 0)
 
   return {
     ats: {

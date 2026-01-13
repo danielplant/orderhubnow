@@ -39,8 +39,8 @@ export async function GET(request: NextRequest) {
     const searchParams = Object.fromEntries(request.nextUrl.searchParams.entries())
     const tab = getString(searchParams.tab) ?? 'all'
     const q = getString(searchParams.q)
-    const categoryIdStr = getString(searchParams.categoryId)
-    const categoryId = categoryIdStr ? parseInt(categoryIdStr, 10) : undefined
+    const collectionIdStr = getString(searchParams.collectionId)
+    const collectionId = collectionIdStr ? parseInt(collectionIdStr, 10) : undefined
 
     // Build where clause
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -54,8 +54,8 @@ export async function GET(request: NextRequest) {
       ]
     }
 
-    if (typeof categoryId === 'number' && Number.isFinite(categoryId)) {
-      where.CategoryID = categoryId
+    if (typeof collectionId === 'number' && Number.isFinite(collectionId)) {
+      where.CollectionID = collectionId
     }
 
     // Tab filter
@@ -76,7 +76,6 @@ export async function GET(request: NextRequest) {
         OrderEntryDescription: true,
         SkuColor: true,
         FabricContent: true,
-        CategoryID: true,
         ShowInPreOrder: true,
         Quantity: true,
         OnRoute: true,
@@ -86,8 +85,9 @@ export async function GET(request: NextRequest) {
         MSRPUSD: true,
         ShopifyImageURL: true,
         ThumbnailPath: true,
-        SkuCategories: {
-          select: { Name: true },
+        CollectionID: true,
+        Collection: {
+          select: { name: true },
         },
       },
     })
@@ -156,7 +156,7 @@ export async function GET(request: NextRequest) {
         onRoute: sku.OnRoute ?? 0,
         wholesalePrice,
         retailPrice,
-        collection: sku.SkuCategories?.Name ?? '',
+        collection: sku.Collection?.name ?? '',
         status: sku.ShowInPreOrder ? 'Pre-Order' : 'ATS',
       })
 
