@@ -64,16 +64,47 @@ export async function GET(
     console.log('Order items count:', orderItems.length)
 
     // Fetch SKU details for each order item (image, size, description, category)
+    // Order items may have prefixes (e.g., "DU92PC-582P-GH-7/8") that don't exist in Sku table ("582P-GH-7/8")
+    // So we need to try multiple matching strategies
     const skuIds = orderItems.map((item) => item.SKU).filter(Boolean)
+
+    // Build a list of potential SKU IDs to search for (exact + normalized versions)
+    const potentialSkuIds = new Set<string>()
+    const skuNormalizationMap = new Map<string, string>() // normalized -> original order item SKU
+
+    for (const orderSkuId of skuIds) {
+      // Add exact match
+      potentialSkuIds.add(orderSkuId)
+
+      // Try stripping common prefixes (DU9, 2PC-, etc.)
+      // Pattern: often has format like "DU92PC-582P-GH-7/8" where "582P-GH-7/8" is the Sku table ID
+      const parts = orderSkuId.split('-')
+      for (let i = 0; i < parts.length; i++) {
+        const suffix = parts.slice(i).join('-')
+        if (suffix && suffix !== orderSkuId) {
+          potentialSkuIds.add(suffix)
+          skuNormalizationMap.set(suffix, orderSkuId)
+        }
+      }
+    }
+
     const skus = await prisma.sku.findMany({
-      where: { SkuID: { in: skuIds } },
+      where: { SkuID: { in: Array.from(potentialSkuIds) } },
       include: {
         SkuCategories: true,
       },
     })
 
-    // Create a map for quick SKU lookup
-    const skuMap = new Map(skus.map((sku) => [sku.SkuID, sku]))
+    // Create a map for quick SKU lookup - map both exact and normalized versions
+    const skuMap = new Map<string, typeof skus[0]>()
+    for (const sku of skus) {
+      skuMap.set(sku.SkuID, sku)
+      // If this SKU ID was a normalized version, also map the original order item SKU
+      const originalOrderSku = skuNormalizationMap.get(sku.SkuID)
+      if (originalOrderSku) {
+        skuMap.set(originalOrderSku, sku)
+      }
+    }
 
     // Fetch company settings
     const companySettings = await getCompanySettings()
