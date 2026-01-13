@@ -1,13 +1,15 @@
 /**
  * Products Export API - XLSX generation with thumbnails
  * Columns: Image | SKU | Color | Description | Material | Available | On Route | Wholesale Price | Retail Price | Collection | Status
+ *
+ * Groups SKUs by baseSku, sorts by size within each group, shows image only on first row of each group.
  */
 
 import { NextRequest, NextResponse } from 'next/server'
 import ExcelJS from 'exceljs'
 import { auth } from '@/lib/auth/providers'
 import { prisma } from '@/lib/prisma'
-import { parsePrice } from '@/lib/utils'
+import { parsePrice, parseSkuId } from '@/lib/utils'
 import { readThumbnail, fetchThumbnail } from '@/lib/utils/thumbnails'
 
 // ============================================================================
@@ -20,8 +22,26 @@ function getString(value: unknown): string | undefined {
   return t || undefined
 }
 
-const THUMBNAIL_SIZE = 100
-const ROW_HEIGHT = 80
+/**
+ * Generate a sort key for sizes to match .NET ordering:
+ * - "a" prefix: sizes like 2/3, 4/5 (single digit before slash)
+ * - "b" prefix: sizes like 10/12, 14/16 (double digit before slash)
+ * - "c" prefix: other sizes (XS, S, M, L, etc.)
+ */
+function getSizeSortKey(size: string): string {
+  if (size.includes('/')) {
+    const firstPart = size.split('/')[0]
+    if (firstPart.length < 2) {
+      return 'a' + size // Single digit: 2/3, 4/5, 6/6X, 7/8
+    } else {
+      return 'b' + size // Double digit: 10/12, 14/16
+    }
+  }
+  return 'c' + size // Other: XS, S, M, L, XL, etc.
+}
+
+const THUMBNAIL_SIZE = 120
+const ROW_HEIGHT = 95
 
 // ============================================================================
 // Main Handler
@@ -66,9 +86,8 @@ export async function GET(request: NextRequest) {
     }
 
     // Fetch SKUs with all required fields including category name
-    const skus = await prisma.sku.findMany({
+    const rawSkus = await prisma.sku.findMany({
       where,
-      orderBy: { SkuID: 'asc' },
       select: {
         ID: true,
         SkuID: true,
@@ -92,6 +111,35 @@ export async function GET(request: NextRequest) {
       },
     })
 
+    // Parse each SKU to get baseSku and size, then group by baseSku
+    const skusWithParsed = rawSkus.map((sku) => {
+      const { baseSku, parsedSize } = parseSkuId(sku.SkuID)
+      return { ...sku, baseSku, parsedSize }
+    })
+
+    // Group by baseSku
+    const grouped = new Map<string, typeof skusWithParsed>()
+    for (const sku of skusWithParsed) {
+      if (!grouped.has(sku.baseSku)) {
+        grouped.set(sku.baseSku, [])
+      }
+      grouped.get(sku.baseSku)!.push(sku)
+    }
+
+    // Sort each group by size, then flatten with first-of-group flag
+    const skus: Array<typeof skusWithParsed[0] & { isFirstInGroup: boolean }> = []
+    const sortedBaseSkus = Array.from(grouped.keys()).sort()
+
+    for (const baseSku of sortedBaseSkus) {
+      const group = grouped.get(baseSku)!
+      // Sort by size using the .NET-style sort key
+      group.sort((a, b) => getSizeSortKey(a.parsedSize).localeCompare(getSizeSortKey(b.parsedSize)))
+      // Add to final array with first-of-group flag
+      group.forEach((sku, idx) => {
+        skus.push({ ...sku, isFirstInGroup: idx === 0 })
+      })
+    }
+
     // Create workbook
     const workbook = new ExcelJS.Workbook()
     workbook.creator = 'MyOrderHub'
@@ -101,7 +149,7 @@ export async function GET(request: NextRequest) {
 
     // Headers: Image | SKU | Color | Description | Material | Available | On Route | Wholesale Price | Retail Price | Collection | Status
     sheet.columns = [
-      { header: 'Image', key: 'image', width: 14 },
+      { header: 'Image', key: 'image', width: 18 },
       { header: 'SKU', key: 'sku', width: 25 },
       { header: 'Color', key: 'color', width: 15 },
       { header: 'Description', key: 'description', width: 45 },
@@ -164,30 +212,32 @@ export async function GET(request: NextRequest) {
       row.height = ROW_HEIGHT
       row.alignment = { vertical: 'middle' }
 
-      // Add thumbnail image if available (prefer local, fallback to fetch)
-      let thumbnailBuffer: Buffer | null = null
-      
-      // Try to read pre-generated thumbnail from disk
-      if (sku.ThumbnailPath) {
-        thumbnailBuffer = readThumbnail(sku.SkuID)
-      }
-      
-      // Fallback: fetch from Shopify URL if no local thumbnail
-      if (!thumbnailBuffer && sku.ShopifyImageURL) {
-        thumbnailBuffer = await fetchThumbnail(sku.ShopifyImageURL)
-      }
-      
-      if (thumbnailBuffer) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const imageId = workbook.addImage({
-          buffer: thumbnailBuffer as any,
-          extension: 'png',
-        })
+      // Add thumbnail image only for first row of each baseSku group
+      if (sku.isFirstInGroup) {
+        let thumbnailBuffer: Buffer | null = null
 
-        sheet.addImage(imageId, {
-          tl: { col: 0, row: rowIndex - 1 },
-          ext: { width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE },
-        })
+        // Try to read pre-generated thumbnail from disk
+        if (sku.ThumbnailPath) {
+          thumbnailBuffer = readThumbnail(sku.SkuID)
+        }
+
+        // Fallback: fetch from Shopify URL if no local thumbnail
+        if (!thumbnailBuffer && sku.ShopifyImageURL) {
+          thumbnailBuffer = await fetchThumbnail(sku.ShopifyImageURL)
+        }
+
+        if (thumbnailBuffer) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const imageId = workbook.addImage({
+            buffer: thumbnailBuffer as any,
+            extension: 'png',
+          })
+
+          sheet.addImage(imageId, {
+            tl: { col: 0, row: rowIndex - 1 },
+            ext: { width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE },
+          })
+        }
       }
     }
 

@@ -75,7 +75,7 @@ export function OrderForm({
   repContext = null,
 }: OrderFormProps) {
   const router = useRouter()
-  const { clearAll, getPreOrderShipWindow, formData: draftFormData, setFormData, isLoadingDraft } = useOrder()
+  const { clearDraft, getPreOrderShipWindow, formData: draftFormData, setFormData, isLoadingDraft } = useOrder()
   const [isPending, startTransition] = useTransition()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const formSyncRef = useRef<NodeJS.Timeout | null>(null)
@@ -443,7 +443,7 @@ export function OrderForm({
           })
 
           if (result.success && result.orderId) {
-            clearAll() // Clear cart
+            await clearDraft() // Clear cart and draft completely
             toast.success(`Order ${result.orderNumber} created successfully!`)
             
             // For rep-created orders, redirect back to rep portal if returnTo is valid
