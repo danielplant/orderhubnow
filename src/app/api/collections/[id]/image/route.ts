@@ -2,10 +2,14 @@ import { prisma } from '@/lib/prisma'
 import { uploadToS3, deleteFromS3, getKeyFromS3Url } from '@/lib/s3'
 
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
+  console.log('[S3 Upload] Starting collection image upload...')
   try {
     const { id } = await ctx.params
     const collectionId = parseInt(id)
+    console.log('[S3 Upload] Collection ID:', collectionId)
+
     if (Number.isNaN(collectionId)) {
+      console.log('[S3 Upload] Invalid collection ID')
       return Response.json({ error: 'Invalid id' }, { status: 400 })
     }
 
@@ -14,14 +18,18 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       where: { id: collectionId },
     })
     if (!collection) {
+      console.log('[S3 Upload] Collection not found')
       return Response.json({ error: 'Collection not found' }, { status: 404 })
     }
 
     const form = await req.formData()
     const file = form.get('file')
     if (!(file instanceof File)) {
+      console.log('[S3 Upload] No file in request')
       return Response.json({ error: 'Missing file' }, { status: 400 })
     }
+
+    console.log('[S3 Upload] File received:', file.name, file.type, file.size, 'bytes')
 
     const bytes = await file.arrayBuffer()
     const buffer = Buffer.from(bytes)
@@ -32,7 +40,10 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
 
     // Upload to S3
     const key = `uploads/collections/collection-${collectionId}.${extension}`
+    console.log('[S3 Upload] Uploading to S3:', key)
+
     const imageUrl = await uploadToS3(buffer, key, contentType)
+    console.log('[S3 Upload] Success! URL:', imageUrl)
 
     // Update collection with new image URL
     await prisma.collection.update({
@@ -42,7 +53,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
 
     return Response.json({ success: true, imageUrl })
   } catch (error) {
-    console.error('Failed to upload collection image:', error)
+    console.error('[S3 Upload] ERROR:', error)
     return Response.json({ error: 'Failed to upload image' }, { status: 500 })
   }
 }
