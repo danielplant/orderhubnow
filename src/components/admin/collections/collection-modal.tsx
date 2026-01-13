@@ -130,7 +130,11 @@ export function CollectionModal({
           })
 
           if (!imgRes.ok) {
-            console.error('Failed to upload image')
+            if (imgRes.status === 413) {
+              throw new Error('Image is too large. Please use an image under 5MB.')
+            }
+            const imgData = await imgRes.json().catch(() => ({}))
+            throw new Error(imgData.error || 'Failed to upload image')
           }
         }
 
