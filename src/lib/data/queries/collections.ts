@@ -399,14 +399,13 @@ export async function getSkusByCollection(collectionId: number): Promise<Product
 }
 
 /**
- * Get PreOrder products by collection ID with OnRoute quantities
+ * Get PreOrder products by collection ID (line sheet/catalog - no stock filter)
  */
 export async function getPreOrderProductsByCollection(collectionId: number): Promise<Product[]> {
   const skus = await prisma.sku.findMany({
     where: {
       CollectionID: collectionId,
       ShowInPreOrder: true,
-      OnRoute: { gt: 0 },
     },
     orderBy: [
       { DisplayPriority: 'asc' },
