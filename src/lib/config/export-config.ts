@@ -50,8 +50,8 @@ export const EXPORT_STYLING: ExportStyleConfig = {
     alternateRowBg: null, // No zebra striping
   },
   groupSeparator: {
-    borderStyle: 'thick',
-    borderColor: 'FFD1D5DB', // Light gray
+    borderStyle: 'medium',
+    borderColor: 'FF9CA3AF', // Darker gray for visibility
   },
 }
 

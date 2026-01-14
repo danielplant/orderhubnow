@@ -44,12 +44,12 @@ function getString(value: unknown): string | undefined {
 function formatPrice(priceCAD: number, priceUSD: number, mode: CurrencyMode): string {
   switch (mode) {
     case 'USD':
-      return priceUSD > 0 ? `$${priceUSD.toFixed(2)}` : ''
+      return priceUSD > 0 ? `USD $${priceUSD.toFixed(2)}` : ''
     case 'CAD':
-      return priceCAD > 0 ? `$${priceCAD.toFixed(2)}` : ''
+      return priceCAD > 0 ? `CAD $${priceCAD.toFixed(2)}` : ''
     case 'BOTH':
       if (priceCAD > 0 || priceUSD > 0) {
-        return `$${priceCAD.toFixed(2)} / $${priceUSD.toFixed(2)}`
+        return `CAD $${priceCAD.toFixed(2)} / USD $${priceUSD.toFixed(2)}`
       }
       return ''
   }
@@ -265,10 +265,36 @@ export async function GET(request: NextRequest) {
         bold: EXPORT_STYLING.dataRows.font.bold,
       }
 
-      // Set alignment - first row vertical top (for wrapped text), others bottom
+      // Set alignment - all rows bottom-aligned, first row has text wrapping
       row.alignment = {
-        vertical: sku.isFirstInGroup ? 'top' : 'bottom',
+        vertical: 'bottom',
         wrapText: sku.isFirstInGroup, // Enable text wrapping on first row
+      }
+
+      // Add thin borders to all cells and right-align numeric columns
+      row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+        cell.border = {
+          top: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+          left: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+          bottom: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+          right: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+        }
+
+        // Right-align numeric columns: Available (8), On Route (9), Qty (13)
+        if ([8, 9, 13].includes(colNumber)) {
+          cell.alignment = { ...cell.alignment, horizontal: 'right' }
+        }
+      })
+
+      // Zebra striping - light gray on non-first rows (alternating)
+      if (!sku.isFirstInGroup && i % 2 === 1) {
+        row.eachCell({ includeEmpty: true }, (cell) => {
+          cell.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: 'FFF9FAFB' }, // Very light gray
+          }
+        })
       }
 
       // Add thick border separator at bottom of last row in each group
