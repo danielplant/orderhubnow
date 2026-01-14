@@ -10,6 +10,7 @@ import { auth } from '@/lib/auth/providers'
 import { prisma } from '@/lib/prisma'
 import { formatCurrency } from '@/lib/utils'
 import { parseOrdersListInput } from '@/lib/data/queries/orders'
+import { extractSize } from '@/lib/utils/size-sort'
 import type { OrderStatus } from '@/lib/types/order'
 
 // ============================================================================
@@ -305,6 +306,14 @@ async function generateQBExport(orders: OrderForExport[]): Promise<ExcelJS.Buffe
     },
   })
 
+  // Get all unique SKUs to fetch Size from Sku table
+  const uniqueSkus = [...new Set(items.map((i) => i.SKU).filter(Boolean))]
+  const skuData = await prisma.sku.findMany({
+    where: { SkuID: { in: uniqueSkus } },
+    select: { SkuID: true, Size: true },
+  })
+  const skuSizeMap = new Map(skuData.map((s) => [s.SkuID, s.Size || '']))
+
   // Create lookup map
   const itemsByOrderId = items.reduce(
     (acc, item) => {
@@ -359,8 +368,8 @@ async function generateQBExport(orders: OrderForExport[]): Promise<ExcelJS.Buffe
     const isUS = order.Country?.toUpperCase().includes('US')
 
     for (const item of orderItems) {
-      // Parse size from SKU (matches .NET logic)
-      const size = parseSizeFromSku(item.SKU)
+      // Get size from Sku table (canonical source)
+      const size = extractSize(skuSizeMap.get(item.SKU) || '')
 
       sheet.addRow({
         brand: 'Limeapple',
@@ -386,22 +395,6 @@ async function generateQBExport(orders: OrderForExport[]): Promise<ExcelJS.Buffe
   }
 
   return await workbook.xlsx.writeBuffer()
-}
-
-/**
- * Parse size from SKU string.
- * Matches .NET logic: last segment after splitting by '-'
- * Examples:
- *   A-1234-BLU-4 → "4"
- *   A-PP3-1234-BLU-O/S → "O/S"
- */
-function parseSizeFromSku(sku: string): string {
-  if (!sku) return ''
-  const parts = sku.split('-')
-  if (parts.length < 3) return ''
-  const lastPart = parts[parts.length - 1]
-  // Return as-is (could be "4", "6", "O/S", etc.)
-  return lastPart || ''
 }
 
 // Stubs for other methods

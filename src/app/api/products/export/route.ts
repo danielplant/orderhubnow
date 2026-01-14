@@ -11,6 +11,7 @@ import { auth } from '@/lib/auth/providers'
 import { prisma } from '@/lib/prisma'
 import { parsePrice, parseSkuId, resolveColor } from '@/lib/utils'
 import { readThumbnail, fetchThumbnail } from '@/lib/utils/thumbnails'
+import { extractSize } from '@/lib/utils/size-sort'
 
 // ============================================================================
 // Helpers
@@ -105,6 +106,7 @@ export async function GET(request: NextRequest) {
         ShopifyImageURL: true,
         ThumbnailPath: true,
         CollectionID: true,
+        Size: true,
         Collection: {
           select: { name: true },
         },
@@ -113,8 +115,9 @@ export async function GET(request: NextRequest) {
 
     // Parse each SKU to get baseSku and size, then group by baseSku
     const skusWithParsed = rawSkus.map((sku) => {
-      const { baseSku, parsedSize } = parseSkuId(sku.SkuID)
-      return { ...sku, baseSku, parsedSize }
+      const { baseSku } = parseSkuId(sku.SkuID)
+      const size = extractSize(sku.Size || '')
+      return { ...sku, baseSku, size }
     })
 
     // Group by baseSku
@@ -133,7 +136,7 @@ export async function GET(request: NextRequest) {
     for (const baseSku of sortedBaseSkus) {
       const group = grouped.get(baseSku)!
       // Sort by size using the .NET-style sort key
-      group.sort((a, b) => getSizeSortKey(a.parsedSize).localeCompare(getSizeSortKey(b.parsedSize)))
+      group.sort((a, b) => getSizeSortKey(a.size).localeCompare(getSizeSortKey(b.size)))
       // Add to final array with first-of-group flag
       group.forEach((sku, idx) => {
         skus.push({ ...sku, isFirstInGroup: idx === 0 })

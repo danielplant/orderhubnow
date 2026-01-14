@@ -542,6 +542,44 @@ export async function updateOrder(
     revalidatePath('/admin/orders')
     revalidatePath('/rep/orders')
 
+    // Look up the rep name for email
+    const repForEmail = await prisma.reps.findUnique({
+      where: { ID: parseInt(headerData.salesRepId) },
+      select: { Name: true },
+    })
+    const salesRepName = repForEmail?.Name ?? ''
+
+    // Send update notification emails (async, non-blocking)
+    // Email settings control whether update notifications are actually sent
+    const currency = headerData.currency.toUpperCase().includes('CAD') ? 'CAD' : 'USD' as 'CAD' | 'USD'
+    sendOrderEmails(
+      {
+        orderId: orderId,
+        orderNumber: existingOrder.OrderNumber,
+        storeName: headerData.storeName,
+        buyerName: headerData.buyerName,
+        customerEmail: headerData.customerEmail,
+        customerPhone: headerData.customerPhone,
+        salesRep: salesRepName,
+        orderAmount: orderAmount,
+        currency: currency,
+        shipStartDate: new Date(headerData.shipStartDate),
+        shipEndDate: new Date(headerData.shipEndDate),
+        orderDate: new Date(), // Use current date for updates
+        orderNotes: headerData.orderNotes ?? '',
+        customerPO: headerData.customerPO ?? '',
+        items: items.map((item) => ({
+          sku: item.sku,
+          quantity: item.quantity,
+          price: item.price,
+          lineTotal: item.price * item.quantity,
+        })),
+      },
+      true // isUpdate = true
+    ).catch((err) => {
+      console.error('Failed to send order update emails:', err)
+    })
+
     return {
       success: true,
       orderNumber: existingOrder.OrderNumber,

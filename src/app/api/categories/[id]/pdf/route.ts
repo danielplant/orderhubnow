@@ -15,6 +15,7 @@ import { auth } from '@/lib/auth/providers'
 import { prisma } from '@/lib/prisma'
 import { generatePdf, wrapHtml, formatDate } from '@/lib/pdf/generate'
 import { getEffectiveQuantity, parsePrice, parseSkuId } from '@/lib/utils'
+import { extractSize } from '@/lib/utils/size-sort'
 
 // ============================================================================
 // Types
@@ -79,6 +80,7 @@ export async function GET(
         OnRoute: true,
         PriceCAD: true,
         PriceUSD: true,
+        Size: true,
       },
     })
 
@@ -86,7 +88,8 @@ export async function GET(
     const productMap = new Map<string, ProductForLineSheet>()
 
     for (const sku of skus) {
-      const { baseSku, parsedSize } = parseSkuId(sku.SkuID)
+      const { baseSku } = parseSkuId(sku.SkuID)
+      const size = extractSize(sku.Size || '')
       const qty = sku.Quantity ?? 0
       const effectiveQty = getEffectiveQuantity(sku.SkuID, qty)
 
@@ -103,7 +106,7 @@ export async function GET(
 
       const product = productMap.get(baseSku)!
       product.sizes.push({
-        size: parsedSize ?? '—',
+        size: size || '—',
         quantity: qty,
         effectiveQty,
         onRoute: sku.OnRoute ?? 0,

@@ -1,11 +1,11 @@
 import { prisma } from '@/lib/prisma'
 import { parsePrice, parseSkuId } from '@/lib/utils'
-import { sortBySize } from '@/lib/utils/size-sort'
+import { sortBySize, extractSize } from '@/lib/utils/size-sort'
 import type { Product, ProductVariant } from '@/lib/types'
 
 /**
  * Get SKUs by category ID, grouped into Products
- * Uses parseSkuId() to extract BaseSku and ParsedSize from SkuID (matching .NET logic)
+ * Uses sku.Size field (from Shopify selectedOptions) as canonical size source
  */
 export async function getSkusByCategory(categoryId: number): Promise<Product[]> {
   const skus = await prisma.sku.findMany({
@@ -26,11 +26,12 @@ export async function getSkusByCategory(categoryId: number): Promise<Product[]> 
   // Group SKUs by BaseSku + ImageURL to split cards when images differ
   // This handles cases where Kids and Ladies variants share the same SKU prefix
   // but have different product images (e.g., 600C-BLK kids vs 600C-BLK ladies)
-  const grouped = new Map<string, Array<typeof skus[0] & { baseSku: string; parsedSize: string }>>()
+  const grouped = new Map<string, Array<typeof skus[0] & { baseSku: string; size: string }>>()
 
   for (const sku of skus) {
-    const { baseSku, parsedSize } = parseSkuId(sku.SkuID)
-    const skuWithParsed = { ...sku, baseSku, parsedSize }
+    const { baseSku } = parseSkuId(sku.SkuID)
+    const size = extractSize(sku.Size || '')
+    const skuWithParsed = { ...sku, baseSku, size }
 
     // Use composite key: baseSku + image URL
     const imageUrl = sku.ShopifyImageURL ?? ''
@@ -52,7 +53,7 @@ export async function getSkusByCategory(categoryId: number): Promise<Product[]> 
     // Map variants and sort by size using Limeapple's specific size sequence
     const variants: ProductVariant[] = sortBySize(
       skuGroup.map(sku => ({
-        size: sku.parsedSize,
+        size: sku.size,
         sku: sku.SkuID,
         available: sku.Quantity ?? 0,
         onRoute: sku.OnRoute ?? 0,

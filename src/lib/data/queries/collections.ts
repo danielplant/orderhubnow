@@ -1,6 +1,6 @@
 import { prisma } from '@/lib/prisma'
 import { parsePrice, parseSkuId } from '@/lib/utils'
-import { sortBySize } from '@/lib/utils/size-sort'
+import { sortBySize, extractSize } from '@/lib/utils/size-sort'
 import type { Product, ProductVariant } from '@/lib/types'
 import type {
   Collection,
@@ -346,11 +346,12 @@ export async function getSkusByCollection(collectionId: number): Promise<Product
   })
 
   // Group SKUs by BaseSku + ImageURL
-  const grouped = new Map<string, Array<typeof skus[0] & { baseSku: string; parsedSize: string }>>()
+  const grouped = new Map<string, Array<typeof skus[0] & { baseSku: string; size: string }>>()
 
   for (const sku of skus) {
-    const { baseSku, parsedSize } = parseSkuId(sku.SkuID)
-    const skuWithParsed = { ...sku, baseSku, parsedSize }
+    const { baseSku } = parseSkuId(sku.SkuID)
+    const size = extractSize(sku.Size || '')
+    const skuWithParsed = { ...sku, baseSku, size }
 
     const imageUrl = sku.ShopifyImageURL ?? ''
     const groupKey = `${baseSku}::${imageUrl}`
@@ -370,7 +371,7 @@ export async function getSkusByCollection(collectionId: number): Promise<Product
 
     const variants: ProductVariant[] = sortBySize(
       skuGroup.map((sku) => ({
-        size: sku.parsedSize,
+        size: sku.size,
         sku: sku.SkuID,
         available: sku.Quantity ?? 0,
         onRoute: sku.OnRoute ?? 0,
@@ -414,11 +415,12 @@ export async function getPreOrderProductsByCollection(collectionId: number): Pro
   })
 
   // Group SKUs by BaseSku + ImageURL
-  const grouped = new Map<string, Array<typeof skus[0] & { baseSku: string; parsedSize: string }>>()
+  const grouped = new Map<string, Array<typeof skus[0] & { baseSku: string; size: string }>>()
 
   for (const sku of skus) {
-    const { baseSku, parsedSize } = parseSkuId(sku.SkuID)
-    const skuWithParsed = { ...sku, baseSku, parsedSize }
+    const { baseSku } = parseSkuId(sku.SkuID)
+    const size = extractSize(sku.Size || '')
+    const skuWithParsed = { ...sku, baseSku, size }
 
     const imageUrl = sku.ShopifyImageURL ?? ''
     const groupKey = `${baseSku}::${imageUrl}`
@@ -438,7 +440,7 @@ export async function getPreOrderProductsByCollection(collectionId: number): Pro
 
     const variants: ProductVariant[] = sortBySize(
       skuGroup.map((sku) => ({
-        size: sku.parsedSize,
+        size: sku.size,
         sku: sku.SkuID,
         available: sku.OnRoute ?? 0, // Use OnRoute for PreOrder
         onRoute: sku.OnRoute ?? 0,

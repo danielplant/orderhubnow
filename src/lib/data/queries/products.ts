@@ -1,10 +1,11 @@
 /**
  * Products (SKU) queries - data layer for admin products page
- * Uses parseSkuId() to derive BaseSku and ParsedSize from SkuID
+ * Uses sku.Size field (from Shopify selectedOptions) as canonical size source
  */
 
 import { prisma } from '@/lib/prisma'
 import { parsePrice, parseSkuId } from '@/lib/utils'
+import { extractSize } from '@/lib/utils/size-sort'
 import type {
   ProductsListInput,
   ProductsListResult,
@@ -161,6 +162,7 @@ export async function getProducts(
         MSRPUSD: true,
         ShopifyImageURL: true,
         CollectionID: true,
+        Size: true,
         Collection: {
           select: { name: true },
         },
@@ -180,12 +182,13 @@ export async function getProducts(
     rows: rows.map((r) => {
       const skuId = r.SkuID
       const qty = r.Quantity ?? 0
-      const { baseSku, parsedSize } = parseSkuId(skuId)
+      const { baseSku } = parseSkuId(skuId)
+      const size = extractSize(r.Size || '')
       return {
         id: String(r.ID),
         skuId,
         baseSku,
-        parsedSize,
+        parsedSize: size,
         description: (r.OrderEntryDescription ?? r.Description ?? skuId) as string,
         color: r.SkuColor ?? '',
         material: r.FabricContent ?? '',
@@ -305,6 +308,7 @@ export async function getProductByBaseSku(baseSku: string) {
       MSRPCAD: true,
       MSRPUSD: true,
       ShopifyImageURL: true,
+      Size: true,
     },
   })
 
@@ -314,10 +318,9 @@ export async function getProductByBaseSku(baseSku: string) {
   
   // Build variants array with size info
   const variants = skus.map((sku) => {
-    const { parsedSize } = parseSkuId(sku.SkuID)
     return {
       sku: sku.SkuID,
-      size: parsedSize,
+      size: extractSize(sku.Size || ''),
       available: sku.Quantity ?? 0,
       onRoute: sku.OnRoute ?? 0,
       priceCad: parsePrice(sku.PriceCAD),

@@ -9,7 +9,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/lib/auth/providers'
 import { prisma } from '@/lib/prisma'
 import { generatePdf, wrapHtml, formatDate } from '@/lib/pdf/generate'
-import { getEffectiveQuantity, parsePrice, parseSkuId } from '@/lib/utils'
+import { getEffectiveQuantity, parsePrice } from '@/lib/utils'
+import { extractSize } from '@/lib/utils/size-sort'
 
 // ============================================================================
 // Helpers
@@ -80,6 +81,7 @@ export async function GET(request: NextRequest) {
         OnRoute: true,
         PriceCAD: true,
         PriceUSD: true,
+        Size: true,
       },
     })
 
@@ -145,6 +147,7 @@ interface SkuForPdf {
   PriceCAD: string | null
   PriceUSD: string | null
   ShowInPreOrder: boolean | null
+  Size: string | null
 }
 
 function generateProductsPdfHtml(
@@ -164,13 +167,13 @@ function generateProductsPdfHtml(
       const qty = sku.Quantity ?? 0
       const effectiveQty = getEffectiveQuantity(sku.SkuID, qty)
       const desc = sku.OrderEntryDescription ?? sku.Description ?? ''
-      const { parsedSize } = parseSkuId(sku.SkuID)
+      const size = extractSize(sku.Size || '')
 
       return `
         <tr>
           <td class="font-medium">${sku.SkuID}</td>
           <td class="text-muted">${desc.substring(0, 40)}${desc.length > 40 ? '...' : ''}</td>
-          <td class="text-center">${parsedSize ?? '—'}</td>
+          <td class="text-center">${size || '—'}</td>
           <td class="text-right">${qty.toLocaleString()}</td>
           <td class="text-right">${effectiveQty.toLocaleString()}</td>
           <td class="text-right">${(sku.OnRoute ?? 0).toLocaleString()}</td>

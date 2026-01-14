@@ -71,11 +71,25 @@ async function getEmailConfig(): Promise<EmailSettingsRecord> {
   }
 }
 
-export async function sendOrderEmails(data: OrderEmailData): Promise<SendOrderEmailsResult> {
+export async function sendOrderEmails(data: OrderEmailData, isUpdate = false): Promise<SendOrderEmailsResult> {
   const result: SendOrderEmailsResult = {
     customerEmailSent: false,
     salesEmailSent: false,
     errors: [],
+  }
+
+  // Get email configuration from database
+  const config = await getEmailConfig()
+
+  // Check if we should send emails based on config
+  if (isUpdate && !config.NotifyOnOrderUpdate) {
+    console.log('Order update emails disabled by configuration')
+    return result
+  }
+
+  if (!isUpdate && !config.NotifyOnNewOrder) {
+    console.log('New order emails disabled by configuration')
+    return result
   }
 
   const shipStartStr = formatDate(data.shipStartDate)
@@ -98,6 +112,10 @@ export async function sendOrderEmails(data: OrderEmailData): Promise<SendOrderEm
     customerPO: data.customerPO,
     items: data.items,
   }
+
+  // Determine from address
+  const fromEmail = config.FromEmail || EMAIL_FROM
+  const fromAddress = config.FromName ? `"${config.FromName}" <${fromEmail}>` : fromEmail
 
   // Generate PDF attachment
   let pdfBuffer: Buffer | null = null
@@ -138,40 +156,49 @@ export async function sendOrderEmails(data: OrderEmailData): Promise<SendOrderEm
     result.errors.push(`PDF generation failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
   }
 
-  // Build CC list
+  // Build CC list from config
   const ccList: string[] = []
-  if (EMAIL_CC) {
+  if (config.CCEmails) {
+    const ccEmails = config.CCEmails.split(',').map(e => e.trim()).filter(Boolean)
+    ccList.push(...ccEmails)
+  } else if (EMAIL_CC) {
     ccList.push(EMAIL_CC)
   }
 
-  // 1. Send customer confirmation email
-  try {
-    const customerHtml = customerConfirmationHtml(emailData)
+  // 1. Send customer confirmation email (if enabled)
+  if (config.SendCustomerConfirmation && data.customerEmail) {
+    try {
+      const customerHtml = customerConfirmationHtml(emailData)
+      const subject = isUpdate
+        ? `Order ${data.orderNumber} Updated - Order confirmation`
+        : `Order ${data.orderNumber} Confirmed - Thank you for your order!`
 
-    await transporter.sendMail({
-      from: EMAIL_FROM,
-      to: data.customerEmail,
-      cc: ccList.length > 0 ? ccList.join(',') : undefined,
-      subject: `Order ${data.orderNumber} Confirmed - Thank you for your order!`,
-      html: customerHtml,
-      attachments: pdfBuffer
-        ? [
-            {
-              filename: `${data.orderNumber}-Confirmation.pdf`,
-              content: pdfBuffer,
-              contentType: 'application/pdf',
-            },
-          ]
-        : [],
-    })
+      await transporter.sendMail({
+        from: fromAddress,
+        to: data.customerEmail,
+        cc: ccList.length > 0 ? ccList.join(',') : undefined,
+        subject,
+        html: customerHtml,
+        attachments: pdfBuffer
+          ? [
+              {
+                filename: `${data.orderNumber}-Confirmation.pdf`,
+                content: pdfBuffer,
+                contentType: 'application/pdf',
+              },
+            ]
+          : [],
+      })
 
-    result.customerEmailSent = true
-  } catch (error) {
-    result.errors.push(`Customer email failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      result.customerEmailSent = true
+    } catch (error) {
+      result.errors.push(`Customer email failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    }
   }
 
   // 2. Send sales team notification
-  if (EMAIL_SALES) {
+  const salesEmails = config.SalesTeamEmails || EMAIL_SALES
+  if (salesEmails) {
     try {
       const appUrl = process.env.APP_URL || process.env.NEXTAUTH_URL || 'http://localhost:3000'
       const adminUrl = `${appUrl}/admin/orders?q=${encodeURIComponent(data.storeName)}`
@@ -181,10 +208,14 @@ export async function sendOrderEmails(data: OrderEmailData): Promise<SendOrderEm
         adminUrl,
       })
 
+      const subject = isUpdate
+        ? `Order ${data.orderNumber} Updated - ${data.storeName}`
+        : `New Order ${data.orderNumber} from ${data.storeName}`
+
       await transporter.sendMail({
-        from: EMAIL_FROM,
-        to: EMAIL_SALES,
-        subject: `New Order ${data.orderNumber} from ${data.storeName}`,
+        from: fromAddress,
+        to: salesEmails,
+        subject,
         html: salesHtml,
       })
 
@@ -198,7 +229,7 @@ export async function sendOrderEmails(data: OrderEmailData): Promise<SendOrderEm
   if (result.errors.length > 0) {
     console.error('Order email errors:', result.errors)
   } else {
-    console.log(`Order emails sent successfully for ${data.orderNumber}`)
+    console.log(`Order emails sent successfully for ${data.orderNumber}${isUpdate ? ' (update)' : ''}`)
   }
 
   return result
