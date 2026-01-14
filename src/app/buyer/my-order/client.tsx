@@ -10,6 +10,7 @@ import { DraftRecoveryBanner } from '@/components/buyer/draft-recovery-banner'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { CurrencyToggle } from '@/components/buyer/currency-toggle'
 import { formatCurrency } from '@/lib/utils'
 import { Trash2 } from 'lucide-react'
 import type { OrderForEditing } from '@/lib/data/queries/orders'
@@ -178,8 +179,9 @@ export function MyOrderClient({
         {/* Order Summary - Right side on desktop */}
         <div className="lg:col-span-1 lg:order-2">
           <Card className="sticky top-4">
-            <CardHeader>
+            <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle>Order Summary</CardTitle>
+              <CurrencyToggle size="sm" />
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="text-sm text-muted-foreground">
