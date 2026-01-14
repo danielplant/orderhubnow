@@ -272,12 +272,15 @@ function generateProductsPdfHtml(
         const priceUsd = parsePrice(sku.PriceUSD)
         const wholesalePrice = formatPrice(priceCad, priceUsd, summary.currency)
 
-        // Image URL - prefer ShopifyImageURL
-        const imageUrl = sku.ShopifyImageURL || ''
+        // Use local thumbnail (120x120px) to keep PDF small, fall back to no image
+        // ThumbnailPath is like "/thumbnails/abc123.png" - convert to file:// URL
+        const thumbnailUrl = sku.ThumbnailPath
+          ? `file://${process.cwd()}/public${sku.ThumbnailPath}`
+          : null
 
         // Build row with firstRowOnly logic
-        const imageCell = sku.isFirstInGroup && imageUrl
-          ? `<img src="${imageUrl}" alt="${sku.baseSku}" class="product-img" />`
+        const imageCell = sku.isFirstInGroup && thumbnailUrl
+          ? `<img src="${thumbnailUrl}" alt="${sku.baseSku}" class="product-img" />`
           : sku.isFirstInGroup
             ? `<div class="no-image">No Image</div>`
             : ''
