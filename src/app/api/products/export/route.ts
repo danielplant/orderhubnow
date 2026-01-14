@@ -7,8 +7,10 @@
  * - Currency toggle (USD / CAD / Both)
  * - Thick border separators between groups
  * - Configurable via export-config.ts
+ * - ATS exports: Only SKUs with Available > 0, excludes On Route column
+ * - PreOrder exports: All SKUs, includes On Route column
  *
- * Columns: Image | Style | SKU | Description | Color | Material | Size | Available | On Route | Collection | Status | Wholesale | Qty
+ * Columns: Image | Style | SKU | Description | Color | Material | Size | Available | [On Route] | Collection | Status | Wholesale | Qty
  */
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -24,7 +26,6 @@ import {
   EXPORT_COLUMNS,
   EXPORT_LAYOUT,
   EXPORT_STYLING,
-  EXPORT_THUMBNAIL,
 } from '@/lib/config/export-config'
 import type { CurrencyMode } from '@/lib/types/export'
 
@@ -119,7 +120,10 @@ export async function GET(request: NextRequest) {
 
     // Tab filter
     if (tab === 'ats') {
-      where.OR = [{ ShowInPreOrder: false }, { ShowInPreOrder: null }]
+      where.AND = [
+        { OR: [{ ShowInPreOrder: false }, { ShowInPreOrder: null }] },
+        { Quantity: { gte: 1 } }, // Only show SKUs with available inventory
+      ]
     } else if (tab === 'preorder') {
       where.ShowInPreOrder = true
     }
@@ -190,8 +194,16 @@ export async function GET(request: NextRequest) {
 
     const sheet = workbook.addWorksheet('Products')
 
+    // Filter columns - exclude 'onRoute' for ATS exports
+    const exportColumns = tab === 'ats'
+      ? EXPORT_COLUMNS.filter((col) => col.key !== 'onRoute')
+      : EXPORT_COLUMNS
+
+    // Track which column keys are numeric for alignment
+    const numericColumnKeys = new Set(['available', 'onRoute', 'orderQty'])
+
     // Set up columns from config
-    sheet.columns = EXPORT_COLUMNS.map((col) => ({
+    sheet.columns = exportColumns.map((col) => ({
       header: col.header,
       key: col.key,
       width: col.width,
@@ -242,11 +254,15 @@ export async function GET(request: NextRequest) {
         material: sku.isFirstInGroup ? (sku.FabricContent ?? '') : '',
         size: sku.size,
         available: sku.Quantity ?? 0,
-        onRoute: sku.OnRoute ?? 0,
         collection: sku.isFirstInGroup ? (sku.Collection?.name ?? '') : '',
         status: sku.isFirstInGroup ? (sku.ShowInPreOrder ? 'Pre-Order' : 'ATS') : '',
         wholesale: sku.isFirstInGroup ? wholesalePrice : '',
         orderQty: '', // Empty for reps to fill
+      }
+
+      // Only include onRoute for non-ATS exports
+      if (tab !== 'ats') {
+        rowData.onRoute = sku.OnRoute ?? 0
       }
 
       const row = sheet.addRow(rowData)
@@ -280,8 +296,9 @@ export async function GET(request: NextRequest) {
           right: { style: 'thin', color: { argb: 'FFE5E7EB' } },
         }
 
-        // Right-align numeric columns: Available (8), On Route (9), Qty (13)
-        if ([8, 9, 13].includes(colNumber)) {
+        // Right-align numeric columns based on column key
+        const colKey = exportColumns[colNumber - 1]?.key
+        if (colKey && numericColumnKeys.has(colKey)) {
           cell.alignment = { ...cell.alignment, horizontal: 'right' }
         }
       })
@@ -331,10 +348,13 @@ export async function GET(request: NextRequest) {
             extension: 'png',
           })
 
+          // Use two-cell anchor (tl + br) for Apple Numbers compatibility
+          /* eslint-disable @typescript-eslint/no-explicit-any */
           sheet.addImage(imageId, {
             tl: { col: 0, row: rowIndex - 1 },
-            ext: { width: EXPORT_THUMBNAIL.widthPx, height: EXPORT_THUMBNAIL.widthPx },
-          })
+            br: { col: 1, row: rowIndex },
+          } as any)
+          /* eslint-enable @typescript-eslint/no-explicit-any */
         }
       }
     }
