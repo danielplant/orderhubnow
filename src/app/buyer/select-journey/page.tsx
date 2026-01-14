@@ -1,7 +1,9 @@
 import { JourneyCard } from "@/components/buyer/journey-card";
 import { BrandHeader } from "@/components/buyer/brand-header";
 import { CurrencyToggle } from "@/components/buyer/currency-toggle";
+import { RepCurrencyDefaulter } from "@/components/buyer/rep-currency-defaulter";
 import { getInventoryMetrics } from "@/lib/data/queries/inventory";
+import { getRepById } from "@/lib/data/queries/reps";
 import { redirect } from "next/navigation";
 import { buildRepQueryStringFromObject } from "@/lib/utils/rep-context";
 
@@ -12,9 +14,14 @@ interface Props {
 }
 
 export default async function SelectJourneyPage({ searchParams }: Props) {
-  const [metrics, params] = await Promise.all([
+  const params = await searchParams;
+
+  // If rep context, fetch their country for currency defaulting
+  const repId = typeof params.repId === 'string' ? parseInt(params.repId) : null;
+
+  const [metrics, rep] = await Promise.all([
     getInventoryMetrics(),
-    searchParams,
+    repId ? getRepById(repId) : Promise.resolve(null),
   ]);
 
   // Build rep context query string to preserve through navigation
@@ -33,6 +40,9 @@ export default async function SelectJourneyPage({ searchParams }: Props) {
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <BrandHeader />
+
+      {/* Default currency based on rep's country when in rep context */}
+      {rep && <RepCurrencyDefaulter country={rep.country} />}
 
       <main className="flex-1 flex flex-col items-center justify-center px-6 py-12">
         <div className="w-full max-w-6xl space-y-10">
