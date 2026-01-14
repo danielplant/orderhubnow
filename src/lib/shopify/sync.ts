@@ -5,7 +5,11 @@
  */
 
 import { prisma } from '@/lib/prisma'
-import { saveThumbnailsBatch } from '@/lib/utils/thumbnails'
+import {
+  processThumbnailsBatch,
+  logThumbnailSyncSummary,
+  type ThumbnailSyncItem,
+} from '@/lib/utils/thumbnails'
 
 // ============================================================================
 // GID Parsing
@@ -159,6 +163,9 @@ export const BULK_OPERATION_QUERY = `
                 mfColor: metafield(namespace: "custom", key: "color") {
                   value
                 }
+                # NOTE: CAD wholesale price uses legacy key "test_number_" (created during testing, never renamed)
+                # Shopify admin shows label "CAD WS PRICE" but underlying key is "test_number_"
+                # All other price metafields have proper names (us_ws_price, msrp_cad, msrp_us)
                 mfCADWSPrice: metafield(namespace: "custom", key: "test_number_") {
                   value
                 }
@@ -538,11 +545,6 @@ interface InventoryItemData {
 interface QuantityData {
   name: string
   quantity: number
-}
-
-interface InventoryLevelNode {
-  id?: string
-  quantities?: QuantityData[]
 }
 
 /**
@@ -1185,32 +1187,54 @@ export async function runFullSync(options?: {
     const transformResult = await transformToSkuTable()
     onProgress('Step 4/5', `Complete - ${transformResult.processed} SKUs created`)
 
-    // Step 5: Generate thumbnails for all SKUs with images
-    onProgress('Step 5/5', 'Generating thumbnails')
+    // Step 5: Generate thumbnails with smart caching
+    // Only regenerates when: URL changed, settings changed, or file missing
+    onProgress('Step 5/5', 'Processing thumbnails (smart cache)')
     const skusWithImages = await prisma.sku.findMany({
       where: { ShopifyImageURL: { not: null } },
-      select: { SkuID: true, ShopifyImageURL: true },
+      select: { SkuID: true, ShopifyImageURL: true, ThumbnailPath: true },
     })
-    
-    const thumbnailItems = skusWithImages.map(s => ({
+
+    const thumbnailItems: ThumbnailSyncItem[] = skusWithImages.map(s => ({
       skuId: s.SkuID,
       imageUrl: s.ShopifyImageURL,
+      currentThumbnailPath: s.ThumbnailPath,
     }))
-    
-    let thumbnailsGenerated = 0
+
     if (thumbnailItems.length > 0) {
-      const thumbnailResults = await saveThumbnailsBatch(thumbnailItems)
-      thumbnailsGenerated = thumbnailResults.size
-      
-      // Update SKUs with thumbnail paths
-      for (const [skuId, thumbnailPath] of thumbnailResults) {
+      const { results, stats } = await processThumbnailsBatch(thumbnailItems, {
+        concurrency: 10,
+        onProgress: (processed, total, currentStats) => {
+          const pct = Math.round((processed / total) * 100)
+          onProgress(
+            'Step 5/5',
+            `Thumbnails: ${pct}% (${currentStats.generated} new, ${currentStats.skipped} cached)`
+          )
+        },
+      })
+
+      // Log summary for debugging
+      logThumbnailSyncSummary(stats)
+
+      // Update SKUs that got new or changed thumbnail paths
+      const updates = results.filter(
+        r => r.status === 'generated' && r.thumbnailPath
+      )
+
+      for (const update of updates) {
         await prisma.sku.updateMany({
-          where: { SkuID: skuId },
-          data: { ThumbnailPath: thumbnailPath },
+          where: { SkuID: update.skuId },
+          data: { ThumbnailPath: update.thumbnailPath },
         })
       }
+
+      onProgress(
+        'Step 5/5',
+        `Complete - ${stats.generated} generated, ${stats.skipped} cached, ${stats.failed} failed`
+      )
+    } else {
+      onProgress('Step 5/5', 'Complete - No images to process')
     }
-    onProgress('Step 5/5', `Complete - ${thumbnailsGenerated} thumbnails generated`)
 
     // Mark sync as complete
     await completeSyncRun(operationId, 'completed', transformResult.processed)

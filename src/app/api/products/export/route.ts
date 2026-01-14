@@ -1,17 +1,32 @@
 /**
  * Products Export API - XLSX generation with thumbnails
- * Columns: Image | SKU | Color | Description | Material | Available | On Route | Wholesale Price | Retail Price | Collection | Status
  *
- * Groups SKUs by baseSku, sorts by size within each group, shows image only on first row of each group.
+ * Features:
+ * - Groups SKUs by Style (baseSku) with image on first row only
+ * - Variable row heights (tall for image row, short for data rows)
+ * - Currency toggle (USD / CAD / Both)
+ * - Thick border separators between groups
+ * - Configurable via export-config.ts
+ *
+ * Columns: Image | Style | SKU | Description | Color | Material | Size | Available | On Route | Collection | Status | Wholesale | Qty
  */
 
 import { NextRequest, NextResponse } from 'next/server'
 import ExcelJS from 'exceljs'
+import path from 'path'
+import fs from 'fs'
 import { auth } from '@/lib/auth/providers'
 import { prisma } from '@/lib/prisma'
 import { parsePrice, parseSkuId, resolveColor } from '@/lib/utils'
-import { readThumbnail, fetchThumbnail } from '@/lib/utils/thumbnails'
+import { fetchAndResizeImage } from '@/lib/utils/thumbnails'
 import { extractSize, sortBySize } from '@/lib/utils/size-sort'
+import {
+  EXPORT_COLUMNS,
+  EXPORT_LAYOUT,
+  EXPORT_STYLING,
+  EXPORT_THUMBNAIL,
+} from '@/lib/config/export-config'
+import type { CurrencyMode } from '@/lib/types/export'
 
 // ============================================================================
 // Helpers
@@ -23,8 +38,48 @@ function getString(value: unknown): string | undefined {
   return t || undefined
 }
 
-const THUMBNAIL_SIZE = 120
-const ROW_HEIGHT = 95
+/**
+ * Format price based on currency mode
+ */
+function formatPrice(priceCAD: number, priceUSD: number, mode: CurrencyMode): string {
+  switch (mode) {
+    case 'USD':
+      return priceUSD > 0 ? `$${priceUSD.toFixed(2)}` : ''
+    case 'CAD':
+      return priceCAD > 0 ? `$${priceCAD.toFixed(2)}` : ''
+    case 'BOTH':
+      if (priceCAD > 0 || priceUSD > 0) {
+        return `$${priceCAD.toFixed(2)} / $${priceUSD.toFixed(2)}`
+      }
+      return ''
+  }
+}
+
+/**
+ * Parse currency mode from query param
+ */
+function parseCurrencyMode(value: string | undefined): CurrencyMode {
+  if (value === 'USD' || value === 'CAD' || value === 'BOTH') {
+    return value
+  }
+  return 'BOTH' // Default
+}
+
+/**
+ * Read thumbnail from disk by path
+ */
+function readThumbnailFromPath(thumbnailPath: string | null): Buffer | null {
+  if (!thumbnailPath) return null
+  try {
+    const fullPath = path.join(process.cwd(), 'public', thumbnailPath)
+    if (fs.existsSync(fullPath)) {
+      return fs.readFileSync(fullPath)
+    }
+  } catch {
+    // Ignore errors
+  }
+  return null
+}
 
 // ============================================================================
 // Main Handler
@@ -44,6 +99,7 @@ export async function GET(request: NextRequest) {
     const q = getString(searchParams.q)
     const collectionIdStr = getString(searchParams.collectionId)
     const collectionId = collectionIdStr ? parseInt(collectionIdStr, 10) : undefined
+    const currency = parseCurrencyMode(getString(searchParams.currency))
 
     // Build where clause
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -51,9 +107,9 @@ export async function GET(request: NextRequest) {
 
     if (q) {
       where.OR = [
-        { SkuID: { contains: q, mode: 'insensitive' } },
-        { Description: { contains: q, mode: 'insensitive' } },
-        { OrderEntryDescription: { contains: q, mode: 'insensitive' } },
+        { SkuID: { contains: q } },
+        { Description: { contains: q } },
+        { OrderEntryDescription: { contains: q } },
       ]
     }
 
@@ -68,7 +124,7 @@ export async function GET(request: NextRequest) {
       where.ShowInPreOrder = true
     }
 
-    // Fetch SKUs with all required fields including category name
+    // Fetch SKUs with all required fields including collection name
     const rawSkus = await prisma.sku.findMany({
       where,
       select: {
@@ -83,8 +139,6 @@ export async function GET(request: NextRequest) {
         OnRoute: true,
         PriceCAD: true,
         PriceUSD: true,
-        MSRPCAD: true,
-        MSRPUSD: true,
         ShopifyImageURL: true,
         ThumbnailPath: true,
         CollectionID: true,
@@ -111,95 +165,124 @@ export async function GET(request: NextRequest) {
       grouped.get(sku.baseSku)!.push(sku)
     }
 
-    // Sort each group by size, then flatten with first-of-group flag
-    const skus: Array<typeof skusWithParsed[0] & { isFirstInGroup: boolean }> = []
+    // Sort each group by size, then flatten with position flags
+    const skus: Array<
+      (typeof skusWithParsed)[0] & { isFirstInGroup: boolean; isLastInGroup: boolean }
+    > = []
     const sortedBaseSkus = Array.from(grouped.keys()).sort()
 
     for (const baseSku of sortedBaseSkus) {
       const group = grouped.get(baseSku)!
-      // Sort by size using the canonical SIZE_ORDER
       const sortedGroup = sortBySize(group)
-      // Add to final array with first-of-group flag
       sortedGroup.forEach((sku, idx) => {
-        skus.push({ ...sku, isFirstInGroup: idx === 0 })
+        skus.push({
+          ...sku,
+          isFirstInGroup: idx === 0,
+          isLastInGroup: idx === sortedGroup.length - 1,
+        })
       })
     }
 
     // Create workbook
     const workbook = new ExcelJS.Workbook()
-    workbook.creator = 'MyOrderHub'
+    workbook.creator = 'OrderHub'
     workbook.created = new Date()
 
     const sheet = workbook.addWorksheet('Products')
 
-    // Headers: Image | SKU | Color | Description | Material | Available | On Route | Wholesale Price | Retail Price | Collection | Status
-    sheet.columns = [
-      { header: 'Image', key: 'image', width: 18 },
-      { header: 'SKU', key: 'sku', width: 25 },
-      { header: 'Color', key: 'color', width: 15 },
-      { header: 'Description', key: 'description', width: 45 },
-      { header: 'Material', key: 'material', width: 25 },
-      { header: 'Available', key: 'available', width: 12 },
-      { header: 'On Route', key: 'onRoute', width: 12 },
-      { header: 'Wholesale Price', key: 'wholesalePrice', width: 25 },
-      { header: 'Retail Price', key: 'retailPrice', width: 20 },
-      { header: 'Collection', key: 'collection', width: 25 },
-      { header: 'Status', key: 'status', width: 12 },
-    ]
+    // Set up columns from config
+    sheet.columns = EXPORT_COLUMNS.map((col) => ({
+      header: col.header,
+      key: col.key,
+      width: col.width,
+    }))
 
     // Style header row
     const headerRow = sheet.getRow(1)
-    headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } }
+    headerRow.font = {
+      name: EXPORT_STYLING.header.font.name,
+      size: EXPORT_STYLING.header.font.size,
+      bold: EXPORT_STYLING.header.font.bold,
+      color: { argb: EXPORT_STYLING.header.textColor },
+    }
     headerRow.fill = {
       type: 'pattern',
       pattern: 'solid',
-      fgColor: { argb: 'FF4F81BD' },
+      fgColor: { argb: EXPORT_STYLING.header.bgColor },
     }
-    headerRow.height = 25
+    headerRow.height = EXPORT_LAYOUT.headerRowHeight
     headerRow.alignment = { vertical: 'middle' }
+
+    // Freeze header row if configured
+    if (EXPORT_LAYOUT.freezeHeader) {
+      sheet.views = [{ state: 'frozen', xSplit: 0, ySplit: 1 }]
+    }
 
     // Data rows with thumbnails
     for (let i = 0; i < skus.length; i++) {
       const sku = skus[i]
       const rowIndex = i + 2 // 1-based, skip header
 
-      // Format prices
+      // Format prices based on currency mode
       const priceCad = parsePrice(sku.PriceCAD)
       const priceUsd = parsePrice(sku.PriceUSD)
-      const msrpCad = parsePrice(sku.MSRPCAD)
-      const msrpUsd = parsePrice(sku.MSRPUSD)
+      const wholesalePrice = formatPrice(priceCad, priceUsd, currency)
 
-      const wholesalePrice =
-        priceCad > 0 || priceUsd > 0
-          ? `CAD: ${priceCad.toFixed(2)} / USD: ${priceUsd.toFixed(2)}`
-          : ''
-      const retailPrice =
-        msrpCad > 0 || msrpUsd > 0
-          ? `C: ${msrpCad.toFixed(2)}, U: ${msrpUsd.toFixed(2)}`
-          : ''
-
-      // Add row data (image cell left empty for now)
-      // Resolve color with fallbacks (SkuColor → SKU ID → Description)
+      // Resolve description and color with fallbacks
       const description = sku.OrderEntryDescription ?? sku.Description ?? ''
       const color = resolveColor(sku.SkuColor, sku.SkuID, description)
 
-      const row = sheet.addRow({
-        image: '',
+      // Build row data object
+      const rowData: Record<string, string | number> = {
+        image: '', // Placeholder for image
+        baseSku: sku.isFirstInGroup ? sku.baseSku : '',
         sku: sku.SkuID,
-        color,
-        description,
-        material: sku.FabricContent ?? '',
+        description: sku.isFirstInGroup ? description : '',
+        color: sku.isFirstInGroup ? color : '',
+        material: sku.isFirstInGroup ? (sku.FabricContent ?? '') : '',
+        size: sku.size,
         available: sku.Quantity ?? 0,
         onRoute: sku.OnRoute ?? 0,
-        wholesalePrice,
-        retailPrice,
-        collection: sku.Collection?.name ?? '',
-        status: sku.ShowInPreOrder ? 'Pre-Order' : 'ATS',
-      })
+        collection: sku.isFirstInGroup ? (sku.Collection?.name ?? '') : '',
+        status: sku.isFirstInGroup ? (sku.ShowInPreOrder ? 'Pre-Order' : 'ATS') : '',
+        wholesale: sku.isFirstInGroup ? wholesalePrice : '',
+        orderQty: '', // Empty for reps to fill
+      }
 
-      // Set consistent row height
-      row.height = ROW_HEIGHT
-      row.alignment = { vertical: 'middle' }
+      const row = sheet.addRow(rowData)
+
+      // Set row height based on position in group
+      if (sku.isFirstInGroup) {
+        row.height = EXPORT_LAYOUT.imageRowHeight
+      } else {
+        row.height = EXPORT_LAYOUT.dataRowHeight
+      }
+
+      // Set font for data rows
+      row.font = {
+        name: EXPORT_STYLING.dataRows.font.name,
+        size: EXPORT_STYLING.dataRows.font.size,
+        bold: EXPORT_STYLING.dataRows.font.bold,
+      }
+
+      // Set alignment - first row vertical top (for wrapped text), others bottom
+      row.alignment = {
+        vertical: sku.isFirstInGroup ? 'top' : 'bottom',
+        wrapText: sku.isFirstInGroup, // Enable text wrapping on first row
+      }
+
+      // Add thick border separator at bottom of last row in each group
+      if (sku.isLastInGroup) {
+        row.eachCell({ includeEmpty: true }, (cell) => {
+          cell.border = {
+            ...cell.border,
+            bottom: {
+              style: EXPORT_STYLING.groupSeparator.borderStyle,
+              color: { argb: EXPORT_STYLING.groupSeparator.borderColor },
+            },
+          }
+        })
+      }
 
       // Add thumbnail image only for first row of each baseSku group
       if (sku.isFirstInGroup) {
@@ -207,24 +290,24 @@ export async function GET(request: NextRequest) {
 
         // Try to read pre-generated thumbnail from disk
         if (sku.ThumbnailPath) {
-          thumbnailBuffer = readThumbnail(sku.SkuID)
+          thumbnailBuffer = readThumbnailFromPath(sku.ThumbnailPath)
         }
 
         // Fallback: fetch from Shopify URL if no local thumbnail
         if (!thumbnailBuffer && sku.ShopifyImageURL) {
-          thumbnailBuffer = await fetchThumbnail(sku.ShopifyImageURL)
+          thumbnailBuffer = await fetchAndResizeImage(sku.ShopifyImageURL)
         }
 
         if (thumbnailBuffer) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const imageId = workbook.addImage({
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             buffer: thumbnailBuffer as any,
             extension: 'png',
           })
 
           sheet.addImage(imageId, {
             tl: { col: 0, row: rowIndex - 1 },
-            ext: { width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE },
+            ext: { width: EXPORT_THUMBNAIL.widthPx, height: EXPORT_THUMBNAIL.widthPx },
           })
         }
       }
@@ -233,8 +316,9 @@ export async function GET(request: NextRequest) {
     // Generate buffer
     const buffer = await workbook.xlsx.writeBuffer()
 
-    // Return file
-    const filename = `Products_Export_${new Date().toISOString().split('T')[0]}.xlsx`
+    // Return file with currency suffix in filename
+    const currencySuffix = currency === 'BOTH' ? '' : `_${currency}`
+    const filename = `Products_Export${currencySuffix}_${new Date().toISOString().split('T')[0]}.xlsx`
 
     return new NextResponse(buffer, {
       status: 200,

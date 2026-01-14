@@ -11,7 +11,12 @@ import {
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
 } from '@/components/ui'
+import type { CurrencyMode } from '@/lib/types/export'
 import { BulkActionsBar } from '@/components/admin/bulk-actions-bar'
 import { ProductDetailModal } from '@/components/admin/product-detail-modal'
 import { cn } from '@/lib/utils'
@@ -23,7 +28,7 @@ import {
   bulkSetPreOrderFlag,
 } from '@/lib/data/actions/products'
 import { UploadProductsModal } from '@/components/admin/upload-products-modal'
-import { MoreHorizontal, Download, Upload } from 'lucide-react'
+import { MoreHorizontal, Download, Upload, ChevronDown, FileSpreadsheet } from 'lucide-react'
 
 // ============================================================================
 // Types
@@ -66,6 +71,7 @@ export function ProductsTable({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [selectedProduct, setSelectedProduct] = React.useState<any | null>(null)
   const [highlightedSku, setHighlightedSku] = React.useState<string | undefined>()
+  const [exportCurrency, setExportCurrency] = React.useState<CurrencyMode>('BOTH')
 
   // Parse current filter state from URL
   const tab = (searchParams.get('tab') || 'all') as InventoryTab
@@ -172,8 +178,9 @@ export function ProductsTable({
 
   const doExport = React.useCallback(() => {
     const params = new URLSearchParams(searchParams.toString())
+    params.set('currency', exportCurrency)
     window.location.href = `/api/products/export?${params.toString()}`
-  }, [searchParams])
+  }, [searchParams, exportCurrency])
 
   const handleSkuClick = React.useCallback(async (row: AdminSkuRow) => {
     setIsLoading(true)
@@ -411,10 +418,31 @@ export function ProductsTable({
               <Upload className="h-4 w-4 mr-2" />
               Upload
             </Button>
-            <Button variant="outline" size="sm" onClick={doExport}>
-              <Download className="h-4 w-4 mr-2" />
-              Export
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm">
+                  <Download className="h-4 w-4 mr-2" />
+                  Export
+                  <ChevronDown className="h-4 w-4 ml-2" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-48">
+                <DropdownMenuLabel>Currency</DropdownMenuLabel>
+                <DropdownMenuRadioGroup
+                  value={exportCurrency}
+                  onValueChange={(v) => setExportCurrency(v as CurrencyMode)}
+                >
+                  <DropdownMenuRadioItem value="BOTH">Both (CAD/USD)</DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem value="CAD">CAD Only</DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem value="USD">USD Only</DropdownMenuRadioItem>
+                </DropdownMenuRadioGroup>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={doExport}>
+                  <FileSpreadsheet className="h-4 w-4 mr-2" />
+                  Download Excel
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
       </div>
