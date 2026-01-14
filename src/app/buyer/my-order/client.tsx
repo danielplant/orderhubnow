@@ -78,8 +78,8 @@ export function MyOrderClient({
   // Determine if we're in edit mode (from props or context)
   const isEditMode = !!existingOrder || contextIsEditMode
 
-  // For edit mode, use the order's currency; otherwise use context
-  const effectiveCurrency = editOrderCurrency || (existingOrder?.currency) || currency
+  // Use currency from context (allows changing currency in edit mode too)
+  const effectiveCurrency = currency
 
   // Unified cart items from context - works for both new and edit mode
   const cartItems = useMemo(() => {
