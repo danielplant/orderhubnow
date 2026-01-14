@@ -1,5 +1,5 @@
 import { prisma } from '@/lib/prisma'
-import { parsePrice, parseSkuId } from '@/lib/utils'
+import { parsePrice, parseSkuId, resolveColor } from '@/lib/utils'
 import { sortBySize, extractSize } from '@/lib/utils/size-sort'
 import type { Product, ProductVariant } from '@/lib/types'
 import type {
@@ -380,12 +380,13 @@ export async function getSkusByCollection(collectionId: number): Promise<Product
       }))
     )
 
+    const title = first.OrderEntryDescription ?? first.Description ?? baseSku
     products.push({
       id: groupKey,
       skuBase: baseSku,
-      title: first.OrderEntryDescription ?? first.Description ?? baseSku,
+      title,
       fabric: first.FabricContent ?? '',
-      color: first.SkuColor ?? '',
+      color: resolveColor(first.SkuColor, first.SkuID, title),
       productType: first.ProductType ?? '',
       priceCad: parsePrice(first.PriceCAD),
       priceUsd: parsePrice(first.PriceUSD),
@@ -449,12 +450,13 @@ export async function getPreOrderProductsByCollection(collectionId: number): Pro
       }))
     )
 
+    const title = first.OrderEntryDescription ?? first.Description ?? baseSku
     products.push({
       id: groupKey,
       skuBase: baseSku,
-      title: first.OrderEntryDescription ?? first.Description ?? baseSku,
+      title,
       fabric: first.FabricContent ?? '',
-      color: first.SkuColor ?? '',
+      color: resolveColor(first.SkuColor, first.SkuID, title),
       productType: first.ProductType ?? '',
       priceCad: parsePrice(first.PriceCAD),
       priceUsd: parsePrice(first.PriceUSD),

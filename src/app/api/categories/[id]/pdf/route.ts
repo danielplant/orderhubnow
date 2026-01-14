@@ -14,7 +14,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/lib/auth/providers'
 import { prisma } from '@/lib/prisma'
 import { generatePdf, wrapHtml, formatDate } from '@/lib/pdf/generate'
-import { getEffectiveQuantity, parsePrice, parseSkuId } from '@/lib/utils'
+import { getEffectiveQuantity, parsePrice, parseSkuId, resolveColor } from '@/lib/utils'
 import { extractSize } from '@/lib/utils/size-sort'
 
 // ============================================================================
@@ -94,12 +94,13 @@ export async function GET(
       const effectiveQty = getEffectiveQuantity(sku.SkuID, qty)
 
       if (!productMap.has(baseSku)) {
+        const description = sku.OrderEntryDescription ?? sku.Description ?? ''
         productMap.set(baseSku, {
           baseSku,
-          description: sku.OrderEntryDescription ?? sku.Description ?? '',
+          description,
           priceCAD: parsePrice(sku.PriceCAD),
           priceUSD: parsePrice(sku.PriceUSD),
-          color: sku.SkuColor ?? '',
+          color: resolveColor(sku.SkuColor, sku.SkuID, description),
           sizes: [],
         })
       }

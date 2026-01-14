@@ -1,5 +1,5 @@
 import { prisma } from '@/lib/prisma'
-import { parsePrice, parseSkuId } from '@/lib/utils'
+import { parsePrice, parseSkuId, resolveColor } from '@/lib/utils'
 import { sortBySize, extractSize } from '@/lib/utils/size-sort'
 import type { Product, ProductVariant } from '@/lib/types'
 
@@ -63,12 +63,13 @@ export async function getSkusByCategory(categoryId: number): Promise<Product[]> 
     )
 
     // Use groupKey as ID to ensure uniqueness when baseSku has multiple image variants
+    const title = first.OrderEntryDescription ?? first.Description ?? baseSku
     products.push({
       id: groupKey,
       skuBase: baseSku,
-      title: first.OrderEntryDescription ?? first.Description ?? baseSku,
+      title,
       fabric: first.FabricContent ?? '',
-      color: first.SkuColor ?? '',
+      color: resolveColor(first.SkuColor, first.SkuID, title),
       productType: first.ProductType ?? '',
       priceCad: parsePrice(first.PriceCAD),
       priceUsd: parsePrice(first.PriceUSD),

@@ -14,6 +14,7 @@
 import { prisma } from '@/lib/prisma'
 import type { Product, ProductVariant } from '@/lib/types/inventory'
 import { sortBySize, extractSize } from '@/lib/utils/size-sort'
+import { resolveColor } from '@/lib/utils'
 
 // ============================================================================
 // Types
@@ -203,12 +204,13 @@ export async function getPreOrderProductsWithVariants(
     }))
 
     // Use groupKey as ID to ensure uniqueness when baseSku has multiple image variants
+    const title = firstSku.OrderEntryDescription || firstSku.Description || baseSku
     products.push({
       id: groupKey,
       skuBase: baseSku,
-      title: firstSku.OrderEntryDescription || firstSku.Description || baseSku,
+      title,
       fabric: firstSku.FabricContent || '',
-      color: firstSku.SkuColor || '',
+      color: resolveColor(firstSku.SkuColor, firstSku.SkuID, title),
       productType: firstSku.ProductType || '',
       priceCad: parsePriceFromString(firstSku.PriceCAD),
       priceUsd: parsePriceFromString(firstSku.PriceUSD),

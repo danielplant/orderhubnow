@@ -4,7 +4,7 @@
  */
 
 import { prisma } from '@/lib/prisma'
-import { parsePrice, parseSkuId } from '@/lib/utils'
+import { parsePrice, parseSkuId, resolveColor } from '@/lib/utils'
 import { extractSize } from '@/lib/utils/size-sort'
 import type {
   ProductsListInput,
@@ -184,13 +184,14 @@ export async function getProducts(
       const qty = r.Quantity ?? 0
       const { baseSku } = parseSkuId(skuId)
       const size = extractSize(r.Size || '')
+      const description = (r.OrderEntryDescription ?? r.Description ?? skuId) as string
       return {
         id: String(r.ID),
         skuId,
         baseSku,
         parsedSize: size,
-        description: (r.OrderEntryDescription ?? r.Description ?? skuId) as string,
-        color: r.SkuColor ?? '',
+        description,
+        color: resolveColor(r.SkuColor, skuId, description),
         material: r.FabricContent ?? '',
         categoryId: r.CollectionID ?? null,
         categoryName: r.Collection?.name ?? null,
@@ -264,11 +265,12 @@ export async function getSkuById(id: string) {
 
   if (!row) return null
 
+  const description = row.OrderEntryDescription ?? row.Description ?? ''
   return {
     id: String(row.ID),
     skuId: row.SkuID,
-    description: row.OrderEntryDescription ?? row.Description ?? '',
-    color: row.SkuColor ?? '',
+    description,
+    color: resolveColor(row.SkuColor, row.SkuID, description),
     categoryId: row.CategoryID,
     showInPreOrder: row.ShowInPreOrder,
     quantity: row.Quantity ?? 0,
@@ -328,10 +330,11 @@ export async function getProductByBaseSku(baseSku: string) {
     }
   })
 
+  const title = first.OrderEntryDescription ?? first.Description ?? baseSku
   return {
     baseSku,
-    title: first.OrderEntryDescription ?? first.Description ?? baseSku,
-    color: first.SkuColor ?? '',
+    title,
+    color: resolveColor(first.SkuColor, first.SkuID, title),
     material: first.FabricContent ?? '',
     imageUrl: first.ShopifyImageURL ?? null,
     isPreOrder: first.ShowInPreOrder ?? false,
