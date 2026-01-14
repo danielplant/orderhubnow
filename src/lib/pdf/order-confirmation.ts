@@ -1,9 +1,11 @@
 /**
  * Order Confirmation PDF Template
  *
- * NuORDER-style professional wholesale order confirmation.
- * Features: Inline product images, Ship-To/Bill-To addresses,
- * Color/Size columns, line-level discounts, dual notes sections.
+ * Professional wholesale order confirmation with two sections:
+ * - Page 1: Order Summary (clean table, no images)
+ * - Page 2+: Order Details Appendix (with images)
+ *
+ * Table headers repeat on page breaks for multi-page orders.
  */
 
 import { wrapHtml } from './generate'
@@ -123,6 +125,19 @@ function escapeHtml(str: string): string {
     .replace(/"/g, '&quot;')
 }
 
+// Extract style name from SKU (remove size suffix)
+function getStyleFromSku(sku: string): string {
+  const parts = sku.split('-')
+  if (parts.length > 1) {
+    // Remove last part if it looks like a size
+    const lastPart = parts[parts.length - 1]
+    if (/^\d/.test(lastPart) || /^[XSML]+$/i.test(lastPart)) {
+      return parts.slice(0, -1).join('-')
+    }
+  }
+  return sku
+}
+
 // ============================================================================
 // Template Generator
 // ============================================================================
@@ -130,29 +145,22 @@ function escapeHtml(str: string): string {
 export function generateOrderConfirmationHtml(input: OrderConfirmationInput): string {
   const { order, items } = input
 
-  // Calculate total units
+  // Calculate totals
   const totalUnits = items.reduce((sum, item) => sum + item.quantity, 0)
-  const totalStyles = new Set(items.map((item) => item.sku.split('-').slice(0, -1).join('-') || item.sku)).size
+  const totalStyles = new Set(items.map((item) => getStyleFromSku(item.sku))).size
 
-  // Has any discount?
+  // Check if we have discounts
   const hasDiscounts = items.some((item) => item.discount > 0) || order.totalDiscount > 0
 
-  // Generate line item rows with inline images
-  const itemRows = items
+  // ============================================================================
+  // PAGE 1: Order Summary Table (No Images)
+  // ============================================================================
+  const summaryRows = items
     .map(
       (item) => `
       <tr>
-        <td class="cell-image">
-          ${
-            item.imageUrl
-              ? `<img src="${item.imageUrl}" alt="${escapeHtml(item.sku)}" class="product-image" />`
-              : `<div class="no-image">—</div>`
-          }
-        </td>
-        <td class="cell-style">
-          <div class="style-number">${escapeHtml(item.sku)}</div>
-          ${item.description ? `<div class="style-name">${escapeHtml(item.description)}</div>` : ''}
-        </td>
+        <td class="cell-sku">${escapeHtml(getStyleFromSku(item.sku))}</td>
+        <td class="cell-name">${item.description ? escapeHtml(item.description) : '—'}</td>
         <td class="cell-color">${item.color ? escapeHtml(item.color) : '—'}</td>
         <td class="cell-size">${item.size || '—'}</td>
         <td class="cell-qty">${item.quantity}</td>
@@ -164,74 +172,127 @@ export function generateOrderConfirmationHtml(input: OrderConfirmationInput): st
     )
     .join('')
 
-  // Build Ship-To section
+  // ============================================================================
+  // PAGE 2+: Order Details Appendix (With Images)
+  // ============================================================================
+  const detailRows = items
+    .map(
+      (item) => `
+      <tr>
+        <td class="detail-image">
+          ${
+            item.imageUrl
+              ? `<img src="${item.imageUrl}" alt="${escapeHtml(item.sku)}" class="product-image" />`
+              : `<div class="no-image">No Image</div>`
+          }
+        </td>
+        <td class="detail-info">
+          <div class="detail-sku">${escapeHtml(item.sku)}</div>
+          ${item.description ? `<div class="detail-desc">Description: ${escapeHtml(item.description)}</div>` : ''}
+          ${item.color ? `<div class="detail-color">Color: ${escapeHtml(item.color)}</div>` : ''}
+          ${item.category ? `<div class="detail-category">Category: ${escapeHtml(item.category)}</div>` : ''}
+        </td>
+        <td class="detail-size">${item.size || '—'}</td>
+        <td class="detail-qty">${item.quantity}</td>
+        <td class="detail-price">${formatCurrency(item.price, order.currency)}</td>
+        <td class="detail-total">${formatCurrency(item.lineTotal, order.currency)}</td>
+      </tr>
+    `
+    )
+    .join('')
+
+  // ============================================================================
+  // Build Address Sections
+  // ============================================================================
   const shipToHtml = order.shipToAddress
     ? `
-      <div class="address-content">
-        <strong>${escapeHtml(order.storeName)}</strong><br/>
-        ${formatAddress(order.shipToAddress)}
-      </div>
-      <div class="address-meta">
-        <div><span class="meta-label">Ship Window:</span> ${formatShipWindow(order.shipStartDate, order.shipEndDate)}</div>
-      </div>
+      <strong>${escapeHtml(order.storeName)}</strong><br/>
+      ${formatAddress(order.shipToAddress)}
     `
-    : `<div class="address-empty">No shipping address on file</div>`
+    : `<span class="text-muted">No shipping address on file</span>`
 
-  // Build Bill-To section
   let billToHtml: string
   if (order.billToAddress === 'same') {
     billToHtml = `
-      <div class="address-content">
-        <em>Same as Shipping</em>
-      </div>
+      <strong>${escapeHtml(order.storeName)}</strong><br/>
+      <em>Same as Shipping</em>
     `
   } else if (order.billToAddress) {
     billToHtml = `
-      <div class="address-content">
-        <strong>${escapeHtml(order.storeName)}</strong><br/>
-        ${formatAddress(order.billToAddress)}
-      </div>
+      <strong>${escapeHtml(order.storeName)}</strong><br/>
+      ${formatAddress(order.billToAddress)}
     `
   } else {
-    billToHtml = `<div class="address-empty">No billing address on file</div>`
+    billToHtml = `<span class="text-muted">No billing address on file</span>`
   }
 
-  // Payment terms in Bill-To section
+  // Add payment terms to Bill To section
   if (order.paymentTerms) {
-    billToHtml += `
-      <div class="address-meta">
-        <div><span class="meta-label">Payment Terms:</span> ${escapeHtml(order.paymentTerms)}</div>
-      </div>
-    `
+    billToHtml += `<div class="payment-terms">Payment Terms: <strong>${escapeHtml(order.paymentTerms)}</strong></div>`
   }
 
+  // ============================================================================
+  // Generate Full HTML
+  // ============================================================================
   const content = `
-    <div class="confirmation">
+    <!-- ====================================================================== -->
+    <!-- PAGE 1: ORDER SUMMARY                                                  -->
+    <!-- ====================================================================== -->
+    <div class="page page-summary">
+
       <!-- Header -->
       <header class="header">
-        <div class="header-left">
+        <div class="header-brand">
           <div class="logo">OrderHub</div>
         </div>
-        <div class="header-right">
-          <div class="order-meta">
-            <div class="order-number">Order ${escapeHtml(order.orderNumber)}</div>
-            <div class="order-status status-${order.orderStatus.toLowerCase().replace(/\s+/g, '-')}">${escapeHtml(order.orderStatus)}</div>
-          </div>
-          <div class="order-date">${formatDate(order.orderDate)}</div>
-          <div class="order-rep">Sales Rep: ${escapeHtml(order.salesRep)}</div>
+        <div class="header-contact">
+          <div>www.limeapple.com</div>
+          <div>TEL: 1-800-359-5171</div>
+          <div>EMAIL: orders@limeapple.com</div>
         </div>
       </header>
+
+      <!-- Order Metadata -->
+      <div class="order-meta-bar">
+        <div class="meta-row">
+          <div class="meta-item">
+            <span class="meta-label">Order Number:</span>
+            <span class="meta-value">${escapeHtml(order.orderNumber)}</span>
+          </div>
+          <div class="meta-item">
+            <span class="meta-label">PO#:</span>
+            <span class="meta-value">${order.customerPO ? escapeHtml(order.customerPO) : '—'}</span>
+          </div>
+          <div class="meta-item">
+            <span class="meta-label">Sales Rep:</span>
+            <span class="meta-value">${escapeHtml(order.salesRep)}</span>
+          </div>
+        </div>
+        <div class="meta-row">
+          <div class="meta-item">
+            <span class="meta-label">Order Date:</span>
+            <span class="meta-value">${formatDateShort(order.orderDate)}</span>
+          </div>
+          <div class="meta-item">
+            <span class="meta-label">Ship Window:</span>
+            <span class="meta-value">${formatShipWindow(order.shipStartDate, order.shipEndDate)}</span>
+          </div>
+          <div class="meta-item">
+            <span class="meta-label">Status:</span>
+            <span class="meta-value status-badge status-${order.orderStatus.toLowerCase().replace(/\s+/g, '-')}">${escapeHtml(order.orderStatus)}</span>
+          </div>
+        </div>
+      </div>
 
       <!-- Info Cards: Buyer | Ship To | Bill To -->
       <div class="info-grid">
         <div class="info-card">
           <div class="info-card-header">Buyer Information</div>
           <div class="info-card-body">
-            <div class="buyer-store">${escapeHtml(order.storeName)}</div>
-            <div class="buyer-name">${escapeHtml(order.buyerName)}</div>
-            ${order.customerEmail ? `<div class="buyer-detail">${escapeHtml(order.customerEmail)}</div>` : ''}
-            ${order.customerPhone ? `<div class="buyer-detail">${escapeHtml(order.customerPhone)}</div>` : ''}
-            ${order.customerPO ? `<div class="buyer-po">PO: ${escapeHtml(order.customerPO)}</div>` : ''}
+            <div class="info-row"><span class="info-label">Retailer:</span> ${escapeHtml(order.storeName)}</div>
+            <div class="info-row"><span class="info-label">Buyer:</span> ${escapeHtml(order.buyerName)}</div>
+            <div class="info-row"><span class="info-label">Email:</span> ${escapeHtml(order.customerEmail)}</div>
+            <div class="info-row"><span class="info-label">Phone:</span> ${order.customerPhone ? escapeHtml(order.customerPhone) : '—'}</div>
           </div>
         </div>
 
@@ -251,36 +312,32 @@ export function generateOrderConfirmationHtml(input: OrderConfirmationInput): st
       </div>
 
       <!-- Order Summary Table -->
-      <div class="order-section">
+      <div class="section">
         <div class="section-header">Order Summary</div>
-        <table class="order-table">
+        <table class="summary-table">
           <thead>
             <tr>
-              <th class="th-image">Image</th>
-              <th class="th-style">Style # / Name</th>
+              <th class="th-sku">Style #</th>
+              <th class="th-name">Style Name</th>
               <th class="th-color">Color</th>
               <th class="th-size">Size</th>
               <th class="th-qty">Qty</th>
               <th class="th-price">Wholesale</th>
-              ${hasDiscounts ? '<th class="th-discount">Disc%</th>' : ''}
-              <th class="th-total">Total</th>
+              ${hasDiscounts ? '<th class="th-discount">Discount</th>' : ''}
+              <th class="th-total">Line Total</th>
             </tr>
           </thead>
           <tbody>
-            ${itemRows}
+            ${summaryRows}
           </tbody>
         </table>
 
         <!-- Totals -->
-        <div class="totals-section">
-          <div class="totals-summary">
-            <div class="totals-info">
-              <span>${totalStyles} style${totalStyles !== 1 ? 's' : ''}</span>
-              <span class="totals-divider">•</span>
-              <span>${totalUnits} unit${totalUnits !== 1 ? 's' : ''}</span>
-            </div>
+        <div class="totals-container">
+          <div class="totals-info">
+            ${totalStyles} style${totalStyles !== 1 ? 's' : ''} &bull; ${totalUnits} unit${totalUnits !== 1 ? 's' : ''}
           </div>
-          <div class="totals-amounts">
+          <div class="totals-box">
             ${
               hasDiscounts
                 ? `
@@ -288,14 +345,14 @@ export function generateOrderConfirmationHtml(input: OrderConfirmationInput): st
                 <span class="totals-label">Subtotal:</span>
                 <span class="totals-value">${formatCurrency(order.subtotal, order.currency)}</span>
               </div>
-              <div class="totals-row totals-discount">
+              <div class="totals-row discount-row">
                 <span class="totals-label">Discount:</span>
                 <span class="totals-value">-${formatCurrency(order.totalDiscount, order.currency)}</span>
               </div>
             `
                 : ''
             }
-            <div class="totals-row totals-grand">
+            <div class="totals-row grand-total">
               <span class="totals-label">Order Total:</span>
               <span class="totals-value">${formatCurrency(order.orderAmount, order.currency)} ${order.currency}</span>
             </div>
@@ -308,91 +365,162 @@ export function generateOrderConfirmationHtml(input: OrderConfirmationInput): st
         order.orderNotes || order.brandNotes
           ? `
       <div class="notes-grid">
-        ${
-          order.orderNotes
-            ? `
         <div class="notes-card">
           <div class="notes-header">Buyer Notes</div>
-          <div class="notes-body">${escapeHtml(order.orderNotes)}</div>
+          <div class="notes-body">${order.orderNotes ? escapeHtml(order.orderNotes) : '—'}</div>
         </div>
-        `
-            : ''
-        }
-        ${
-          order.brandNotes
-            ? `
         <div class="notes-card">
           <div class="notes-header">Brand Notes</div>
-          <div class="notes-body">${escapeHtml(order.brandNotes)}</div>
+          <div class="notes-body">${order.brandNotes ? escapeHtml(order.brandNotes) : '—'}</div>
         </div>
-        `
-            : ''
-        }
       </div>
       `
           : ''
       }
 
       <!-- Footer -->
-      <footer class="footer">
-        <div class="footer-dates">
+      <footer class="summary-footer">
+        <div class="footer-left">
           <span>Delivery Window: ${formatShipWindow(order.shipStartDate, order.shipEndDate)}</span>
+        </div>
+        <div class="footer-right">
+          <span>Submitted via OrderHub ✓</span>
           ${order.approvalDate ? `<span class="footer-divider">|</span><span>Approved: ${formatDateShort(order.approvalDate)}</span>` : ''}
         </div>
-        <div class="footer-generated">Generated ${formatDate(new Date())}</div>
       </footer>
     </div>
 
+    <!-- ====================================================================== -->
+    <!-- PAGE 2+: ORDER DETAILS (APPENDIX WITH IMAGES)                          -->
+    <!-- ====================================================================== -->
+    <div class="page page-details">
+
+      <header class="details-header">
+        <h2>Order Details — ${escapeHtml(order.orderNumber)}</h2>
+      </header>
+
+      <table class="details-table">
+        <thead>
+          <tr>
+            <th class="dth-image">Image</th>
+            <th class="dth-info">SKU / Description</th>
+            <th class="dth-size">Size</th>
+            <th class="dth-qty">Qty</th>
+            <th class="dth-price">Price</th>
+            <th class="dth-total">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${detailRows}
+        </tbody>
+        <tfoot>
+          <tr>
+            <td colspan="3" class="tfoot-spacer"></td>
+            <td colspan="3" class="tfoot-total">
+              <strong>Total # of Units: ${totalUnits}</strong>
+            </td>
+          </tr>
+        </tfoot>
+      </table>
+
+    </div>
+
+    <!-- ====================================================================== -->
+    <!-- STYLES                                                                 -->
+    <!-- ====================================================================== -->
     <style>
-      /* Base */
-      .confirmation {
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      /* ===== Base Styles ===== */
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
         font-size: 9pt;
         color: #1a1a1a;
         line-height: 1.4;
+        margin: 0;
+        padding: 0;
       }
 
-      /* Header */
+      .page {
+        padding: 0;
+      }
+
+      .text-muted {
+        color: #737373;
+        font-style: italic;
+      }
+
+      /* ===== Page Break ===== */
+      .page-details {
+        page-break-before: always;
+      }
+
+      /* ===== Header ===== */
       .header {
         display: flex;
         justify-content: space-between;
         align-items: flex-start;
-        padding-bottom: 16px;
+        padding-bottom: 12px;
         border-bottom: 2px solid #171717;
-        margin-bottom: 20px;
+        margin-bottom: 16px;
       }
 
       .logo {
-        font-size: 22pt;
+        font-size: 24pt;
         font-weight: 700;
         color: #171717;
         letter-spacing: -0.5px;
       }
 
-      .header-right {
+      .header-contact {
         text-align: right;
-      }
-
-      .order-meta {
-        display: flex;
-        align-items: center;
-        justify-content: flex-end;
-        gap: 12px;
-        margin-bottom: 4px;
-      }
-
-      .order-number {
-        font-size: 13pt;
-        font-weight: 600;
-        color: #171717;
-      }
-
-      .order-status {
-        display: inline-block;
-        padding: 2px 10px;
-        border-radius: 3px;
         font-size: 8pt;
-        font-weight: 500;
+        color: #525252;
+        line-height: 1.6;
+      }
+
+      /* ===== Order Metadata Bar ===== */
+      .order-meta-bar {
+        background: #f5f5f5;
+        border: 1px solid #e5e5e5;
+        border-radius: 4px;
+        padding: 10px 14px;
+        margin-bottom: 16px;
+      }
+
+      .meta-row {
+        display: flex;
+        gap: 30px;
+        margin-bottom: 6px;
+      }
+
+      .meta-row:last-child {
+        margin-bottom: 0;
+      }
+
+      .meta-item {
+        display: flex;
+        gap: 6px;
+      }
+
+      .meta-label {
+        color: #737373;
+        font-size: 8pt;
+      }
+
+      .meta-value {
+        font-weight: 600;
+        font-size: 8pt;
+      }
+
+      .status-badge {
+        display: inline-block;
+        padding: 1px 8px;
+        border-radius: 3px;
+        font-size: 7pt;
+        font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.3px;
       }
@@ -403,115 +531,79 @@ export function generateOrderConfirmationHtml(input: OrderConfirmationInput): st
       .status-invoiced { background: #f3e8ff; color: #6b21a8; }
       .status-cancelled { background: #fee2e2; color: #991b1b; }
 
-      .order-date {
-        font-size: 9pt;
-        color: #525252;
-      }
-
-      .order-rep {
-        font-size: 8pt;
-        color: #737373;
-        margin-top: 2px;
-      }
-
-      /* Info Grid - 3 columns */
+      /* ===== Info Grid (3 columns) ===== */
       .info-grid {
         display: flex;
-        gap: 16px;
-        margin-bottom: 20px;
+        gap: 12px;
+        margin-bottom: 16px;
       }
 
       .info-card {
         flex: 1;
-        border: 1px solid #e5e5e5;
+        border: 1px solid #d4d4d4;
         border-radius: 4px;
         overflow: hidden;
       }
 
       .info-card-header {
-        background: #f5f5f5;
+        background: #e5e5e5;
         padding: 6px 10px;
         font-size: 8pt;
-        font-weight: 600;
+        font-weight: 700;
         text-transform: uppercase;
         letter-spacing: 0.3px;
-        color: #525252;
-        border-bottom: 1px solid #e5e5e5;
+        color: #404040;
       }
 
       .info-card-body {
         padding: 10px;
         font-size: 8pt;
-        min-height: 80px;
+        line-height: 1.6;
+        min-height: 90px;
       }
 
-      .buyer-store {
-        font-weight: 600;
-        font-size: 9pt;
+      .info-row {
         margin-bottom: 2px;
       }
 
-      .buyer-name {
-        color: #525252;
-        margin-bottom: 6px;
-      }
-
-      .buyer-detail {
+      .info-label {
         color: #737373;
-        font-size: 8pt;
       }
 
-      .buyer-po {
-        margin-top: 8px;
-        font-weight: 500;
-      }
-
-      .address-content {
-        line-height: 1.5;
-      }
-
-      .address-content strong {
-        font-size: 9pt;
-      }
-
-      .address-meta {
+      .payment-terms {
         margin-top: 10px;
         padding-top: 8px;
         border-top: 1px solid #e5e5e5;
-        font-size: 8pt;
       }
 
-      .meta-label {
-        color: #737373;
-      }
-
-      .address-empty {
-        color: #a3a3a3;
-        font-style: italic;
-      }
-
-      /* Order Section */
-      .order-section {
-        margin-bottom: 20px;
+      /* ===== Section Header ===== */
+      .section {
+        margin-bottom: 16px;
       }
 
       .section-header {
         font-size: 10pt;
-        font-weight: 600;
-        padding-bottom: 8px;
+        font-weight: 700;
+        padding: 6px 0;
+        border-bottom: 2px solid #171717;
         margin-bottom: 0;
-        border-bottom: 1px solid #e5e5e5;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
       }
 
-      /* Order Table */
-      .order-table {
+      /* ===== Summary Table (No Images) ===== */
+      .summary-table {
         width: 100%;
         border-collapse: collapse;
         font-size: 8pt;
       }
 
-      .order-table th {
-        background: #fafafa;
+      .summary-table thead {
+        display: table-header-group; /* Repeat headers on page break */
+      }
+
+      .summary-table th {
+        background: #f5f5f5;
         font-weight: 600;
         text-align: left;
         padding: 8px 6px;
@@ -522,124 +614,49 @@ export function generateOrderConfirmationHtml(input: OrderConfirmationInput): st
         color: #525252;
       }
 
-      .order-table td {
+      .summary-table td {
         padding: 8px 6px;
         border-bottom: 1px solid #e5e5e5;
         vertical-align: middle;
       }
 
-      .order-table tbody tr:last-child td {
-        border-bottom: none;
+      .summary-table tbody tr:last-child td {
+        border-bottom: 1px solid #d4d4d4;
       }
 
-      /* Column widths */
-      .th-image { width: 60px; text-align: center; }
-      .th-style { width: auto; }
-      .th-color { width: 70px; }
-      .th-size { width: 45px; text-align: center; }
-      .th-qty { width: 40px; text-align: center; }
-      .th-price { width: 70px; text-align: right; }
-      .th-discount { width: 50px; text-align: center; }
-      .th-total { width: 75px; text-align: right; }
+      /* Summary Table Column Widths */
+      .th-sku { width: 80px; }
+      .th-name { width: auto; }
+      .th-color { width: 80px; }
+      .th-size { width: 50px; text-align: center; }
+      .th-qty { width: 45px; text-align: center; }
+      .th-price { width: 75px; text-align: right; }
+      .th-discount { width: 60px; text-align: center; }
+      .th-total { width: 85px; text-align: right; }
 
-      /* Cell styles */
-      .cell-image {
-        text-align: center;
-        padding: 4px 6px;
-      }
+      .cell-sku { font-weight: 600; }
+      .cell-name { }
+      .cell-color { }
+      .cell-size { text-align: center; }
+      .cell-qty { text-align: center; font-weight: 500; }
+      .cell-price { text-align: right; }
+      .cell-discount { text-align: center; color: #16a34a; }
+      .cell-total { text-align: right; font-weight: 600; }
 
-      .product-image {
-        max-width: 50px;
-        max-height: 60px;
-        object-fit: contain;
-        border-radius: 2px;
-      }
-
-      .no-image {
-        width: 50px;
-        height: 50px;
-        background: #f5f5f5;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        color: #a3a3a3;
-        font-size: 10pt;
-        border-radius: 2px;
-        margin: 0 auto;
-      }
-
-      .cell-style {
-        vertical-align: middle;
-      }
-
-      .style-number {
-        font-weight: 600;
-        font-size: 8pt;
-        color: #171717;
-      }
-
-      .style-name {
-        font-size: 7pt;
-        color: #737373;
-        margin-top: 2px;
-        max-width: 180px;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-
-      .cell-color {
-        font-size: 8pt;
-      }
-
-      .cell-size {
-        text-align: center;
-        font-size: 8pt;
-      }
-
-      .cell-qty {
-        text-align: center;
-        font-weight: 500;
-      }
-
-      .cell-price {
-        text-align: right;
-        font-size: 8pt;
-      }
-
-      .cell-discount {
-        text-align: center;
-        font-size: 8pt;
-        color: #16a34a;
-      }
-
-      .cell-total {
-        text-align: right;
-        font-weight: 600;
-        font-size: 8pt;
-      }
-
-      /* Totals Section */
-      .totals-section {
+      /* ===== Totals Container ===== */
+      .totals-container {
         display: flex;
         justify-content: space-between;
         align-items: flex-end;
         padding: 12px 0;
-        border-top: 1px solid #e5e5e5;
-        margin-top: 0;
       }
 
-      .totals-summary {
+      .totals-info {
         font-size: 8pt;
         color: #737373;
       }
 
-      .totals-divider {
-        margin: 0 8px;
-        color: #d4d4d4;
-      }
-
-      .totals-amounts {
+      .totals-box {
         text-align: right;
       }
 
@@ -647,7 +664,7 @@ export function generateOrderConfirmationHtml(input: OrderConfirmationInput): st
         display: flex;
         justify-content: flex-end;
         gap: 20px;
-        padding: 2px 0;
+        padding: 3px 0;
         font-size: 8pt;
       }
 
@@ -656,97 +673,231 @@ export function generateOrderConfirmationHtml(input: OrderConfirmationInput): st
       }
 
       .totals-value {
-        min-width: 80px;
+        min-width: 90px;
         text-align: right;
       }
 
-      .totals-discount .totals-value {
+      .discount-row .totals-value {
         color: #16a34a;
       }
 
-      .totals-grand {
+      .grand-total {
         font-size: 10pt;
-        font-weight: 600;
+        font-weight: 700;
         padding-top: 6px;
         margin-top: 4px;
-        border-top: 1px solid #e5e5e5;
+        border-top: 2px solid #171717;
       }
 
-      .totals-grand .totals-label {
+      .grand-total .totals-label,
+      .grand-total .totals-value {
         color: #171717;
       }
 
-      .totals-grand .totals-value {
-        color: #171717;
-      }
-
-      /* Notes Grid */
+      /* ===== Notes Grid ===== */
       .notes-grid {
         display: flex;
-        gap: 16px;
-        margin-bottom: 20px;
+        gap: 12px;
+        margin-bottom: 16px;
       }
 
       .notes-card {
         flex: 1;
-        border: 1px solid #e5e5e5;
+        border: 1px solid #d4d4d4;
         border-radius: 4px;
         overflow: hidden;
       }
 
       .notes-header {
-        background: #fafafa;
+        background: #f5f5f5;
         padding: 6px 10px;
         font-size: 8pt;
         font-weight: 600;
         color: #525252;
-        border-bottom: 1px solid #e5e5e5;
+        border-bottom: 1px solid #d4d4d4;
       }
 
       .notes-body {
         padding: 10px;
         font-size: 8pt;
-        color: #525252;
+        color: #404040;
         white-space: pre-wrap;
         line-height: 1.5;
+        min-height: 40px;
       }
 
-      /* Footer */
-      .footer {
+      /* ===== Summary Footer ===== */
+      .summary-footer {
         padding-top: 12px;
-        border-top: 1px solid #e5e5e5;
+        border-top: 1px solid #d4d4d4;
         display: flex;
         justify-content: space-between;
         align-items: center;
         font-size: 8pt;
-        color: #737373;
-      }
-
-      .footer-dates {
-        display: flex;
-        align-items: center;
+        color: #525252;
       }
 
       .footer-divider {
-        margin: 0 10px;
+        margin: 0 8px;
         color: #d4d4d4;
       }
 
-      .footer-generated {
-        font-style: italic;
+      /* ===== Details Page (Appendix) ===== */
+      .details-header {
+        text-align: center;
+        padding-bottom: 12px;
+        border-bottom: 2px solid #171717;
+        margin-bottom: 16px;
       }
 
-      /* Print styles */
+      .details-header h2 {
+        font-size: 14pt;
+        font-weight: 700;
+        margin: 0;
+        color: #171717;
+      }
+
+      /* ===== Details Table (With Images) ===== */
+      .details-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 8pt;
+      }
+
+      .details-table thead {
+        display: table-header-group; /* Repeat headers on page break */
+      }
+
+      .details-table th {
+        background: #f5f5f5;
+        font-weight: 600;
+        text-align: left;
+        padding: 10px 8px;
+        border: 1px solid #d4d4d4;
+        font-size: 8pt;
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
+        color: #404040;
+      }
+
+      .details-table td {
+        padding: 10px 8px;
+        border: 1px solid #d4d4d4;
+        vertical-align: top;
+      }
+
+      /* Details Table Column Widths */
+      .dth-image { width: 90px; text-align: center; }
+      .dth-info { width: auto; }
+      .dth-size { width: 60px; text-align: center; }
+      .dth-qty { width: 60px; text-align: center; }
+      .dth-price { width: 80px; text-align: right; }
+      .dth-total { width: 90px; text-align: right; }
+
+      .detail-image {
+        text-align: center;
+        vertical-align: middle;
+      }
+
+      .product-image {
+        max-width: 80px;
+        max-height: 100px;
+        object-fit: contain;
+        border-radius: 3px;
+      }
+
+      .no-image {
+        width: 80px;
+        height: 80px;
+        background: #f5f5f5;
+        border: 1px solid #e5e5e5;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #a3a3a3;
+        font-size: 8pt;
+        border-radius: 3px;
+        margin: 0 auto;
+      }
+
+      .detail-info {
+        vertical-align: top;
+      }
+
+      .detail-sku {
+        font-weight: 700;
+        font-size: 9pt;
+        margin-bottom: 6px;
+      }
+
+      .detail-desc,
+      .detail-color,
+      .detail-category {
+        font-size: 8pt;
+        color: #525252;
+        margin-bottom: 2px;
+      }
+
+      .detail-size {
+        text-align: center;
+        vertical-align: middle;
+        font-size: 9pt;
+      }
+
+      .detail-qty {
+        text-align: center;
+        vertical-align: middle;
+        font-size: 9pt;
+        font-weight: 600;
+      }
+
+      .detail-price {
+        text-align: right;
+        vertical-align: middle;
+      }
+
+      .detail-total {
+        text-align: right;
+        vertical-align: middle;
+        font-weight: 600;
+      }
+
+      .details-table tfoot td {
+        background: #f5f5f5;
+        padding: 10px 8px;
+      }
+
+      .tfoot-spacer {
+        border: none !important;
+        background: transparent !important;
+      }
+
+      .tfoot-total {
+        text-align: right;
+        font-size: 9pt;
+      }
+
+      /* ===== Print Styles ===== */
       @media print {
-        .order-table {
-          page-break-inside: auto;
+        .page-details {
+          page-break-before: always;
         }
 
-        .order-table tr {
+        .summary-table thead,
+        .details-table thead {
+          display: table-header-group;
+        }
+
+        .summary-table tr,
+        .details-table tr {
           page-break-inside: avoid;
         }
 
         .notes-grid {
+          page-break-inside: avoid;
+        }
+
+        .totals-container {
           page-break-inside: avoid;
         }
       }

@@ -56,20 +56,51 @@ export async function generatePdf(
 ): Promise<Uint8Array> {
   const mergedOptions = { ...DEFAULT_OPTIONS, ...options }
 
-  // Get Chromium executable path
-  const execPath = await chromium.executablePath()
-  console.log('Chromium executable path:', execPath)
+  // In development, prefer local Chrome installation over serverless Chromium
+  const isDev = process.env.NODE_ENV === 'development'
+  const localChromePath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+
+  let execPath: string | undefined
+  let browserArgs: string[]
+
+  if (isDev) {
+    // Try local Chrome first in development
+    const fs = await import('fs')
+    if (fs.existsSync(localChromePath)) {
+      execPath = localChromePath
+      browserArgs = [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--font-render-hinting=none',
+        '--disable-font-subpixel-positioning',
+      ]
+      console.log('Using local Chrome:', execPath)
+    } else {
+      execPath = await chromium.executablePath()
+      browserArgs = [
+        ...chromium.args,
+        '--font-render-hinting=none',
+        '--disable-font-subpixel-positioning',
+      ]
+      console.log('Using serverless Chromium:', execPath)
+    }
+  } else {
+    // Production: use serverless Chromium
+    execPath = await chromium.executablePath()
+    browserArgs = [
+      ...chromium.args,
+      '--font-render-hinting=none',
+      '--disable-font-subpixel-positioning',
+    ]
+    console.log('Chromium executable path:', execPath)
+  }
 
   if (!execPath) {
     throw new Error('Chromium executable not found')
   }
 
   const browser = await puppeteer.launch({
-    args: [
-      ...chromium.args,
-      '--font-render-hinting=none',
-      '--disable-font-subpixel-positioning',
-    ],
+    args: browserArgs,
     executablePath: execPath,
     headless: true,
   })
