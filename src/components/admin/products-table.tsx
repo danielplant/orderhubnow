@@ -184,8 +184,9 @@ export function ProductsTable({
 
   const doExportPdf = React.useCallback(() => {
     const params = new URLSearchParams(searchParams.toString())
+    params.set('currency', exportCurrency)
     window.location.href = `/api/products/export-pdf?${params.toString()}`
-  }, [searchParams])
+  }, [searchParams, exportCurrency])
 
   const handleSkuClick = React.useCallback(async (row: AdminSkuRow) => {
     setIsLoading(true)
