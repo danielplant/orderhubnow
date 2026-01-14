@@ -19,7 +19,7 @@ export default async function RepLoginPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-muted/30">
       <div className="bg-background p-8 rounded-lg shadow-lg">
-        <h1 className="text-2xl font-bold mb-2 text-center">MyOrderHub</h1>
+        <h1 className="text-2xl font-bold mb-2 text-center">OrderHub</h1>
         <p className="text-sm text-muted-foreground mb-6 text-center">Sales Rep Portal</p>
         <Suspense fallback={<div>Loading...</div>}>
           <LoginForm requiredRole="rep" defaultRedirect="/rep" />
@@ -30,6 +30,6 @@ export default async function RepLoginPage() {
 }
 
 export const metadata = {
-  title: 'Rep Login | MyOrderHub',
+  title: 'Rep Login | OrderHub',
   description: 'Sign in to the sales rep portal',
 }

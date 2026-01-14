@@ -2,7 +2,7 @@
  * Orders PDF Export API
  *
  * Generates a PDF report of orders using puppeteer-core + @sparticuz/chromium.
- * Design: Generic "MyOrderHub" branding, grayscale, US Letter landscape.
+ * Design: Generic "OrderHub" branding, grayscale, US Letter landscape.
  */
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -167,7 +167,7 @@ function generateOrdersPdfHtml(
   const content = `
     <div class="pdf-header">
       <div class="pdf-header-left">
-        <div class="pdf-logo">MyOrderHub</div>
+        <div class="pdf-logo">OrderHub</div>
       </div>
       <div class="pdf-header-right">
         <div class="pdf-title">ORDERS REPORT</div>
@@ -217,7 +217,7 @@ function generateOrdersPdfHtml(
     </div>
   `
 
-  return wrapHtml(content, 'Orders Report - MyOrderHub')
+  return wrapHtml(content, 'Orders Report - OrderHub')
 }
 
 export async function POST() {

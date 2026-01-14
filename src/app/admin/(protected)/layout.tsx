@@ -11,7 +11,7 @@ export default async function AdminLayout({ children }: { children: ReactNode })
     <div className="min-h-screen bg-muted/30">
       <header className="border-b bg-background px-6 py-4">
         <div className="flex items-center justify-between">
-          <div className="text-sm font-semibold">MyOrderHub — Admin</div>
+          <div className="text-sm font-semibold">OrderHub — Admin</div>
           <div className="flex items-center gap-4">
             <span className="text-sm text-muted-foreground">
               Logged in as <span className="font-medium text-foreground">{userName}</span>

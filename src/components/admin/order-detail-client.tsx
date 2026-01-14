@@ -2,13 +2,16 @@
 
 import * as React from 'react'
 import Link from 'next/link'
-import { Button } from '@/components/ui'
+import { useRouter } from 'next/navigation'
+import { Button, Card, CardContent, CardHeader, CardTitle, Input } from '@/components/ui'
 import { EditShipmentModal } from './edit-shipment-modal'
 import { ShipmentModal } from './shipment-modal'
 import { OrderAdjustments } from './order-adjustments'
 import { formatCurrency, cn } from '@/lib/utils'
 import { getTrackingUrl } from '@/lib/types/shipment'
+import { updateOrderDetails } from '@/lib/data/actions/orders'
 import type { ShipmentRow, Carrier } from '@/lib/types/shipment'
+import { Pencil, X, Check, Loader2 } from 'lucide-react'
 
 // ============================================================================
 // Types
@@ -259,5 +262,144 @@ export function ShipmentHistory({
         onOpenChange={setShowCreateShipment}
       />
     </div>
+  )
+}
+
+// ============================================================================
+// PDF Settings Card
+// ============================================================================
+
+const PAYMENT_TERMS_OPTIONS = [
+  'Net 30',
+  'Net 60',
+  'Net 90',
+  'COD',
+  'Due on Receipt',
+  'Prepaid',
+]
+
+interface PDFSettingsCardProps {
+  orderId: string
+  paymentTerms: string
+  approvalDate: string
+  brandNotes: string
+}
+
+export function PDFSettingsCard({
+  orderId,
+  paymentTerms: initialPaymentTerms,
+  approvalDate: initialApprovalDate,
+  brandNotes: initialBrandNotes,
+}: PDFSettingsCardProps) {
+  const router = useRouter()
+  const [isEditing, setIsEditing] = React.useState(false)
+  const [isSaving, setIsSaving] = React.useState(false)
+
+  const [paymentTerms, setPaymentTerms] = React.useState(initialPaymentTerms)
+  const [approvalDate, setApprovalDate] = React.useState(initialApprovalDate)
+  const [brandNotes, setBrandNotes] = React.useState(initialBrandNotes)
+
+  // Reset form when canceling
+  const handleCancel = () => {
+    setPaymentTerms(initialPaymentTerms)
+    setApprovalDate(initialApprovalDate)
+    setBrandNotes(initialBrandNotes)
+    setIsEditing(false)
+  }
+
+  const handleSave = async () => {
+    setIsSaving(true)
+    try {
+      const result = await updateOrderDetails({
+        orderId,
+        paymentTerms,
+        approvalDate: approvalDate || null,
+        brandNotes,
+      })
+      if (result.success) {
+        setIsEditing(false)
+        router.refresh()
+      } else {
+        console.error('Failed to save:', result.error)
+      }
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <CardTitle className="text-base">PDF Settings</CardTitle>
+        {!isEditing ? (
+          <Button variant="ghost" size="sm" onClick={() => setIsEditing(true)}>
+            <Pencil className="h-4 w-4" />
+          </Button>
+        ) : (
+          <div className="flex gap-1">
+            <Button variant="ghost" size="sm" onClick={handleCancel} disabled={isSaving}>
+              <X className="h-4 w-4" />
+            </Button>
+            <Button variant="ghost" size="sm" onClick={handleSave} disabled={isSaving}>
+              {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+            </Button>
+          </div>
+        )}
+      </CardHeader>
+      <CardContent className="space-y-3 text-sm">
+        {/* Payment Terms */}
+        <div className="flex justify-between gap-4">
+          <span className="text-muted-foreground">Payment Terms</span>
+          {isEditing ? (
+            <select
+              value={paymentTerms}
+              onChange={(e) => setPaymentTerms(e.target.value)}
+              className="w-32 h-8 px-2 text-sm rounded-md border border-input bg-background"
+            >
+              <option value="">Select...</option>
+              {PAYMENT_TERMS_OPTIONS.map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <span className="font-medium">{paymentTerms || '—'}</span>
+          )}
+        </div>
+
+        {/* Approval Date */}
+        <div className="flex justify-between gap-4">
+          <span className="text-muted-foreground">Approval Date</span>
+          {isEditing ? (
+            <Input
+              type="date"
+              value={approvalDate}
+              onChange={(e) => setApprovalDate(e.target.value)}
+              className="w-36 h-8"
+            />
+          ) : (
+            <span className="font-medium">{approvalDate || '—'}</span>
+          )}
+        </div>
+
+        {/* Brand Notes */}
+        <div className="space-y-1">
+          <span className="text-muted-foreground">Brand Notes</span>
+          {isEditing ? (
+            <textarea
+              value={brandNotes}
+              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setBrandNotes(e.target.value)}
+              placeholder="Internal notes for the brand (shown on PDF)"
+              className="w-full min-h-[80px] text-sm px-3 py-2 rounded-md border border-input bg-background resize-y"
+            />
+          ) : (
+            <div className="text-sm whitespace-pre-wrap">
+              {brandNotes || '—'}
+            </div>
+          )}
+        </div>
+      </CardContent>
+    </Card>
   )
 }

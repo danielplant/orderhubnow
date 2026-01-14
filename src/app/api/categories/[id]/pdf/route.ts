@@ -2,7 +2,7 @@
  * Category Line Sheet PDF API
  *
  * Generates a PDF line sheet for a specific category with product images.
- * Design: Generic "MyOrderHub" branding, grayscale, US Letter portrait.
+ * Design: Generic "OrderHub" branding, grayscale, US Letter portrait.
  *
  * Access Points:
  * - Categories page: Per-row "Download Line Sheet" button
@@ -219,7 +219,7 @@ function generateLineSheetHtml(
   const content = `
     <div class="pdf-header">
       <div class="pdf-header-left">
-        <div class="pdf-logo">MyOrderHub</div>
+        <div class="pdf-logo">OrderHub</div>
       </div>
       <div class="pdf-header-right">
         <div class="pdf-title">CATEGORY: ${categoryName}</div>

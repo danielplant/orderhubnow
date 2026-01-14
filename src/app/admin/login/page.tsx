@@ -19,7 +19,7 @@ export default async function AdminLoginPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-muted/30">
       <div className="bg-background p-8 rounded-lg shadow-lg">
-        <h1 className="text-2xl font-bold mb-2 text-center">MyOrderHub</h1>
+        <h1 className="text-2xl font-bold mb-2 text-center">OrderHub</h1>
         <p className="text-sm text-muted-foreground mb-6 text-center">Admin Portal</p>
         <Suspense fallback={<div>Loading...</div>}>
           <LoginForm requiredRole="admin" defaultRedirect="/admin" />
@@ -30,6 +30,6 @@ export default async function AdminLoginPage() {
 }
 
 export const metadata = {
-  title: 'Admin Login | MyOrderHub',
+  title: 'Admin Login | OrderHub',
   description: 'Sign in to the admin portal',
 }

@@ -137,7 +137,7 @@ function SetPasswordForm() {
       <div className="bg-background p-8 rounded-lg shadow-lg w-full max-w-md">
         <h1 className="text-2xl font-bold mb-2 text-center">Set Your Password</h1>
         <p className="text-sm text-muted-foreground mb-6 text-center">
-          Choose a password for your MyOrderHub account.
+          Choose a password for your OrderHub account.
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-4">

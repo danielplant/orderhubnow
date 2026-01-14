@@ -1,7 +1,7 @@
 export const appConfig = {
-  brandName: 'MyOrderHub',
-  name: 'MyOrderHub',
-  nameShort: 'MOH',
+  brandName: 'OrderHub',
+  name: 'OrderHub',
+  nameShort: 'OH',
   accentColor: '#90FCCC',
   helpText: 'for wholesale ordering',
 }

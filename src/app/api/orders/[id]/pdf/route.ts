@@ -2,13 +2,19 @@
  * Order PDF Confirmation API
  *
  * GET /api/orders/[id]/pdf
- * Returns a PDF order confirmation with optional detailed appendix.
+ * Returns a NuORDER-style PDF order confirmation with:
+ * - Ship-To/Bill-To addresses
+ * - Inline product images
+ * - Color, Size, Discount columns
+ * - Payment Terms, Approval Date, Brand Notes
  */
 
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { generatePdf } from '@/lib/pdf/generate'
 import { generateOrderConfirmationHtml } from '@/lib/pdf/order-confirmation'
+import { parsePrice, resolveColor } from '@/lib/utils'
+import { extractSize } from '@/lib/utils/size-sort'
 
 interface RouteContext {
   params: Promise<{ id: string }>
@@ -23,7 +29,6 @@ export async function GET(
 
   // Validate order ID
   const orderId = parseInt(id, 10)
-  console.log('PDF Request for order:', orderId)
 
   if (isNaN(orderId) || orderId <= 0) {
     return NextResponse.json(
@@ -33,12 +38,33 @@ export async function GET(
   }
 
   try {
-    // Fetch order
+    // Fetch order with new fields
     const order = await prisma.customerOrders.findUnique({
       where: { ID: BigInt(orderId) },
+      select: {
+        ID: true,
+        OrderNumber: true,
+        StoreName: true,
+        BuyerName: true,
+        SalesRep: true,
+        CustomerEmail: true,
+        CustomerPhone: true,
+        Country: true,
+        OrderAmount: true,
+        OrderNotes: true,
+        CustomerPO: true,
+        ShipStartDate: true,
+        ShipEndDate: true,
+        OrderDate: true,
+        Website: true,
+        OrderStatus: true,
+        CustomerID: true,
+        // New PDF fields
+        PaymentTerms: true,
+        ApprovalDate: true,
+        BrandNotes: true,
+      },
     })
-
-    console.log('Order found:', order ? 'yes' : 'no')
 
     if (!order) {
       return NextResponse.json(
@@ -47,28 +73,55 @@ export async function GET(
       )
     }
 
-    // Fetch order items
+    // Fetch customer for addresses (if CustomerID exists)
+    let customer = null
+    if (order.CustomerID) {
+      customer = await prisma.customers.findUnique({
+        where: { ID: order.CustomerID },
+        select: {
+          StoreName: true,
+          CustomerName: true,
+          Email: true,
+          Phone: true,
+          // Bill-To address
+          Street1: true,
+          Street2: true,
+          City: true,
+          StateProvince: true,
+          ZipPostal: true,
+          Country: true,
+          // Ship-To address
+          ShippingStreet1: true,
+          ShippingStreet2: true,
+          ShippingCity: true,
+          ShippingStateProvince: true,
+          ShippingZipPostal: true,
+          ShippingCountry: true,
+        },
+      })
+    }
+
+    // Fetch order items with LineDiscount
     const orderItems = await prisma.customerOrdersItems.findMany({
       where: { CustomerOrderID: BigInt(orderId) },
+      select: {
+        SKU: true,
+        Quantity: true,
+        Price: true,
+        PriceCurrency: true,
+        LineDiscount: true,
+      },
     })
 
-    console.log('Order items count:', orderItems.length)
+    // Fetch SKU details for each order item (image, size, description, category, color, MSRP)
+    const skuIds = orderItems.map((item) => item.SKU).filter(Boolean) as string[]
 
-    // Fetch SKU details for each order item (image, size, description, category)
-    // Order items may have prefixes (e.g., "DU92PC-582P-GH-7/8") that don't exist in Sku table ("582P-GH-7/8")
-    // So we need to try multiple matching strategies
-    const skuIds = orderItems.map((item) => item.SKU).filter(Boolean)
-
-    // Build a list of potential SKU IDs to search for (exact + normalized versions)
+    // Build potential SKU IDs (handle prefix normalization)
     const potentialSkuIds = new Set<string>()
-    const skuNormalizationMap = new Map<string, string>() // normalized -> original order item SKU
+    const skuNormalizationMap = new Map<string, string>()
 
     for (const orderSkuId of skuIds) {
-      // Add exact match
       potentialSkuIds.add(orderSkuId)
-
-      // Try stripping common prefixes (DU9, 2PC-, etc.)
-      // Pattern: often has format like "DU92PC-582P-GH-7/8" where "582P-GH-7/8" is the Sku table ID
       const parts = orderSkuId.split('-')
       for (let i = 0; i < parts.length; i++) {
         const suffix = parts.slice(i).join('-')
@@ -81,16 +134,27 @@ export async function GET(
 
     const skus = await prisma.sku.findMany({
       where: { SkuID: { in: Array.from(potentialSkuIds) } },
-      include: {
-        SkuCategories: true,
+      select: {
+        SkuID: true,
+        Description: true,
+        OrderEntryDescription: true,
+        SkuColor: true,
+        Size: true,
+        ShopifyImageURL: true,
+        PriceCAD: true,
+        PriceUSD: true,
+        MSRPCAD: true,
+        MSRPUSD: true,
+        SkuCategories: {
+          select: { Name: true },
+        },
       },
     })
 
-    // Create a map for quick SKU lookup - map both exact and normalized versions
-    const skuMap = new Map<string, typeof skus[0]>()
+    // Create SKU lookup map
+    const skuMap = new Map<string, (typeof skus)[0]>()
     for (const sku of skus) {
       skuMap.set(sku.SkuID, sku)
-      // If this SKU ID was a normalized version, also map the original order item SKU
       const originalOrderSku = skuNormalizationMap.get(sku.SkuID)
       if (originalOrderSku) {
         skuMap.set(originalOrderSku, sku)
@@ -99,6 +163,77 @@ export async function GET(
 
     // Determine currency from Country field (legacy behavior)
     const currency = order.Country?.toUpperCase().includes('CAD') ? 'CAD' : 'USD'
+
+    // Build ship-to address
+    const shipToAddress = customer?.ShippingStreet1
+      ? {
+          street1: customer.ShippingStreet1 || '',
+          street2: customer.ShippingStreet2 || undefined,
+          city: customer.ShippingCity || '',
+          stateProvince: customer.ShippingStateProvince || '',
+          zipPostal: customer.ShippingZipPostal || '',
+          country: customer.ShippingCountry || '',
+        }
+      : null
+
+    // Build bill-to address (check if same as shipping)
+    let billToAddress: typeof shipToAddress | 'same' = null
+    if (customer?.Street1) {
+      const isSameAsShipping =
+        customer.Street1 === customer.ShippingStreet1 &&
+        customer.City === customer.ShippingCity &&
+        customer.ZipPostal === customer.ShippingZipPostal
+
+      if (isSameAsShipping) {
+        billToAddress = 'same'
+      } else {
+        billToAddress = {
+          street1: customer.Street1 || '',
+          street2: customer.Street2 || undefined,
+          city: customer.City || '',
+          stateProvince: customer.StateProvince || '',
+          zipPostal: customer.ZipPostal || '',
+          country: customer.Country || '',
+        }
+      }
+    }
+
+    // Calculate totals
+    let subtotal = 0
+    let totalDiscount = 0
+
+    // Build line items with SKU details
+    const items = orderItems.map((item) => {
+      const sku = skuMap.get(item.SKU || '')
+      const qty = item.Quantity || 0
+      const price = item.Price || 0
+      const discount = item.LineDiscount || 0
+      const discountAmount = (price * qty * discount) / 100
+      const lineTotal = price * qty - discountAmount
+
+      subtotal += price * qty
+      totalDiscount += discountAmount
+
+      const description = sku?.OrderEntryDescription || sku?.Description || ''
+
+      return {
+        sku: item.SKU || 'Unknown SKU',
+        quantity: qty,
+        price: price,
+        currency: currency,
+        lineTotal: lineTotal,
+        discount: discount,
+        // Enhanced SKU details
+        imageUrl: sku?.ShopifyImageURL || null,
+        size: extractSize(sku?.Size || ''),
+        description: description,
+        category: sku?.SkuCategories?.Name || '',
+        color: resolveColor(sku?.SkuColor || null, item.SKU || '', description),
+        retailPrice: currency === 'CAD'
+          ? parsePrice(sku?.MSRPCAD)
+          : parsePrice(sku?.MSRPUSD),
+      }
+    })
 
     // Build order data for PDF
     const orderData = {
@@ -117,32 +252,23 @@ export async function GET(
       orderDate: order.OrderDate || new Date(),
       website: order.Website || '',
       orderStatus: order.OrderStatus || 'Pending',
+      // New address fields
+      shipToAddress,
+      billToAddress,
+      // New PDF config fields
+      paymentTerms: order.PaymentTerms || undefined,
+      approvalDate: order.ApprovalDate || undefined,
+      brandNotes: order.BrandNotes || undefined,
+      // Calculated totals
+      subtotal,
+      totalDiscount,
     }
-
-    // Build line items with SKU details
-    const items = orderItems.map((item) => {
-      const sku = skuMap.get(item.SKU || '')
-      return {
-        sku: item.SKU || 'Unknown SKU',
-        quantity: item.Quantity || 0,
-        price: item.Price || 0,
-        currency: currency,
-        lineTotal: (item.Quantity || 0) * (item.Price || 0),
-        // Enhanced SKU details
-        imageUrl: sku?.ShopifyImageURL || null,
-        size: sku?.Size || '',
-        description: sku?.OrderEntryDescription || sku?.Description || '',
-        category: sku?.SkuCategories?.Name || '',
-      }
-    })
 
     // Generate HTML
     const html = generateOrderConfirmationHtml({
       order: orderData,
       items,
     })
-
-    console.log('HTML length:', html.length)
 
     // DEBUG MODE: Return raw HTML instead of PDF
     if (debugMode === 'html') {
@@ -166,7 +292,7 @@ export async function GET(
     // Build filename
     const filename = `${order.OrderNumber || orderId}-Confirmation.pdf`
 
-    // Return PDF response - convert Uint8Array to Buffer
+    // Return PDF response
     const buffer = Buffer.from(pdfBuffer)
     return new NextResponse(buffer, {
       status: 200,

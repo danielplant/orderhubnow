@@ -50,6 +50,6 @@ export const transporter = {
 }
 
 // Email addresses from config
-export const EMAIL_FROM = process.env.EMAIL_FROM || 'orders@myorderhub.com'
+export const EMAIL_FROM = process.env.EMAIL_FROM || 'orders@orderhub.com'
 export const EMAIL_CC = process.env.EMAIL_CC || ''
 export const EMAIL_SALES = process.env.EMAIL_SALES || ''

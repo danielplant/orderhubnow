@@ -57,7 +57,7 @@ async function exportToXLSX(
   visibleColumns: string[]
 ): Promise<ArrayBuffer> {
   const workbook = new ExcelJS.Workbook();
-  workbook.creator = 'MyOrderHub';
+  workbook.creator = 'OrderHub';
   workbook.created = new Date();
   
   const sheet = workbook.addWorksheet(config.name);
@@ -268,7 +268,7 @@ export async function GET(request: NextRequest) {
         const html = wrapHtml(`
           <div class="pdf-header">
             <div class="pdf-header-left">
-              <span class="pdf-logo">MyOrderHub</span>
+              <span class="pdf-logo">OrderHub</span>
             </div>
             <div class="pdf-header-right">
               <div class="pdf-title">${config.name}</div>

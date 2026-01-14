@@ -226,7 +226,7 @@ export async function POST(request: NextRequest) {
 export async function GET() {
   try {
     const workbook = new ExcelJS.Workbook()
-    workbook.creator = 'MyOrderHub'
+    workbook.creator = 'OrderHub'
     workbook.created = new Date()
 
     const sheet = workbook.addWorksheet('Products Template')

@@ -21,7 +21,7 @@ const SIZE_ORDER: string[] = [
   // Teen/Adult numeric
   '18', '18/20', '20',
   // Letter sizes (small to large)
-  'XXS', 'XS', 'S', 'M', 'M/L', 'L', 'XL', 'XXL',
+  'XXXS', 'XXS', 'XS', 'S', 'M', 'M/L', 'L', 'XL', 'XXL',
   // Letter sizes with parenthetical numeric (small to large)
   'XS(6/6X)', 'S(7/8)', 'M(10/12)', 'L(14/16)',
   // Junior sizes
@@ -84,7 +84,7 @@ export function extractSize(variantTitle: string): string {
   if (!variantTitle) return '';
 
   // First strip any prepack suffix
-  let cleaned = stripPrepackSuffix(variantTitle);
+  const cleaned = stripPrepackSuffix(variantTitle);
 
   // If it doesn't contain " / ", normalize and return as-is
   if (!cleaned.includes(' / ')) {

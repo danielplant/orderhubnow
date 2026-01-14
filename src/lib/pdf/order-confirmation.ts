@@ -1,11 +1,25 @@
 /**
  * Order Confirmation PDF Template
  *
- * Generates customer-facing order confirmation HTML.
- * Design: Clean, professional MyOrderHub format with detailed appendix.
+ * NuORDER-style professional wholesale order confirmation.
+ * Features: Inline product images, Ship-To/Bill-To addresses,
+ * Color/Size columns, line-level discounts, dual notes sections.
  */
 
 import { wrapHtml } from './generate'
+
+// ============================================================================
+// Types
+// ============================================================================
+
+interface Address {
+  street1: string
+  street2?: string
+  city: string
+  stateProvince: string
+  zipPostal: string
+  country: string
+}
 
 interface OrderData {
   orderNumber: string
@@ -23,6 +37,16 @@ interface OrderData {
   orderDate: Date
   website: string
   orderStatus: string
+  // Address fields
+  shipToAddress: Address | null
+  billToAddress: Address | 'same' | null
+  // PDF configuration fields
+  paymentTerms?: string
+  approvalDate?: Date
+  brandNotes?: string
+  // Calculated totals
+  subtotal: number
+  totalDiscount: number
 }
 
 interface LineItem {
@@ -31,17 +55,24 @@ interface LineItem {
   price: number
   currency: string
   lineTotal: number
-  // Optional enhanced fields for appendix
+  discount: number
+  // Enhanced fields
   imageUrl?: string | null
   size?: string
   description?: string
   category?: string
+  color?: string
+  retailPrice?: number | null
 }
 
 interface OrderConfirmationInput {
   order: OrderData
   items: LineItem[]
 }
+
+// ============================================================================
+// Formatters
+// ============================================================================
 
 function formatCurrency(amount: number, currency: 'USD' | 'CAD'): string {
   return new Intl.NumberFormat('en-US', {
@@ -60,548 +91,662 @@ function formatDate(date: Date): string {
   })
 }
 
+function formatDateShort(date: Date): string {
+  return date.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  })
+}
+
 function formatShipWindow(start: Date, end: Date): string {
   const startStr = start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
   const endStr = end.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-  return `${startStr} - ${endStr}`
+  return `${startStr} – ${endStr}`
 }
+
+function formatAddress(address: Address): string {
+  const lines = [
+    address.street1,
+    address.street2,
+    `${address.city}, ${address.stateProvince} ${address.zipPostal}`,
+    address.country,
+  ].filter(Boolean)
+  return lines.join('<br/>')
+}
+
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+// ============================================================================
+// Template Generator
+// ============================================================================
 
 export function generateOrderConfirmationHtml(input: OrderConfirmationInput): string {
   const { order, items } = input
 
   // Calculate total units
   const totalUnits = items.reduce((sum, item) => sum + item.quantity, 0)
+  const totalStyles = new Set(items.map((item) => item.sku.split('-').slice(0, -1).join('-') || item.sku)).size
 
-  // Check if we have enhanced item data (images, descriptions, etc.)
-  const hasEnhancedData = items.some(item => item.imageUrl || item.description || item.size)
+  // Has any discount?
+  const hasDiscounts = items.some((item) => item.discount > 0) || order.totalDiscount > 0
 
-  // Generate simple line items rows for main section
+  // Generate line item rows with inline images
   const itemRows = items
     .map(
       (item) => `
       <tr>
-        <td class="item-sku">${item.sku}</td>
-        <td class="text-center">${item.quantity}</td>
-        <td class="text-right">${formatCurrency(item.price, order.currency)}</td>
-        <td class="text-right font-medium">${formatCurrency(item.lineTotal, order.currency)}</td>
-      </tr>
-    `
-    )
-    .join('')
-
-  // Generate detailed appendix rows (with images, sizes, descriptions)
-  const appendixRows = items
-    .map(
-      (item) => `
-      <tr>
-        <td class="appendix-image-cell">
+        <td class="cell-image">
           ${
             item.imageUrl
-              ? `<img src="${item.imageUrl}" alt="${item.sku}" class="appendix-product-image" />`
-              : `<div class="appendix-no-image">No Image</div>`
+              ? `<img src="${item.imageUrl}" alt="${escapeHtml(item.sku)}" class="product-image" />`
+              : `<div class="no-image">—</div>`
           }
         </td>
-        <td class="appendix-sku-cell">
-          <div class="appendix-sku-id">${item.sku}</div>
-          ${item.description ? `<div class="appendix-sku-desc">Description: ${item.description}</div>` : ''}
-          ${item.category ? `<div class="appendix-sku-category">Category: ${item.category}</div>` : ''}
+        <td class="cell-style">
+          <div class="style-number">${escapeHtml(item.sku)}</div>
+          ${item.description ? `<div class="style-name">${escapeHtml(item.description)}</div>` : ''}
         </td>
-        <td class="appendix-size-cell">${item.size || ''}</td>
-        <td class="appendix-qty-cell">${item.quantity}</td>
-        <td class="appendix-price-cell">${formatCurrency(item.price, order.currency)}</td>
-        <td class="appendix-total-cell">${formatCurrency(item.lineTotal, order.currency)}</td>
+        <td class="cell-color">${item.color ? escapeHtml(item.color) : '—'}</td>
+        <td class="cell-size">${item.size || '—'}</td>
+        <td class="cell-qty">${item.quantity}</td>
+        <td class="cell-price">${formatCurrency(item.price, order.currency)}</td>
+        ${hasDiscounts ? `<td class="cell-discount">${item.discount > 0 ? `${item.discount}%` : '—'}</td>` : ''}
+        <td class="cell-total">${formatCurrency(item.lineTotal, order.currency)}</td>
       </tr>
     `
     )
     .join('')
 
+  // Build Ship-To section
+  const shipToHtml = order.shipToAddress
+    ? `
+      <div class="address-content">
+        <strong>${escapeHtml(order.storeName)}</strong><br/>
+        ${formatAddress(order.shipToAddress)}
+      </div>
+      <div class="address-meta">
+        <div><span class="meta-label">Ship Window:</span> ${formatShipWindow(order.shipStartDate, order.shipEndDate)}</div>
+      </div>
+    `
+    : `<div class="address-empty">No shipping address on file</div>`
+
+  // Build Bill-To section
+  let billToHtml: string
+  if (order.billToAddress === 'same') {
+    billToHtml = `
+      <div class="address-content">
+        <em>Same as Shipping</em>
+      </div>
+    `
+  } else if (order.billToAddress) {
+    billToHtml = `
+      <div class="address-content">
+        <strong>${escapeHtml(order.storeName)}</strong><br/>
+        ${formatAddress(order.billToAddress)}
+      </div>
+    `
+  } else {
+    billToHtml = `<div class="address-empty">No billing address on file</div>`
+  }
+
+  // Payment terms in Bill-To section
+  if (order.paymentTerms) {
+    billToHtml += `
+      <div class="address-meta">
+        <div><span class="meta-label">Payment Terms:</span> ${escapeHtml(order.paymentTerms)}</div>
+      </div>
+    `
+  }
+
   const content = `
-    <div class="confirmation-container">
+    <div class="confirmation">
       <!-- Header -->
-      <div class="confirmation-header">
-        <div class="logo-section">
-          <div class="logo">MyOrderHub</div>
-          <div class="tagline">Wholesale Order Management</div>
+      <header class="header">
+        <div class="header-left">
+          <div class="logo">OrderHub</div>
         </div>
-        <div class="order-info">
-          <div class="order-number">Order #${order.orderNumber}</div>
+        <div class="header-right">
+          <div class="order-meta">
+            <div class="order-number">Order ${escapeHtml(order.orderNumber)}</div>
+            <div class="order-status status-${order.orderStatus.toLowerCase().replace(/\s+/g, '-')}">${escapeHtml(order.orderStatus)}</div>
+          </div>
           <div class="order-date">${formatDate(order.orderDate)}</div>
-          <div class="order-status status-${order.orderStatus.toLowerCase()}">${order.orderStatus}</div>
+          <div class="order-rep">Sales Rep: ${escapeHtml(order.salesRep)}</div>
         </div>
-      </div>
+      </header>
 
-      <!-- Thank You Message -->
-      <div class="thank-you-section">
-        <h1>Thank You for Your Order!</h1>
-        <p>We've received your order and it's being processed. You'll receive a confirmation email at <strong>${order.customerEmail}</strong>.</p>
-      </div>
-
-      <!-- Customer & Order Details -->
-      <div class="details-grid">
-        <div class="details-card">
-          <h3>Customer Information</h3>
-          <div class="detail-row">
-            <span class="label">Store:</span>
-            <span class="value">${order.storeName}</span>
+      <!-- Info Cards: Buyer | Ship To | Bill To -->
+      <div class="info-grid">
+        <div class="info-card">
+          <div class="info-card-header">Buyer Information</div>
+          <div class="info-card-body">
+            <div class="buyer-store">${escapeHtml(order.storeName)}</div>
+            <div class="buyer-name">${escapeHtml(order.buyerName)}</div>
+            ${order.customerEmail ? `<div class="buyer-detail">${escapeHtml(order.customerEmail)}</div>` : ''}
+            ${order.customerPhone ? `<div class="buyer-detail">${escapeHtml(order.customerPhone)}</div>` : ''}
+            ${order.customerPO ? `<div class="buyer-po">PO: ${escapeHtml(order.customerPO)}</div>` : ''}
           </div>
-          <div class="detail-row">
-            <span class="label">Contact:</span>
-            <span class="value">${order.buyerName}</span>
-          </div>
-          <div class="detail-row">
-            <span class="label">Email:</span>
-            <span class="value">${order.customerEmail}</span>
-          </div>
-          <div class="detail-row">
-            <span class="label">Phone:</span>
-            <span class="value">${order.customerPhone}</span>
-          </div>
-          ${order.website ? `
-          <div class="detail-row">
-            <span class="label">Website:</span>
-            <span class="value">${order.website}</span>
-          </div>
-          ` : ''}
         </div>
 
-        <div class="details-card">
-          <h3>Order Details</h3>
-          <div class="detail-row">
-            <span class="label">Sales Rep:</span>
-            <span class="value">${order.salesRep}</span>
+        <div class="info-card">
+          <div class="info-card-header">Ship To</div>
+          <div class="info-card-body">
+            ${shipToHtml}
           </div>
-          <div class="detail-row">
-            <span class="label">Ship Window:</span>
-            <span class="value">${formatShipWindow(order.shipStartDate, order.shipEndDate)}</span>
-          </div>
-          ${order.customerPO ? `
-          <div class="detail-row">
-            <span class="label">Customer PO:</span>
-            <span class="value">${order.customerPO}</span>
-          </div>
-          ` : ''}
-          <div class="detail-row">
-            <span class="label">Currency:</span>
-            <span class="value">${order.currency}</span>
+        </div>
+
+        <div class="info-card">
+          <div class="info-card-header">Bill To</div>
+          <div class="info-card-body">
+            ${billToHtml}
           </div>
         </div>
       </div>
 
-      <!-- Line Items -->
-      <div class="items-section">
-        <h3>Order Items</h3>
-        <table class="items-table">
+      <!-- Order Summary Table -->
+      <div class="order-section">
+        <div class="section-header">Order Summary</div>
+        <table class="order-table">
           <thead>
             <tr>
-              <th>SKU</th>
-              <th class="text-center">Qty</th>
-              <th class="text-right">Unit Price</th>
-              <th class="text-right">Total</th>
+              <th class="th-image">Image</th>
+              <th class="th-style">Style # / Name</th>
+              <th class="th-color">Color</th>
+              <th class="th-size">Size</th>
+              <th class="th-qty">Qty</th>
+              <th class="th-price">Wholesale</th>
+              ${hasDiscounts ? '<th class="th-discount">Disc%</th>' : ''}
+              <th class="th-total">Total</th>
             </tr>
           </thead>
           <tbody>
             ${itemRows}
           </tbody>
         </table>
-      </div>
 
-      <!-- Order Total -->
-      <div class="total-section">
-        <div class="total-row">
-          <span class="total-label">Order Total:</span>
-          <span class="total-value">${formatCurrency(order.orderAmount, order.currency)}</span>
+        <!-- Totals -->
+        <div class="totals-section">
+          <div class="totals-summary">
+            <div class="totals-info">
+              <span>${totalStyles} style${totalStyles !== 1 ? 's' : ''}</span>
+              <span class="totals-divider">•</span>
+              <span>${totalUnits} unit${totalUnits !== 1 ? 's' : ''}</span>
+            </div>
+          </div>
+          <div class="totals-amounts">
+            ${
+              hasDiscounts
+                ? `
+              <div class="totals-row">
+                <span class="totals-label">Subtotal:</span>
+                <span class="totals-value">${formatCurrency(order.subtotal, order.currency)}</span>
+              </div>
+              <div class="totals-row totals-discount">
+                <span class="totals-label">Discount:</span>
+                <span class="totals-value">-${formatCurrency(order.totalDiscount, order.currency)}</span>
+              </div>
+            `
+                : ''
+            }
+            <div class="totals-row totals-grand">
+              <span class="totals-label">Order Total:</span>
+              <span class="totals-value">${formatCurrency(order.orderAmount, order.currency)} ${order.currency}</span>
+            </div>
+          </div>
         </div>
       </div>
 
-      ${order.orderNotes ? `
-      <!-- Order Notes -->
-      <div class="notes-section">
-        <h3>Order Notes</h3>
-        <p>${order.orderNotes}</p>
+      <!-- Notes Section -->
+      ${
+        order.orderNotes || order.brandNotes
+          ? `
+      <div class="notes-grid">
+        ${
+          order.orderNotes
+            ? `
+        <div class="notes-card">
+          <div class="notes-header">Buyer Notes</div>
+          <div class="notes-body">${escapeHtml(order.orderNotes)}</div>
+        </div>
+        `
+            : ''
+        }
+        ${
+          order.brandNotes
+            ? `
+        <div class="notes-card">
+          <div class="notes-header">Brand Notes</div>
+          <div class="notes-body">${escapeHtml(order.brandNotes)}</div>
+        </div>
+        `
+            : ''
+        }
       </div>
-      ` : ''}
-
-      <!-- Footer -->
-      <div class="confirmation-footer">
-        <p>Questions about your order? Contact your sales representative or email us at orders@myorderhub.com</p>
-        <p class="footer-date">Generated on ${formatDate(new Date())}</p>
-      </div>
-    </div>
-
-    ${hasEnhancedData ? `
-    <!-- Page Break for Appendix -->
-    <div class="page-break"></div>
-
-    <!-- Appendix: Detailed Order Summary -->
-    <div class="appendix-container">
-      <div class="appendix-header">
-        <h2>Order Details - ${order.orderNumber}</h2>
-        <p>Detailed product information</p>
-      </div>
-
-      <table class="appendix-table">
-        <thead>
-          <tr>
-            <th class="appendix-image-header">Image</th>
-            <th class="appendix-sku-header">SKU</th>
-            <th class="appendix-size-header">Size</th>
-            <th class="appendix-qty-header">Qty</th>
-            <th class="appendix-price-header">Price</th>
-            <th class="appendix-total-header">Total</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${appendixRows}
-        </tbody>
-      </table>
-
-      <div class="appendix-total-units">
-        Total # of Units: ${totalUnits}
-      </div>
-    </div>
-    ` : ''}
-
-    <style>
-      .confirmation-container {
-        max-width: 100%;
-        padding: 0;
+      `
+          : ''
       }
 
-      .confirmation-header {
+      <!-- Footer -->
+      <footer class="footer">
+        <div class="footer-dates">
+          <span>Delivery Window: ${formatShipWindow(order.shipStartDate, order.shipEndDate)}</span>
+          ${order.approvalDate ? `<span class="footer-divider">|</span><span>Approved: ${formatDateShort(order.approvalDate)}</span>` : ''}
+        </div>
+        <div class="footer-generated">Generated ${formatDate(new Date())}</div>
+      </footer>
+    </div>
+
+    <style>
+      /* Base */
+      .confirmation {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        font-size: 9pt;
+        color: #1a1a1a;
+        line-height: 1.4;
+      }
+
+      /* Header */
+      .header {
         display: flex;
         justify-content: space-between;
         align-items: flex-start;
-        padding-bottom: 20px;
-        border-bottom: 3px solid #171717;
-        margin-bottom: 24px;
+        padding-bottom: 16px;
+        border-bottom: 2px solid #171717;
+        margin-bottom: 20px;
       }
 
-      .logo-section .logo {
-        font-size: 24pt;
+      .logo {
+        font-size: 22pt;
         font-weight: 700;
         color: #171717;
+        letter-spacing: -0.5px;
       }
 
-      .logo-section .tagline {
-        font-size: 9pt;
-        color: #666;
-        margin-top: 2px;
-      }
-
-      .order-info {
+      .header-right {
         text-align: right;
       }
 
+      .order-meta {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 12px;
+        margin-bottom: 4px;
+      }
+
       .order-number {
-        font-size: 14pt;
+        font-size: 13pt;
         font-weight: 600;
         color: #171717;
       }
 
-      .order-date {
-        font-size: 10pt;
-        color: #666;
-        margin-top: 4px;
-      }
-
       .order-status {
         display: inline-block;
-        margin-top: 8px;
-        padding: 4px 12px;
-        border-radius: 4px;
-        font-size: 9pt;
+        padding: 2px 10px;
+        border-radius: 3px;
+        font-size: 8pt;
         font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
       }
 
       .status-pending { background: #fef3c7; color: #92400e; }
       .status-processing { background: #dbeafe; color: #1e40af; }
       .status-shipped { background: #d1fae5; color: #065f46; }
       .status-invoiced { background: #f3e8ff; color: #6b21a8; }
+      .status-cancelled { background: #fee2e2; color: #991b1b; }
 
-      .thank-you-section {
-        text-align: center;
-        padding: 24px;
-        background: #f8fafc;
-        border-radius: 8px;
-        margin-bottom: 24px;
-      }
-
-      .thank-you-section h1 {
-        font-size: 18pt;
-        color: #16a34a;
-        margin-bottom: 8px;
-      }
-
-      .thank-you-section p {
-        font-size: 10pt;
-        color: #475569;
-      }
-
-      .details-grid {
-        display: flex;
-        gap: 24px;
-        margin-bottom: 24px;
-      }
-
-      .details-card {
-        flex: 1;
-        padding: 16px;
-        background: #f8fafc;
-        border-radius: 6px;
-      }
-
-      .details-card h3 {
-        font-size: 11pt;
-        font-weight: 600;
-        margin-bottom: 12px;
-        padding-bottom: 8px;
-        border-bottom: 1px solid #e2e8f0;
-      }
-
-      .detail-row {
-        display: flex;
-        justify-content: space-between;
-        padding: 4px 0;
+      .order-date {
         font-size: 9pt;
+        color: #525252;
       }
 
-      .detail-row .label {
-        color: #64748b;
-      }
-
-      .detail-row .value {
-        font-weight: 500;
-        color: #1e293b;
-      }
-
-      .items-section {
-        margin-bottom: 24px;
-      }
-
-      .items-section h3 {
-        font-size: 11pt;
-        font-weight: 600;
-        margin-bottom: 12px;
-      }
-
-      .items-table {
-        width: 100%;
-        border-collapse: collapse;
-      }
-
-      .items-table th {
-        background: #f1f5f9;
-        font-weight: 600;
+      .order-rep {
         font-size: 8pt;
-        text-align: left;
-        padding: 8px 10px;
-        border-bottom: 2px solid #e2e8f0;
+        color: #737373;
+        margin-top: 2px;
       }
 
-      .items-table td {
+      /* Info Grid - 3 columns */
+      .info-grid {
+        display: flex;
+        gap: 16px;
+        margin-bottom: 20px;
+      }
+
+      .info-card {
+        flex: 1;
+        border: 1px solid #e5e5e5;
+        border-radius: 4px;
+        overflow: hidden;
+      }
+
+      .info-card-header {
+        background: #f5f5f5;
         padding: 6px 10px;
         font-size: 8pt;
-        border-bottom: 1px solid #e2e8f0;
-      }
-
-      .items-table .item-sku {
-        font-weight: 500;
-        font-size: 8pt;
-        white-space: nowrap;
-      }
-
-      .items-table .text-center { text-align: center; }
-      .items-table .text-right { text-align: right; }
-      .items-table .font-medium { font-weight: 500; }
-
-      .total-section {
-        text-align: right;
-        padding: 16px 0;
-        border-top: 2px solid #171717;
-      }
-
-      .total-row {
-        display: inline-flex;
-        gap: 24px;
-        align-items: center;
-      }
-
-      .total-label {
-        font-size: 10pt;
-        font-weight: 500;
-      }
-
-      .total-value {
-        font-size: 14pt;
-        font-weight: 700;
-        color: #171717;
-      }
-
-      .notes-section {
-        margin-top: 24px;
-        padding: 16px;
-        background: #fffbeb;
-        border-radius: 6px;
-        border-left: 4px solid #f59e0b;
-      }
-
-      .notes-section h3 {
-        font-size: 10pt;
         font-weight: 600;
-        margin-bottom: 8px;
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
+        color: #525252;
+        border-bottom: 1px solid #e5e5e5;
       }
 
-      .notes-section p {
-        font-size: 9pt;
-        color: #78350f;
-        white-space: pre-wrap;
-      }
-
-      .confirmation-footer {
-        margin-top: 32px;
-        padding-top: 16px;
-        border-top: 1px solid #e2e8f0;
-        text-align: center;
-      }
-
-      .confirmation-footer p {
+      .info-card-body {
+        padding: 10px;
         font-size: 8pt;
-        color: #64748b;
-        margin-bottom: 4px;
+        min-height: 80px;
       }
 
-      .footer-date {
-        font-style: italic;
-      }
-
-      /* Page Break */
-      .page-break {
-        page-break-before: always;
-        margin-top: 40px;
-      }
-
-      /* Appendix Styles */
-      .appendix-container {
-        font-family: Arial, Helvetica, sans-serif;
-        font-size: 10pt;
-      }
-
-      .appendix-header {
-        text-align: center;
-        margin-bottom: 20px;
-        padding-bottom: 10px;
-        border-bottom: 2px solid #171717;
-      }
-
-      .appendix-header h2 {
-        font-size: 16pt;
+      .buyer-store {
         font-weight: 600;
-        margin-bottom: 4px;
-      }
-
-      .appendix-header p {
         font-size: 9pt;
-        color: #666;
-      }
-
-      .appendix-table {
-        width: 100%;
-        border-collapse: collapse;
-        margin-bottom: 8px;
-      }
-
-      .appendix-table th,
-      .appendix-table td {
-        border: 1px solid #ddd;
-        padding: 6px 8px;
-        vertical-align: top;
-      }
-
-      .appendix-table th {
-        background-color: #f5f5f5;
-        font-weight: bold;
-        text-align: center;
-        font-size: 9pt;
-      }
-
-      .appendix-image-header { width: 80px; }
-      .appendix-sku-header { width: auto; }
-      .appendix-size-header { width: 60px; }
-      .appendix-qty-header { width: 50px; }
-      .appendix-price-header { width: 70px; }
-      .appendix-total-header { width: 80px; }
-
-      .appendix-image-cell {
-        text-align: center;
-        vertical-align: middle;
-        width: 80px;
-      }
-
-      .appendix-product-image {
-        max-width: 70px;
-        max-height: 90px;
-        object-fit: contain;
-      }
-
-      .appendix-no-image {
-        width: 70px;
-        height: 70px;
-        background-color: #f0f0f0;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 8pt;
-        color: #999;
-        margin: 0 auto;
-      }
-
-      .appendix-sku-cell {
-        vertical-align: top;
-      }
-
-      .appendix-sku-id {
-        font-weight: bold;
-        margin-bottom: 4px;
-      }
-
-      .appendix-sku-desc,
-      .appendix-sku-category {
-        font-size: 8pt;
-        color: #555;
         margin-bottom: 2px;
       }
 
-      .appendix-size-cell,
-      .appendix-qty-cell {
+      .buyer-name {
+        color: #525252;
+        margin-bottom: 6px;
+      }
+
+      .buyer-detail {
+        color: #737373;
+        font-size: 8pt;
+      }
+
+      .buyer-po {
+        margin-top: 8px;
+        font-weight: 500;
+      }
+
+      .address-content {
+        line-height: 1.5;
+      }
+
+      .address-content strong {
+        font-size: 9pt;
+      }
+
+      .address-meta {
+        margin-top: 10px;
+        padding-top: 8px;
+        border-top: 1px solid #e5e5e5;
+        font-size: 8pt;
+      }
+
+      .meta-label {
+        color: #737373;
+      }
+
+      .address-empty {
+        color: #a3a3a3;
+        font-style: italic;
+      }
+
+      /* Order Section */
+      .order-section {
+        margin-bottom: 20px;
+      }
+
+      .section-header {
+        font-size: 10pt;
+        font-weight: 600;
+        padding-bottom: 8px;
+        margin-bottom: 0;
+        border-bottom: 1px solid #e5e5e5;
+      }
+
+      /* Order Table */
+      .order-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 8pt;
+      }
+
+      .order-table th {
+        background: #fafafa;
+        font-weight: 600;
+        text-align: left;
+        padding: 8px 6px;
+        border-bottom: 1px solid #d4d4d4;
+        font-size: 7pt;
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
+        color: #525252;
+      }
+
+      .order-table td {
+        padding: 8px 6px;
+        border-bottom: 1px solid #e5e5e5;
+        vertical-align: middle;
+      }
+
+      .order-table tbody tr:last-child td {
+        border-bottom: none;
+      }
+
+      /* Column widths */
+      .th-image { width: 60px; text-align: center; }
+      .th-style { width: auto; }
+      .th-color { width: 70px; }
+      .th-size { width: 45px; text-align: center; }
+      .th-qty { width: 40px; text-align: center; }
+      .th-price { width: 70px; text-align: right; }
+      .th-discount { width: 50px; text-align: center; }
+      .th-total { width: 75px; text-align: right; }
+
+      /* Cell styles */
+      .cell-image {
         text-align: center;
+        padding: 4px 6px;
+      }
+
+      .product-image {
+        max-width: 50px;
+        max-height: 60px;
+        object-fit: contain;
+        border-radius: 2px;
+      }
+
+      .no-image {
+        width: 50px;
+        height: 50px;
+        background: #f5f5f5;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #a3a3a3;
+        font-size: 10pt;
+        border-radius: 2px;
+        margin: 0 auto;
+      }
+
+      .cell-style {
         vertical-align: middle;
       }
 
-      .appendix-price-cell,
-      .appendix-total-cell {
-        text-align: right;
-        vertical-align: middle;
+      .style-number {
+        font-weight: 600;
+        font-size: 8pt;
+        color: #171717;
       }
 
-      .appendix-total-units {
+      .style-name {
+        font-size: 7pt;
+        color: #737373;
+        margin-top: 2px;
+        max-width: 180px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .cell-color {
+        font-size: 8pt;
+      }
+
+      .cell-size {
+        text-align: center;
+        font-size: 8pt;
+      }
+
+      .cell-qty {
+        text-align: center;
+        font-weight: 500;
+      }
+
+      .cell-price {
         text-align: right;
-        font-weight: bold;
-        padding: 8px;
-        border: 1px solid #ddd;
-        border-top: none;
+        font-size: 8pt;
+      }
+
+      .cell-discount {
+        text-align: center;
+        font-size: 8pt;
+        color: #16a34a;
+      }
+
+      .cell-total {
+        text-align: right;
+        font-weight: 600;
+        font-size: 8pt;
+      }
+
+      /* Totals Section */
+      .totals-section {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-end;
+        padding: 12px 0;
+        border-top: 1px solid #e5e5e5;
+        margin-top: 0;
+      }
+
+      .totals-summary {
+        font-size: 8pt;
+        color: #737373;
+      }
+
+      .totals-divider {
+        margin: 0 8px;
+        color: #d4d4d4;
+      }
+
+      .totals-amounts {
+        text-align: right;
+      }
+
+      .totals-row {
+        display: flex;
+        justify-content: flex-end;
+        gap: 20px;
+        padding: 2px 0;
+        font-size: 8pt;
+      }
+
+      .totals-label {
+        color: #525252;
+      }
+
+      .totals-value {
+        min-width: 80px;
+        text-align: right;
+      }
+
+      .totals-discount .totals-value {
+        color: #16a34a;
+      }
+
+      .totals-grand {
+        font-size: 10pt;
+        font-weight: 600;
+        padding-top: 6px;
+        margin-top: 4px;
+        border-top: 1px solid #e5e5e5;
+      }
+
+      .totals-grand .totals-label {
+        color: #171717;
+      }
+
+      .totals-grand .totals-value {
+        color: #171717;
+      }
+
+      /* Notes Grid */
+      .notes-grid {
+        display: flex;
+        gap: 16px;
+        margin-bottom: 20px;
+      }
+
+      .notes-card {
+        flex: 1;
+        border: 1px solid #e5e5e5;
+        border-radius: 4px;
+        overflow: hidden;
+      }
+
+      .notes-header {
+        background: #fafafa;
+        padding: 6px 10px;
+        font-size: 8pt;
+        font-weight: 600;
+        color: #525252;
+        border-bottom: 1px solid #e5e5e5;
+      }
+
+      .notes-body {
+        padding: 10px;
+        font-size: 8pt;
+        color: #525252;
+        white-space: pre-wrap;
+        line-height: 1.5;
+      }
+
+      /* Footer */
+      .footer {
+        padding-top: 12px;
+        border-top: 1px solid #e5e5e5;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 8pt;
+        color: #737373;
+      }
+
+      .footer-dates {
+        display: flex;
+        align-items: center;
+      }
+
+      .footer-divider {
+        margin: 0 10px;
+        color: #d4d4d4;
+      }
+
+      .footer-generated {
+        font-style: italic;
       }
 
       /* Print styles */
       @media print {
-        .page-break {
-          page-break-before: always;
-        }
-
-        .appendix-table {
+        .order-table {
           page-break-inside: auto;
         }
 
-        .appendix-table tr {
+        .order-table tr {
+          page-break-inside: avoid;
+        }
+
+        .notes-grid {
           page-break-inside: avoid;
         }
       }

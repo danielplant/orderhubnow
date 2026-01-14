@@ -6,7 +6,7 @@ import { formatCurrency } from '@/lib/utils'
 import { Card, CardContent, CardHeader, CardTitle, Button, StatusBadge } from '@/components/ui'
 import type { OrderStatus } from '@/lib/types/order'
 import { getShipmentsForOrder, getOrderItemsWithFulfillment } from '@/lib/data/actions/shipments'
-import { LineItemsSection, ShipmentHistory } from '@/components/admin/order-detail-client'
+import { LineItemsSection, ShipmentHistory, PDFSettingsCard } from '@/components/admin/order-detail-client'
 
 function getStatusBadgeStatus(status: OrderStatus) {
   switch (status) {
@@ -56,6 +56,10 @@ export default async function AdminOrderDetailsPage(props: { params: Promise<{ i
       OrderDate: true,
       Website: true,
       IsTransferredToShopify: true,
+      // PDF settings fields
+      PaymentTerms: true,
+      ApprovalDate: true,
+      BrandNotes: true,
     },
   })
 
@@ -186,12 +190,19 @@ export default async function AdminOrderDetailsPage(props: { params: Promise<{ i
 
         <Card>
           <CardHeader>
-            <CardTitle>Notes</CardTitle>
+            <CardTitle>Buyer Notes</CardTitle>
           </CardHeader>
           <CardContent className="text-sm text-muted-foreground whitespace-pre-wrap">
             {order.OrderNotes?.trim() ? order.OrderNotes : '—'}
           </CardContent>
         </Card>
+
+        <PDFSettingsCard
+          orderId={id}
+          paymentTerms={order.PaymentTerms || ''}
+          approvalDate={order.ApprovalDate?.toISOString().slice(0, 10) || ''}
+          brandNotes={order.BrandNotes || ''}
+        />
 
         <Card className="lg:col-span-2">
           <CardHeader>

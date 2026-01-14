@@ -120,6 +120,9 @@ export async function sendOrderEmails(data: OrderEmailData, isUpdate = false): P
   // Generate PDF attachment
   let pdfBuffer: Buffer | null = null
   try {
+    // Calculate subtotal from items
+    const subtotal = data.items.reduce((sum, item) => sum + item.lineTotal, 0)
+
     const pdfHtml = generateOrderConfirmationHtml({
       order: {
         orderNumber: data.orderNumber,
@@ -137,6 +140,11 @@ export async function sendOrderEmails(data: OrderEmailData, isUpdate = false): P
         orderDate: data.orderDate,
         website: '',
         orderStatus: 'Pending',
+        // New required fields (use defaults for email context)
+        shipToAddress: null,
+        billToAddress: null,
+        subtotal: subtotal,
+        totalDiscount: 0,
       },
       items: data.items.map((item) => ({
         sku: item.sku,
@@ -144,6 +152,7 @@ export async function sendOrderEmails(data: OrderEmailData, isUpdate = false): P
         price: item.price,
         currency: data.currency,
         lineTotal: item.lineTotal,
+        discount: 0,
       })),
     })
 

@@ -186,7 +186,7 @@ export function CustomerImportModal({
           {state === 'idle' && (
             <div className="space-y-4">
               <p className="text-muted-foreground">
-                This will import all customers from your Shopify store into MyOrderHub.
+                This will import all customers from your Shopify store into OrderHub.
               </p>
               <ul className="text-sm text-muted-foreground space-y-1 list-disc list-inside">
                 <li>Existing customers (matched by email) will be updated</li>

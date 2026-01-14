@@ -19,7 +19,7 @@
 
 ## Overview
 
-This package contains a complete analytics platform for MyOrderHub:
+This package contains a complete analytics platform for OrderHub:
 - **9 Reports**: Category Totals, PO Sold, SKU Velocity, Exception Report, Cohort Retention, Account Potential, Rep Scorecard, Customer LTV, First-to-Second Conversion
 - **Enhanced Dashboard**: Live KPIs, exception alerts, at-risk accounts
 - **Interactive Report Viewer**: Column customization, filtering, saved views, exports

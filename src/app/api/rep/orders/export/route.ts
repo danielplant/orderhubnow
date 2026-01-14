@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
 
     // Build Excel workbook
     const workbook = new ExcelJS.Workbook()
-    workbook.creator = 'MyOrderHub'
+    workbook.creator = 'OrderHub'
     workbook.created = new Date()
 
     const sheet = workbook.addWorksheet('Customers Orders')

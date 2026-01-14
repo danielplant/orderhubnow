@@ -56,7 +56,7 @@ async function exportToXLSX(
   visibleColumns: string[]
 ): Promise<Buffer> {
   const workbook = new ExcelJS.Workbook();
-  workbook.creator = 'MyOrderHub';
+  workbook.creator = 'OrderHub';
   workbook.created = new Date();
   
   const sheet = workbook.addWorksheet(config.name);

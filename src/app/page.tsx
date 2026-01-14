@@ -126,7 +126,7 @@ export default function Home() {
               <Sparkles className="w-5 h-5 text-white" />
             </div>
             <span className="text-xl font-semibold tracking-tight text-neutral-900">
-              MyOrderHub
+              OrderHub
             </span>
           </div>
         </motion.header>

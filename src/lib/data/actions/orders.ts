@@ -104,6 +104,54 @@ export async function addOrderComment(input: {
 }
 
 // ============================================================================
+// Order Details (Payment Terms, Approval Date, Brand Notes)
+// ============================================================================
+
+/**
+ * Update order details for PDF (Payment Terms, Approval Date, Brand Notes).
+ * These fields are used in the NuORDER-style PDF export.
+ */
+export async function updateOrderDetails(input: {
+  orderId: string
+  paymentTerms?: string
+  approvalDate?: string | null
+  brandNotes?: string
+}): Promise<{ success: boolean; error?: string }> {
+  try {
+    await requireAdmin()
+
+    // Build update data - only include provided fields
+    const data: {
+      PaymentTerms?: string
+      ApprovalDate?: Date | null
+      BrandNotes?: string
+    } = {}
+
+    if (input.paymentTerms !== undefined) {
+      data.PaymentTerms = input.paymentTerms.trim()
+    }
+    if (input.approvalDate !== undefined) {
+      data.ApprovalDate = input.approvalDate ? new Date(input.approvalDate) : null
+    }
+    if (input.brandNotes !== undefined) {
+      data.BrandNotes = input.brandNotes.trim()
+    }
+
+    await prisma.customerOrders.update({
+      where: { ID: BigInt(input.orderId) },
+      data,
+    })
+
+    revalidatePath('/admin/orders')
+    revalidatePath(`/admin/orders/${input.orderId}`)
+    return { success: true }
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'Failed to update order details'
+    return { success: false, error: message }
+  }
+}
+
+// ============================================================================
 // Rep Assignment
 // ============================================================================
 

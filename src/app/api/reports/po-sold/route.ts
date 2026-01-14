@@ -55,7 +55,7 @@ export async function GET() {
     
     // Create workbook
     const workbook = new ExcelJS.Workbook();
-    workbook.creator = 'MyOrderHub';
+    workbook.creator = 'OrderHub';
     workbook.created = new Date();
     
     const sheet = workbook.addWorksheet('PO Sold Report');

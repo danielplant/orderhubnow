@@ -48,6 +48,9 @@ model CustomerOrders {
   CustomerID             Int?
   RepID                  Int?
   ShopifyOrderID         String?                  @db.NVarChar(50)
+  PaymentTerms           String?                  @db.NVarChar(200)
+  ApprovalDate           DateTime?                @db.DateTime
+  BrandNotes             String?                  @db.NVarChar(Max)
   CustomerOrdersComments CustomerOrdersComments[]
   CustomerOrdersItems    CustomerOrdersItems[]
   Shipments              Shipments[]
@@ -76,6 +79,7 @@ model CustomerOrdersItems {
   Price           Float
   PriceCurrency   String          @db.NVarChar(50)
   Notes           String          @db.NVarChar(Max)
+  LineDiscount    Float?          @default(0)
   CustomerOrders  CustomerOrders  @relation(fields: [CustomerOrderID], references: [ID], onUpdate: NoAction, map: "FK_CustomerOrdersItems_CustomerOrders")
   ShipmentItems   ShipmentItems[]
 

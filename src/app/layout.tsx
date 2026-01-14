@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 })
 
 export const metadata: Metadata = {
-  title: 'MyOrderHub',
+  title: 'OrderHub',
   description: 'Wholesale Order Management System',
 }
 

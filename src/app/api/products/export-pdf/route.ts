@@ -2,7 +2,7 @@
  * Products PDF Export API
  *
  * Generates a PDF report of products using puppeteer-core + @sparticuz/chromium.
- * Design: Generic "MyOrderHub" branding, grayscale, US Letter landscape.
+ * Design: Generic "OrderHub" branding, grayscale, US Letter landscape.
  */
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -195,7 +195,7 @@ function generateProductsPdfHtml(
   const content = `
     <div class="pdf-header">
       <div class="pdf-header-left">
-        <div class="pdf-logo">MyOrderHub</div>
+        <div class="pdf-logo">OrderHub</div>
       </div>
       <div class="pdf-header-right">
         <div class="pdf-title">PRODUCTS REPORT</div>
@@ -243,7 +243,7 @@ function generateProductsPdfHtml(
     </div>
   `
 
-  return wrapHtml(content, 'Products Report - MyOrderHub')
+  return wrapHtml(content, 'Products Report - OrderHub')
 }
 
 export async function POST() {

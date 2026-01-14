@@ -160,7 +160,7 @@ function formatDate(date: Date | null): string {
  */
 async function generateDetailExport(orders: OrderForExport[]): Promise<ExcelJS.Buffer> {
   const workbook = new ExcelJS.Workbook()
-  workbook.creator = 'MyOrderHub'
+  workbook.creator = 'OrderHub'
   workbook.created = new Date()
 
   const sheet = workbook.addWorksheet('Orders Detail')
@@ -221,7 +221,7 @@ async function generateDetailExport(orders: OrderForExport[]): Promise<ExcelJS.B
  */
 async function generateSummaryExport(orders: OrderForExport[]): Promise<ExcelJS.Buffer> {
   const workbook = new ExcelJS.Workbook()
-  workbook.creator = 'MyOrderHub'
+  workbook.creator = 'OrderHub'
   workbook.created = new Date()
 
   const sheet = workbook.addWorksheet('Orders Summary')
@@ -326,7 +326,7 @@ async function generateQBExport(orders: OrderForExport[]): Promise<ExcelJS.Buffe
   )
 
   const workbook = new ExcelJS.Workbook()
-  workbook.creator = 'MyOrderHub'
+  workbook.creator = 'OrderHub'
   workbook.created = new Date()
 
   const sheet = workbook.addWorksheet('QB Import')
