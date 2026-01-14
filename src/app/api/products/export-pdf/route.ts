@@ -253,42 +253,56 @@ function generateProductsPdfHtml(
 ): string {
   const now = new Date()
 
-  const tableRows = skus
-    .map((sku) => {
-      const description = sku.OrderEntryDescription ?? sku.Description ?? ''
-      const color = resolveColor(sku.SkuColor, sku.SkuID, description)
-      const priceCad = parsePrice(sku.PriceCAD)
-      const priceUsd = parsePrice(sku.PriceUSD)
-      const wholesalePrice = formatPrice(priceCad, priceUsd, summary.currency)
+  // Group SKUs by baseSku for page-break control
+  const groupedByBaseSku = new Map<string, typeof skus>()
+  for (const sku of skus) {
+    if (!groupedByBaseSku.has(sku.baseSku)) {
+      groupedByBaseSku.set(sku.baseSku, [])
+    }
+    groupedByBaseSku.get(sku.baseSku)!.push(sku)
+  }
 
-      // Image URL - prefer ShopifyImageURL
-      const imageUrl = sku.ShopifyImageURL || ''
+  // Generate table body groups - each product group in its own tbody for page-break control
+  const tableBodyGroups = Array.from(groupedByBaseSku.entries())
+    .map(([, groupSkus]) => {
+      const rows = groupSkus.map((sku) => {
+        const description = sku.OrderEntryDescription ?? sku.Description ?? ''
+        const color = resolveColor(sku.SkuColor, sku.SkuID, description)
+        const priceCad = parsePrice(sku.PriceCAD)
+        const priceUsd = parsePrice(sku.PriceUSD)
+        const wholesalePrice = formatPrice(priceCad, priceUsd, summary.currency)
 
-      // Build row with firstRowOnly logic
-      const imageCell = sku.isFirstInGroup && imageUrl
-        ? `<img src="${imageUrl}" alt="${sku.baseSku}" class="product-img" />`
-        : sku.isFirstInGroup
-          ? `<div class="no-image">No Image</div>`
-          : ''
+        // Image URL - prefer ShopifyImageURL
+        const imageUrl = sku.ShopifyImageURL || ''
 
-      const rowClass = sku.isLastInGroup ? 'group-last' : ''
+        // Build row with firstRowOnly logic
+        const imageCell = sku.isFirstInGroup && imageUrl
+          ? `<img src="${imageUrl}" alt="${sku.baseSku}" class="product-img" />`
+          : sku.isFirstInGroup
+            ? `<div class="no-image">No Image</div>`
+            : ''
 
-      return `
-        <tr class="${rowClass}">
-          <td class="image-cell">${imageCell}</td>
-          <td>${sku.isFirstInGroup ? sku.baseSku : ''}</td>
-          <td>${sku.SkuID}</td>
-          <td class="desc-cell">${sku.isFirstInGroup ? description.substring(0, 35) + (description.length > 35 ? '...' : '') : ''}</td>
-          <td>${sku.isFirstInGroup ? color : ''}</td>
-          <td>${sku.isFirstInGroup ? (sku.FabricContent ?? '').substring(0, 20) : ''}</td>
-          <td class="text-center">${sku.size || '—'}</td>
-          <td class="text-right">${(sku.Quantity ?? 0).toLocaleString()}</td>
-          <td>${sku.isFirstInGroup ? (sku.Collection?.name ?? '') : ''}</td>
-          <td class="text-center">${sku.isFirstInGroup ? (sku.ShowInPreOrder ? 'Pre-Order' : 'ATS') : ''}</td>
-          <td class="price-cell">${sku.isFirstInGroup ? wholesalePrice : ''}</td>
-          <td class="text-center qty-col"></td>
-        </tr>
-      `
+        const rowClass = sku.isLastInGroup ? 'group-last' : ''
+
+        return `
+          <tr class="${rowClass}">
+            <td class="image-cell">${imageCell}</td>
+            <td>${sku.isFirstInGroup ? sku.baseSku : ''}</td>
+            <td>${sku.SkuID}</td>
+            <td class="desc-cell">${sku.isFirstInGroup ? description.substring(0, 35) + (description.length > 35 ? '...' : '') : ''}</td>
+            <td>${sku.isFirstInGroup ? color : ''}</td>
+            <td>${sku.isFirstInGroup ? (sku.FabricContent ?? '').substring(0, 20) : ''}</td>
+            <td class="text-center">${sku.size || '—'}</td>
+            <td class="text-right">${(sku.Quantity ?? 0).toLocaleString()}</td>
+            <td>${sku.isFirstInGroup ? (sku.Collection?.name ?? '') : ''}</td>
+            <td class="text-center">${sku.isFirstInGroup ? (sku.ShowInPreOrder ? 'Pre-Order' : 'ATS') : ''}</td>
+            <td class="price-cell">${sku.isFirstInGroup ? wholesalePrice : ''}</td>
+            <td class="text-center qty-col"></td>
+          </tr>
+        `
+      }).join('')
+
+      return `<tbody class="product-group">${rows}</tbody>`
     })
     .join('')
 
@@ -336,6 +350,10 @@ function generateProductsPdfHtml(
 
       .products-table tr.group-last td {
         border-bottom: 2px solid #6b7280;
+      }
+
+      .product-group {
+        page-break-inside: avoid;
       }
 
       .image-cell {
@@ -431,13 +449,11 @@ function generateProductsPdfHtml(
           <th class="text-center qty-col">Qty</th>
         </tr>
       </thead>
-      <tbody>
-        ${tableRows}
-      </tbody>
+      ${tableBodyGroups}
     </table>
 
     <div class="pdf-footer">
-      <span>Confidential</span>
+      <span>Exported from OrderHub on ${formatDate(now)}</span>
     </div>
   `
 
