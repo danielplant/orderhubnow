@@ -1,11 +1,12 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState, useTransition, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { Plus } from 'lucide-react'
 import { Button } from '@/components/ui'
 import { CollectionCard } from './collection-card'
 import { CollectionModal } from './collection-modal'
+import { useUserPreferences } from '@/lib/hooks/useUserPreferences'
 import type { CollectionWithCount, CollectionType } from '@/lib/types/collection'
 
 interface CollectionGridProps {
@@ -22,10 +23,29 @@ export function CollectionGrid({
   const [modalOpen, setModalOpen] = useState(false)
   const [modalType, setModalType] = useState<CollectionType>('ATS')
   const [editingCollection, setEditingCollection] = useState<CollectionWithCount | null>(null)
+  
+  // User preferences for hiding empty collections
+  const { preferences, updatePreference, loading: prefsLoading } = useUserPreferences()
+  const hideEmpty = preferences?.collections?.hideEmpty ?? true
 
   // Local state for optimistic reordering
   const [atsOrder, setAtsOrder] = useState(atsCollections)
   const [preOrderOrder, setPreOrderOrder] = useState(preOrderCollections)
+  
+  // Filter out empty collections if hideEmpty is true
+  const filteredAts = useMemo(
+    () => (hideEmpty ? atsOrder.filter((c) => c.skuCount > 0) : atsOrder),
+    [atsOrder, hideEmpty]
+  )
+  const filteredPreOrder = useMemo(
+    () => (hideEmpty ? preOrderOrder.filter((c) => c.skuCount > 0) : preOrderOrder),
+    [preOrderOrder, hideEmpty]
+  )
+  
+  // Count hidden collections
+  const hiddenAtsCount = atsOrder.filter((c) => c.skuCount === 0).length
+  const hiddenPreOrderCount = preOrderOrder.filter((c) => c.skuCount === 0).length
+  const totalHidden = hiddenAtsCount + hiddenPreOrderCount
 
   // Sync props to local state when they change
   if (atsCollections !== atsOrder && !isPending) {
@@ -92,11 +112,30 @@ export function CollectionGrid({
 
   return (
     <div className="space-y-10">
+      {/* Hide Empty Toggle */}
+      <div className="flex items-center justify-end gap-3">
+        <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={hideEmpty}
+            onChange={(e) => updatePreference('collections.hideEmpty', e.target.checked)}
+            disabled={prefsLoading}
+            className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+          />
+          <span className="text-muted-foreground">
+            Hide empty collections
+            {totalHidden > 0 && hideEmpty && (
+              <span className="ml-1 text-xs">({totalHidden} hidden)</span>
+            )}
+          </span>
+        </label>
+      </div>
+
       {/* ATS Collections Section */}
       <CollectionSection
         title="Available to Ship (ATS)"
         type="ATS"
-        collections={atsOrder}
+        collections={filteredAts}
         onAddCollection={() => handleAddCollection('ATS')}
         onEditCollection={handleEditCollection}
         onReorder={(ids) => handleReorder('ATS', ids)}
@@ -107,7 +146,7 @@ export function CollectionGrid({
       <CollectionSection
         title="Pre-Order"
         type="PreOrder"
-        collections={preOrderOrder}
+        collections={filteredPreOrder}
         onAddCollection={() => handleAddCollection('PreOrder')}
         onEditCollection={handleEditCollection}
         onReorder={(ids) => handleReorder('PreOrder', ids)}

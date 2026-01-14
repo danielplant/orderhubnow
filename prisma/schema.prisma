@@ -509,6 +509,7 @@ model Users {
   Status            String       @default("legacy") @db.NVarChar(20) // invited, active, legacy, disabled
   MustResetPassword Boolean?     @default(true)
   Email             String?      @db.NVarChar(255)
+  Preferences       String?      @db.NVarChar(Max) // JSON object for user preferences
   Reps              Reps?        @relation(fields: [RepId], references: [ID], onDelete: NoAction, onUpdate: NoAction, map: "FK_Users_Reps")
   AuthTokens        AuthTokens[]
 }
