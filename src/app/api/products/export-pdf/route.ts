@@ -92,15 +92,17 @@ export async function GET(request: NextRequest) {
       where.CollectionID = collectionId
     }
 
-    // Tab filter (match XLSX behavior)
+    // Tab filter
     if (tab === 'ats') {
       where.AND = [
         { OR: [{ ShowInPreOrder: false }, { ShowInPreOrder: null }] },
-        { Quantity: { gte: 1 } }, // Only show SKUs with available inventory
       ]
     } else if (tab === 'preorder') {
       where.ShowInPreOrder = true
     }
+
+    // PDF always filters out 0-availability SKUs
+    where.Quantity = { gte: 1 }
 
     // Fetch SKUs with all required fields including collection name (limit to 300 for PDF)
     const rawSkus = await prisma.sku.findMany({
@@ -177,14 +179,12 @@ export async function GET(request: NextRequest) {
     const totalStyles = sortedBaseSkus.length
     const totalSkus = skus.length
     const totalQuantity = skus.reduce((sum, s) => sum + (s.Quantity ?? 0), 0)
-    const totalOnRoute = skus.reduce((sum, s) => sum + (s.OnRoute ?? 0), 0)
 
     // Generate HTML
     const html = generateProductsPdfHtml(skus, {
       totalStyles,
       totalSkus,
       totalQuantity,
-      totalOnRoute,
       collectionName,
       tab,
       currency,
@@ -246,16 +246,12 @@ function generateProductsPdfHtml(
     totalStyles: number
     totalSkus: number
     totalQuantity: number
-    totalOnRoute: number
     collectionName: string | null
     tab: string
     currency: CurrencyMode
   }
 ): string {
   const now = new Date()
-
-  // Determine if we should show On Route column (hide for ATS exports)
-  const showOnRoute = summary.tab !== 'ats'
 
   const tableRows = skus
     .map((sku) => {
@@ -287,11 +283,10 @@ function generateProductsPdfHtml(
           <td>${sku.isFirstInGroup ? (sku.FabricContent ?? '').substring(0, 20) : ''}</td>
           <td class="text-center">${sku.size || '—'}</td>
           <td class="text-right">${(sku.Quantity ?? 0).toLocaleString()}</td>
-          ${showOnRoute ? `<td class="text-right">${(sku.OnRoute ?? 0).toLocaleString()}</td>` : ''}
           <td>${sku.isFirstInGroup ? (sku.Collection?.name ?? '') : ''}</td>
           <td class="text-center">${sku.isFirstInGroup ? (sku.ShowInPreOrder ? 'Pre-Order' : 'ATS') : ''}</td>
           <td class="price-cell">${sku.isFirstInGroup ? wholesalePrice : ''}</td>
-          <td class="text-center"></td>
+          <td class="text-center qty-col"></td>
         </tr>
       `
     })
@@ -386,6 +381,11 @@ function generateProductsPdfHtml(
       .text-center {
         text-align: center !important;
       }
+
+      .qty-col {
+        width: 50px;
+        min-width: 50px;
+      }
     </style>
 
     <div class="pdf-header">
@@ -412,10 +412,6 @@ function generateProductsPdfHtml(
         <div class="pdf-summary-value">${summary.totalQuantity.toLocaleString()}</div>
         <div class="pdf-summary-label">Available</div>
       </div>
-      <div class="pdf-summary-card">
-        <div class="pdf-summary-value">${summary.totalOnRoute.toLocaleString()}</div>
-        <div class="pdf-summary-label">On Route</div>
-      </div>
     </div>
 
     <table class="products-table">
@@ -429,11 +425,10 @@ function generateProductsPdfHtml(
           <th>Material</th>
           <th class="text-center">Size</th>
           <th class="text-right">Available</th>
-          ${showOnRoute ? '<th class="text-right">On Route</th>' : ''}
           <th>Collection</th>
           <th class="text-center">Status</th>
           <th>Wholesale</th>
-          <th class="text-center">Qty</th>
+          <th class="text-center qty-col">Qty</th>
         </tr>
       </thead>
       <tbody>
