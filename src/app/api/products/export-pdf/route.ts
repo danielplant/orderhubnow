@@ -272,18 +272,16 @@ function generateProductsPdfHtml(
         const priceUsd = parsePrice(sku.PriceUSD)
         const wholesalePrice = formatPrice(priceCad, priceUsd, summary.currency)
 
-        // Use local thumbnail (120x120px) to keep PDF small, fall back to no image
-        // ThumbnailPath is like "/thumbnails/abc123.png" - convert to file:// URL
-        const thumbnailUrl = sku.ThumbnailPath
-          ? `file://${process.cwd()}/public${sku.ThumbnailPath}`
+        // Use Shopify CDN resizing to get small images (keeps PDF small)
+        // Append ?width=100 to get 100px wide version from Shopify CDN
+        const imageUrl = sku.ShopifyImageURL
+          ? `${sku.ShopifyImageURL}${sku.ShopifyImageURL.includes('?') ? '&' : '?'}width=100`
           : null
 
-        // Build row with firstRowOnly logic
-        const imageCell = sku.isFirstInGroup && thumbnailUrl
-          ? `<img src="${thumbnailUrl}" alt="${sku.baseSku}" class="product-img" />`
-          : sku.isFirstInGroup
-            ? `<div class="no-image">No Image</div>`
-            : ''
+        // Build row with firstRowOnly logic - skip image cell entirely if no image
+        const imageCell = sku.isFirstInGroup && imageUrl
+          ? `<img src="${imageUrl}" alt="${sku.baseSku}" class="product-img" />`
+          : ''
 
         const rowClass = sku.isLastInGroup ? 'group-last' : ''
 
@@ -337,22 +335,26 @@ function generateProductsPdfHtml(
       .products-table th {
         background: #1E40AF;
         color: white;
-        padding: 6px 4px;
+        padding: 8px 6px;
         text-align: left;
         font-weight: 600;
-        font-size: 7pt;
+        font-size: 7.5pt;
         border: 1px solid #1E40AF;
       }
 
       .products-table td {
-        padding: 4px;
+        padding: 6px;
         border: 1px solid #e5e7eb;
         vertical-align: middle;
-        font-size: 7pt;
+        font-size: 7.5pt;
       }
 
       .products-table tr.group-last td {
-        border-bottom: 2px solid #6b7280;
+        border-bottom: 2px solid #4b5563;
+      }
+
+      .products-table tr:first-child td {
+        background: #fafafa;
       }
 
       .product-group {
@@ -360,38 +362,26 @@ function generateProductsPdfHtml(
       }
 
       .image-cell {
-        width: 60px;
+        width: 70px;
         text-align: center;
-        vertical-align: middle;
+        vertical-align: top;
+        padding: 6px !important;
       }
 
       .product-img {
-        max-width: 55px;
-        max-height: 55px;
+        max-width: 60px;
+        max-height: 60px;
         object-fit: contain;
-        border-radius: 2px;
-      }
-
-      .no-image {
-        width: 55px;
-        height: 55px;
-        background: #f5f5f5;
-        border: 1px solid #e5e5e5;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 6pt;
-        color: #999;
-        border-radius: 2px;
-        margin: 0 auto;
+        border-radius: 3px;
+        border: 1px solid #e5e7eb;
       }
 
       .desc-cell {
-        max-width: 120px;
+        max-width: 140px;
       }
 
       .price-cell {
-        font-size: 6pt;
+        font-size: 6.5pt;
         white-space: nowrap;
       }
 
