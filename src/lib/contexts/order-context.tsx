@@ -111,6 +111,7 @@ interface OrderContextValue {
 
   // Edit mode methods
   loadOrderForEdit: (order: OrderForEditing) => void;
+  setEditOrderCurrency: (currency: Currency) => void;
   clearEditMode: () => void;
 }
 
@@ -485,6 +486,23 @@ export function OrderProvider({ children, initialDraftId }: OrderProviderProps) 
     localStorage.setItem(EDIT_STATE_KEY, JSON.stringify(editData));
   }, []);
 
+  // Update edit order currency (after saving to server)
+  const updateEditOrderCurrency = useCallback((newCurrency: Currency) => {
+    setEditOrderCurrency(newCurrency);
+
+    // Update localStorage edit state
+    const editStored = localStorage.getItem(EDIT_STATE_KEY);
+    if (editStored) {
+      try {
+        const editState = JSON.parse(editStored);
+        editState.currency = newCurrency;
+        localStorage.setItem(EDIT_STATE_KEY, JSON.stringify(editState));
+      } catch {
+        // Ignore parse errors
+      }
+    }
+  }, []);
+
   // Clear edit mode and return to normal cart state
   const clearEditMode = useCallback(() => {
     setEditOrderId(null);
@@ -735,6 +753,7 @@ export function OrderProvider({ children, initialDraftId }: OrderProviderProps) 
         isEditMode: !!editOrderId,
         // Edit mode methods
         loadOrderForEdit,
+        setEditOrderCurrency: updateEditOrderCurrency,
         clearEditMode,
       }}
     >

@@ -315,6 +315,13 @@ export function OrdersTable({ initialOrders, total, statusCounts, reps }: Orders
               <DropdownMenuItem asChild>
                 <Link href={`/admin/orders/${o.id}`}>View</Link>
               </DropdownMenuItem>
+              {o.status === 'Pending' && !o.inShopify && (
+                <DropdownMenuItem asChild>
+                  <Link href={`/buyer/my-order?editOrder=${o.id}&returnTo=/admin/orders`}>
+                    Edit Items
+                  </Link>
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem onClick={() => setCommentsOrderId(o.id)}>
                 Comments
               </DropdownMenuItem>

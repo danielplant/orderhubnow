@@ -1,7 +1,8 @@
 'use client'
 
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
+import { toast } from 'sonner'
 import { useOrder } from '@/lib/contexts/order-context'
 import { useCurrency } from '@/lib/contexts/currency-context'
 import { OrderForm } from '@/components/buyer/order-form'
@@ -12,6 +13,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { CurrencyToggle } from '@/components/buyer/currency-toggle'
 import { formatCurrency } from '@/lib/utils'
+import { updateOrderCurrency } from '@/lib/data/actions/orders'
 import { Trash2 } from 'lucide-react'
 import type { OrderForEditing } from '@/lib/data/queries/orders'
 
@@ -53,9 +55,10 @@ export function MyOrderClient({
     clearEditMode,
     editOrderId,
     editOrderCurrency,
+    setEditOrderCurrency,
     isEditMode: contextIsEditMode,
   } = useOrder()
-  const { currency } = useCurrency()
+  const { currency, setCurrency } = useCurrency()
   const hasLoadedOrderRef = useRef(false)
 
   // Load draft from URL param if present (only for non-edit mode)
@@ -79,7 +82,52 @@ export function MyOrderClient({
   // Determine if we're in edit mode (from props or context)
   const isEditMode = !!existingOrder || contextIsEditMode
 
-  // Use currency from context (allows changing currency in edit mode too)
+  // Track if initial currency sync has happened to avoid saving on mount
+  const initialCurrencySyncRef = useRef(false)
+  const [isSavingCurrency, startCurrencyTransition] = useTransition()
+
+  // Sync currency toggle to order's currency when entering edit mode
+  // This ensures the toggle starts at the order's currency, not the user's localStorage preference
+  useEffect(() => {
+    if (existingOrder?.currency && !initialCurrencySyncRef.current) {
+      setCurrency(existingOrder.currency)
+      initialCurrencySyncRef.current = true
+    }
+  }, [existingOrder, setCurrency])
+
+  // Save currency changes immediately in edit mode
+  useEffect(() => {
+    // Skip if not in edit mode, no order ID, or initial sync hasn't happened yet
+    if (!isEditMode || !editOrderId || !initialCurrencySyncRef.current) {
+      return
+    }
+
+    // Skip if currency matches what's already in the order
+    if (currency === editOrderCurrency) {
+      return
+    }
+
+    startCurrencyTransition(async () => {
+      const result = await updateOrderCurrency({
+        orderId: editOrderId,
+        currency,
+      })
+
+      if (result.success) {
+        // Update context so subsequent toggles work correctly
+        setEditOrderCurrency(currency)
+        toast.success(`Currency updated to ${currency}`)
+      } else {
+        toast.error(result.error || 'Failed to update currency')
+        // Revert toggle on error
+        if (editOrderCurrency) {
+          setCurrency(editOrderCurrency)
+        }
+      }
+    })
+  }, [currency, isEditMode, editOrderId, editOrderCurrency, setCurrency, setEditOrderCurrency])
+
+  // Use currency from toggle (allows changing currency in edit mode)
   const effectiveCurrency = currency
 
   // Unified cart items from context - works for both new and edit mode

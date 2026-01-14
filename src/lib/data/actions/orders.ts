@@ -592,6 +592,111 @@ export async function updateOrder(
 }
 
 // ============================================================================
+// Order Currency Update
+// ============================================================================
+
+/**
+ * Update an order's currency and recalculate all item prices.
+ * Used for immediate currency toggle in edit mode.
+ */
+export async function updateOrderCurrency(input: {
+  orderId: string
+  currency: 'USD' | 'CAD'
+}): Promise<{ success: boolean; newTotal?: number; error?: string }> {
+  try {
+    const { orderId, currency } = input
+
+    // Verify order exists and is editable
+    const existingOrder = await prisma.customerOrders.findUnique({
+      where: { ID: BigInt(orderId) },
+      select: {
+        ID: true,
+        OrderStatus: true,
+        IsTransferredToShopify: true,
+      },
+    })
+
+    if (!existingOrder) {
+      return { success: false, error: 'Order not found' }
+    }
+
+    if (existingOrder.OrderStatus !== 'Pending') {
+      return { success: false, error: 'Only Pending orders can be edited' }
+    }
+
+    if (existingOrder.IsTransferredToShopify) {
+      return { success: false, error: 'Orders transferred to Shopify cannot be edited' }
+    }
+
+    // Get all order items with their SKU variant IDs
+    const items = await prisma.customerOrdersItems.findMany({
+      where: { CustomerOrderID: BigInt(orderId) },
+      select: {
+        ID: true,
+        SKUVariantID: true,
+        Quantity: true,
+      },
+    })
+
+    // Get the price for each variant in the new currency
+    const variantIds = items.map((item) => item.SKUVariantID).filter(Boolean) as bigint[]
+    const variants = await prisma.sKUVariants.findMany({
+      where: { ID: { in: variantIds } },
+      select: {
+        ID: true,
+        PriceCAD: true,
+        PriceUSD: true,
+      },
+    })
+
+    const variantPriceMap = new Map(
+      variants.map((v) => [
+        v.ID.toString(),
+        currency === 'CAD' ? Number(v.PriceCAD ?? 0) : Number(v.PriceUSD ?? 0),
+      ])
+    )
+
+    // Update in transaction
+    let newTotal = 0
+    await prisma.$transaction(async (tx) => {
+      // Update each item's price and currency
+      for (const item of items) {
+        const newPrice = item.SKUVariantID
+          ? variantPriceMap.get(item.SKUVariantID.toString()) ?? 0
+          : 0
+        newTotal += newPrice * (item.Quantity ?? 0)
+
+        await tx.customerOrdersItems.update({
+          where: { ID: item.ID },
+          data: {
+            Price: newPrice,
+            PriceCurrency: currency,
+          },
+        })
+      }
+
+      // Update order header
+      await tx.customerOrders.update({
+        where: { ID: BigInt(orderId) },
+        data: {
+          Country: currency, // Legacy field stores currency
+          OrderAmount: newTotal,
+        },
+      })
+    })
+
+    revalidatePath('/admin/orders')
+    revalidatePath('/rep/orders')
+
+    return { success: true, newTotal }
+  } catch (e) {
+    console.error('updateOrderCurrency error:', e)
+    const message = e instanceof Error ? e.message : 'Failed to update currency'
+    return { success: false, error: message }
+  }
+}
+
+// ============================================================================
 // Stub Actions (Defer to later briefs)
 // ============================================================================
 
