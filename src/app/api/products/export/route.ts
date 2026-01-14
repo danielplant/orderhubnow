@@ -11,7 +11,7 @@ import { auth } from '@/lib/auth/providers'
 import { prisma } from '@/lib/prisma'
 import { parsePrice, parseSkuId, resolveColor } from '@/lib/utils'
 import { readThumbnail, fetchThumbnail } from '@/lib/utils/thumbnails'
-import { extractSize } from '@/lib/utils/size-sort'
+import { extractSize, sortBySize } from '@/lib/utils/size-sort'
 
 // ============================================================================
 // Helpers
@@ -21,24 +21,6 @@ function getString(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined
   const t = value.trim()
   return t || undefined
-}
-
-/**
- * Generate a sort key for sizes to match .NET ordering:
- * - "a" prefix: sizes like 2/3, 4/5 (single digit before slash)
- * - "b" prefix: sizes like 10/12, 14/16 (double digit before slash)
- * - "c" prefix: other sizes (XS, S, M, L, etc.)
- */
-function getSizeSortKey(size: string): string {
-  if (size.includes('/')) {
-    const firstPart = size.split('/')[0]
-    if (firstPart.length < 2) {
-      return 'a' + size // Single digit: 2/3, 4/5, 6/6X, 7/8
-    } else {
-      return 'b' + size // Double digit: 10/12, 14/16
-    }
-  }
-  return 'c' + size // Other: XS, S, M, L, XL, etc.
 }
 
 const THUMBNAIL_SIZE = 120
@@ -135,10 +117,10 @@ export async function GET(request: NextRequest) {
 
     for (const baseSku of sortedBaseSkus) {
       const group = grouped.get(baseSku)!
-      // Sort by size using the .NET-style sort key
-      group.sort((a, b) => getSizeSortKey(a.size).localeCompare(getSizeSortKey(b.size)))
+      // Sort by size using the canonical SIZE_ORDER
+      const sortedGroup = sortBySize(group)
       // Add to final array with first-of-group flag
-      group.forEach((sku, idx) => {
+      sortedGroup.forEach((sku, idx) => {
         skus.push({ ...sku, isFirstInGroup: idx === 0 })
       })
     }
