@@ -628,31 +628,31 @@ export async function updateOrderCurrency(input: {
       return { success: false, error: 'Orders transferred to Shopify cannot be edited' }
     }
 
-    // Get all order items with their SKU variant IDs
+    // Get all order items with their SKU IDs
     const items = await prisma.customerOrdersItems.findMany({
       where: { CustomerOrderID: BigInt(orderId) },
       select: {
         ID: true,
-        SKUVariantID: true,
+        SKU: true,
         Quantity: true,
       },
     })
 
-    // Get the price for each variant in the new currency
-    const variantIds = items.map((item) => item.SKUVariantID).filter(Boolean) as bigint[]
-    const variants = await prisma.sKUVariants.findMany({
-      where: { ID: { in: variantIds } },
+    // Get the price for each SKU in the new currency
+    const skuIds = items.map((item) => item.SKU)
+    const skus = await prisma.sku.findMany({
+      where: { SkuID: { in: skuIds } },
       select: {
-        ID: true,
+        SkuID: true,
         PriceCAD: true,
         PriceUSD: true,
       },
     })
 
-    const variantPriceMap = new Map(
-      variants.map((v) => [
-        v.ID.toString(),
-        currency === 'CAD' ? Number(v.PriceCAD ?? 0) : Number(v.PriceUSD ?? 0),
+    const skuPriceMap = new Map(
+      skus.map((s) => [
+        s.SkuID,
+        currency === 'CAD' ? parseFloat(s.PriceCAD || '0') : parseFloat(s.PriceUSD || '0'),
       ])
     )
 
@@ -661,9 +661,7 @@ export async function updateOrderCurrency(input: {
     await prisma.$transaction(async (tx) => {
       // Update each item's price and currency
       for (const item of items) {
-        const newPrice = item.SKUVariantID
-          ? variantPriceMap.get(item.SKUVariantID.toString()) ?? 0
-          : 0
+        const newPrice = skuPriceMap.get(item.SKU) ?? 0
         newTotal += newPrice * (item.Quantity ?? 0)
 
         await tx.customerOrdersItems.update({
