@@ -162,6 +162,19 @@ model CompanySettings {
   LogoUrl      String? @db.NVarChar(500)
 }
 
+/// Email notification settings - configurable via admin panel
+model EmailSettings {
+  ID                       Int      @id(map: "PK_EmailSettings") @default(autoincrement())
+  FromEmail                String   @db.NVarChar(200)
+  FromName                 String?  @db.NVarChar(200)
+  SalesTeamEmails          String?  @db.NVarChar(500)
+  CCEmails                 String?  @db.NVarChar(500)
+  NotifyOnNewOrder         Boolean  @default(true)
+  NotifyOnOrderUpdate      Boolean  @default(false)
+  SendCustomerConfirmation Boolean  @default(true)
+  UpdatedAt                DateTime @default(now()) @updatedAt
+}
+
 model MissingShopifySkus {
   ID                      BigInt   @id(map: "PK_MissingShopifySkus") @default(autoincrement())
   SkuID                   String   @db.NVarChar(50)

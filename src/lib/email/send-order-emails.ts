@@ -9,6 +9,8 @@ import { transporter, EMAIL_FROM, EMAIL_CC, EMAIL_SALES } from './client'
 import { customerConfirmationHtml, salesNotificationHtml } from './templates'
 import { generatePdf } from '@/lib/pdf/generate'
 import { generateOrderConfirmationHtml } from '@/lib/pdf/order-confirmation'
+import { getEmailSettings } from '@/lib/data/queries/settings'
+import type { EmailSettingsRecord } from '@/lib/types/settings'
 
 interface OrderEmailData {
   orderId: string
@@ -45,6 +47,28 @@ function formatDate(date: Date): string {
     day: 'numeric',
     year: 'numeric',
   })
+}
+
+/**
+ * Get email configuration from database with fallback to environment variables.
+ */
+async function getEmailConfig(): Promise<EmailSettingsRecord> {
+  try {
+    return await getEmailSettings()
+  } catch {
+    // Fallback to environment variables if DB query fails
+    return {
+      ID: 0,
+      FromEmail: EMAIL_FROM,
+      FromName: null,
+      SalesTeamEmails: EMAIL_SALES,
+      CCEmails: EMAIL_CC || null,
+      NotifyOnNewOrder: true,
+      NotifyOnOrderUpdate: false,
+      SendCustomerConfirmation: true,
+      UpdatedAt: new Date(),
+    }
+  }
 }
 
 export async function sendOrderEmails(data: OrderEmailData): Promise<SendOrderEmailsResult> {

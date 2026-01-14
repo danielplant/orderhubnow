@@ -48,6 +48,26 @@ export type CompanySettingsRecord = {
 export type CompanySettingsEditableFields = Omit<CompanySettingsRecord, 'ID'>
 
 /**
+ * Email notification settings.
+ */
+export type EmailSettingsRecord = {
+  ID: number
+  FromEmail: string
+  FromName: string | null
+  SalesTeamEmails: string | null
+  CCEmails: string | null
+  NotifyOnNewOrder: boolean
+  NotifyOnOrderUpdate: boolean
+  SendCustomerConfirmation: boolean
+  UpdatedAt: Date
+}
+
+/**
+ * Editable fields for email settings.
+ */
+export type EmailSettingsEditableFields = Omit<EmailSettingsRecord, 'ID' | 'UpdatedAt'>
+
+/**
  * Standard action result for server actions.
  */
 export type ActionResult =

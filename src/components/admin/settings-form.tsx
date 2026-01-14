@@ -4,23 +4,26 @@ import { useMemo, useState, useTransition } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
-import type { InventorySettingsRecord, CompanySettingsRecord } from '@/lib/types/settings'
+import type { InventorySettingsRecord, CompanySettingsRecord, EmailSettingsRecord } from '@/lib/types/settings'
 import {
   minimizeBigImages,
   resizeSkuImages300x450,
   updateInventorySettings,
   updateCompanySettings,
+  updateEmailSettings,
 } from '@/lib/data/actions/settings'
 
 interface SettingsFormProps {
   initial: InventorySettingsRecord
   companySettings: CompanySettingsRecord
+  emailSettings: EmailSettingsRecord
 }
 
-export function SettingsForm({ initial, companySettings }: SettingsFormProps) {
+export function SettingsForm({ initial, companySettings, emailSettings }: SettingsFormProps) {
   const [isPending, startTransition] = useTransition()
   const [status, setStatus] = useState<{ kind: 'success' | 'error'; message: string } | null>(null)
   const [companyStatus, setCompanyStatus] = useState<{ kind: 'success' | 'error'; message: string } | null>(null)
+  const [emailStatus, setEmailStatus] = useState<{ kind: 'success' | 'error'; message: string } | null>(null)
 
   const [minQty, setMinQty] = useState(String(initial.MinQuantityToShow))
   const [usdToCad, setUsdToCad] = useState(String(initial.USDToCADConversion ?? 0))
@@ -38,6 +41,15 @@ export function SettingsForm({ initial, companySettings }: SettingsFormProps) {
   const [email, setEmail] = useState(companySettings.Email ?? '')
   const [website, setWebsite] = useState(companySettings.Website ?? '')
   const [logoUrl, setLogoUrl] = useState(companySettings.LogoUrl ?? '')
+
+  // Email settings state
+  const [fromEmail, setFromEmail] = useState(emailSettings.FromEmail)
+  const [fromName, setFromName] = useState(emailSettings.FromName ?? '')
+  const [salesTeamEmails, setSalesTeamEmails] = useState(emailSettings.SalesTeamEmails ?? '')
+  const [ccEmails, setCcEmails] = useState(emailSettings.CCEmails ?? '')
+  const [notifyOnNewOrder, setNotifyOnNewOrder] = useState(emailSettings.NotifyOnNewOrder)
+  const [notifyOnOrderUpdate, setNotifyOnOrderUpdate] = useState(emailSettings.NotifyOnOrderUpdate)
+  const [sendCustomerConfirmation, setSendCustomerConfirmation] = useState(emailSettings.SendCustomerConfirmation)
 
   const canSubmit = useMemo(() => !isPending, [isPending])
 
@@ -91,6 +103,24 @@ export function SettingsForm({ initial, companySettings }: SettingsFormProps) {
 
       if (result.success) setCompanyStatus({ kind: 'success', message: result.message ?? 'Saved.' })
       else setCompanyStatus({ kind: 'error', message: result.error })
+    })
+  }
+
+  function onSaveEmailSettings() {
+    setEmailStatus(null)
+    startTransition(async () => {
+      const result = await updateEmailSettings({
+        FromEmail: fromEmail,
+        FromName: fromName || null,
+        SalesTeamEmails: salesTeamEmails || null,
+        CCEmails: ccEmails || null,
+        NotifyOnNewOrder: notifyOnNewOrder,
+        NotifyOnOrderUpdate: notifyOnOrderUpdate,
+        SendCustomerConfirmation: sendCustomerConfirmation,
+      })
+
+      if (result.success) setEmailStatus({ kind: 'success', message: result.message ?? 'Saved.' })
+      else setEmailStatus({ kind: 'error', message: result.error })
     })
   }
 
@@ -292,6 +322,114 @@ export function SettingsForm({ initial, companySettings }: SettingsFormProps) {
                 }
               >
                 {companyStatus.message}
+              </p>
+            ) : null}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Email Notifications</CardTitle>
+          <CardDescription>
+            Configure when and to whom order notification emails are sent.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">From Email *</label>
+              <Input
+                type="email"
+                value={fromEmail}
+                onChange={(e) => setFromEmail(e.target.value)}
+                placeholder="orders@limeapple.com"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">From Name</label>
+              <Input
+                value={fromName}
+                onChange={(e) => setFromName(e.target.value)}
+                placeholder="Limeapple Orders"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Sales Team Emails</label>
+            <Input
+              value={salesTeamEmails}
+              onChange={(e) => setSalesTeamEmails(e.target.value)}
+              placeholder="orders@limeapple.com, sales@limeapple.com"
+            />
+            <p className="text-xs text-muted-foreground">
+              Comma-separated list of emails to receive order notifications.
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-sm font-medium">CC Emails</label>
+            <Input
+              value={ccEmails}
+              onChange={(e) => setCcEmails(e.target.value)}
+              placeholder="ceo@limeapple.com"
+            />
+            <p className="text-xs text-muted-foreground">
+              Comma-separated list of emails to CC on customer confirmations.
+            </p>
+          </div>
+
+          <div className="space-y-3">
+            <label className="text-sm font-medium">Notification Triggers</label>
+            <label className="flex items-center gap-3 text-sm">
+              <input
+                type="checkbox"
+                className="h-4 w-4"
+                checked={notifyOnNewOrder}
+                onChange={(e) => setNotifyOnNewOrder(e.target.checked)}
+              />
+              Send notification on new order
+            </label>
+
+            <label className="flex items-center gap-3 text-sm">
+              <input
+                type="checkbox"
+                className="h-4 w-4"
+                checked={notifyOnOrderUpdate}
+                onChange={(e) => setNotifyOnOrderUpdate(e.target.checked)}
+              />
+              Send notification when order is updated
+            </label>
+          </div>
+
+          <div className="space-y-3">
+            <label className="text-sm font-medium">Customer Emails</label>
+            <label className="flex items-center gap-3 text-sm">
+              <input
+                type="checkbox"
+                className="h-4 w-4"
+                checked={sendCustomerConfirmation}
+                onChange={(e) => setSendCustomerConfirmation(e.target.checked)}
+              />
+              Send confirmation email to customer
+            </label>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <Button type="button" onClick={onSaveEmailSettings} disabled={!canSubmit}>
+              {isPending ? 'Saving...' : 'Save Email Settings'}
+            </Button>
+
+            {emailStatus ? (
+              <p
+                className={
+                  emailStatus.kind === 'success'
+                    ? 'text-sm text-success'
+                    : 'text-sm text-destructive'
+                }
+              >
+                {emailStatus.message}
               </p>
             ) : null}
           </div>

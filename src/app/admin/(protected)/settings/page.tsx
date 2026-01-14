@@ -1,6 +1,6 @@
 import { auth } from '@/lib/auth/providers'
 import { redirect } from 'next/navigation'
-import { getInventorySettings, getCompanySettings } from '@/lib/data/queries/settings'
+import { getInventorySettings, getCompanySettings, getEmailSettings } from '@/lib/data/queries/settings'
 import { SettingsForm } from '@/components/admin/settings-form'
 
 export const dynamic = 'force-dynamic'
@@ -11,9 +11,10 @@ export default async function SettingsPage() {
     redirect('/admin/login')
   }
 
-  const [settings, companySettings] = await Promise.all([
+  const [settings, companySettings, emailSettings] = await Promise.all([
     getInventorySettings(),
     getCompanySettings(),
+    getEmailSettings(),
   ])
 
   return (
@@ -25,7 +26,7 @@ export default async function SettingsPage() {
         </p>
       </div>
 
-      <SettingsForm initial={settings} companySettings={companySettings} />
+      <SettingsForm initial={settings} companySettings={companySettings} emailSettings={emailSettings} />
     </div>
   )
 }

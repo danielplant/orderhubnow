@@ -2,7 +2,7 @@
 
 import { prisma } from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
-import type { ActionResult, InventorySettingsEditableFields, CompanySettingsEditableFields } from '@/lib/types/settings'
+import type { ActionResult, InventorySettingsEditableFields, CompanySettingsEditableFields, EmailSettingsEditableFields } from '@/lib/types/settings'
 
 /**
  * Parse a value that may be number or string to a valid number, or null.
@@ -129,6 +129,82 @@ export async function updateCompanySettings(
 
     revalidatePath('/admin/settings')
     return { success: true, message: 'Company settings have been updated successfully.' }
+  } catch {
+    return { success: false, error: 'Sorry, there was an error, please try again.' }
+  }
+}
+
+/**
+ * Validate email format.
+ */
+function isValidEmail(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+}
+
+/**
+ * Validate comma-separated email list.
+ */
+function validateEmailList(emailList: string | null): string | null {
+  if (!emailList || emailList.trim().length === 0) return null
+
+  const emails = emailList.split(',').map((e) => e.trim()).filter(Boolean)
+  for (const email of emails) {
+    if (!isValidEmail(email)) return null
+  }
+  return emails.join(', ')
+}
+
+/**
+ * Update email notification settings.
+ */
+export async function updateEmailSettings(
+  input: EmailSettingsEditableFields
+): Promise<ActionResult> {
+  try {
+    if (!input.FromEmail || input.FromEmail.trim().length === 0) {
+      return { success: false, error: 'From email is required' }
+    }
+
+    if (!isValidEmail(input.FromEmail.trim())) {
+      return { success: false, error: 'Invalid from email format' }
+    }
+
+    const salesTeamEmails = validateEmailList(input.SalesTeamEmails)
+    const ccEmails = validateEmailList(input.CCEmails)
+
+    // If sales team emails were provided but invalid
+    if (input.SalesTeamEmails && input.SalesTeamEmails.trim() && salesTeamEmails === null) {
+      return { success: false, error: 'Invalid sales team email format' }
+    }
+
+    // If CC emails were provided but invalid
+    if (input.CCEmails && input.CCEmails.trim() && ccEmails === null) {
+      return { success: false, error: 'Invalid CC email format' }
+    }
+
+    const existing = await prisma.emailSettings.findFirst()
+
+    const data = {
+      FromEmail: input.FromEmail.trim(),
+      FromName: input.FromName?.trim() || null,
+      SalesTeamEmails: salesTeamEmails,
+      CCEmails: ccEmails,
+      NotifyOnNewOrder: input.NotifyOnNewOrder,
+      NotifyOnOrderUpdate: input.NotifyOnOrderUpdate,
+      SendCustomerConfirmation: input.SendCustomerConfirmation,
+    }
+
+    if (existing) {
+      await prisma.emailSettings.update({
+        where: { ID: existing.ID },
+        data,
+      })
+    } else {
+      await prisma.emailSettings.create({ data })
+    }
+
+    revalidatePath('/admin/settings')
+    return { success: true, message: 'Email settings have been updated successfully.' }
   } catch {
     return { success: false, error: 'Sorry, there was an error, please try again.' }
   }

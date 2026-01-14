@@ -1,5 +1,5 @@
 import { prisma } from '@/lib/prisma'
-import type { InventorySettingsRecord, CompanySettingsRecord } from '@/lib/types/settings'
+import type { InventorySettingsRecord, CompanySettingsRecord, EmailSettingsRecord } from '@/lib/types/settings'
 
 /**
  * Fetch the single InventorySettings row.
@@ -104,5 +104,45 @@ export async function upsertCompanySettings(
     Email: created.Email,
     Website: created.Website,
     LogoUrl: created.LogoUrl,
+  }
+}
+
+/**
+ * Default email settings (used when no record exists).
+ * Falls back to environment variables for backward compatibility.
+ */
+const DEFAULT_EMAIL_SETTINGS: EmailSettingsRecord = {
+  ID: 0,
+  FromEmail: process.env.EMAIL_FROM || 'orders@limeapple.com',
+  FromName: 'Limeapple Orders',
+  SalesTeamEmails: process.env.EMAIL_SALES || 'orders@limeapple.com',
+  CCEmails: process.env.EMAIL_CC || null,
+  NotifyOnNewOrder: true,
+  NotifyOnOrderUpdate: false,
+  SendCustomerConfirmation: true,
+  UpdatedAt: new Date(),
+}
+
+/**
+ * Fetch email notification settings.
+ * Returns defaults (from env vars) if no record exists.
+ */
+export async function getEmailSettings(): Promise<EmailSettingsRecord> {
+  const row = await prisma.emailSettings.findFirst()
+
+  if (!row) {
+    return DEFAULT_EMAIL_SETTINGS
+  }
+
+  return {
+    ID: row.ID,
+    FromEmail: row.FromEmail,
+    FromName: row.FromName,
+    SalesTeamEmails: row.SalesTeamEmails,
+    CCEmails: row.CCEmails,
+    NotifyOnNewOrder: row.NotifyOnNewOrder,
+    NotifyOnOrderUpdate: row.NotifyOnOrderUpdate,
+    SendCustomerConfirmation: row.SendCustomerConfirmation,
+    UpdatedAt: row.UpdatedAt,
   }
 }
