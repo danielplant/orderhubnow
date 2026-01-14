@@ -28,7 +28,7 @@ import {
   bulkSetPreOrderFlag,
 } from '@/lib/data/actions/products'
 import { UploadProductsModal } from '@/components/admin/upload-products-modal'
-import { MoreHorizontal, Download, Upload, ChevronDown, FileSpreadsheet } from 'lucide-react'
+import { MoreHorizontal, Download, Upload, ChevronDown, FileSpreadsheet, FileText } from 'lucide-react'
 
 // ============================================================================
 // Types
@@ -181,6 +181,11 @@ export function ProductsTable({
     params.set('currency', exportCurrency)
     window.location.href = `/api/products/export?${params.toString()}`
   }, [searchParams, exportCurrency])
+
+  const doExportPdf = React.useCallback(() => {
+    const params = new URLSearchParams(searchParams.toString())
+    window.location.href = `/api/products/export-pdf?${params.toString()}`
+  }, [searchParams])
 
   const handleSkuClick = React.useCallback(async (row: AdminSkuRow) => {
     setIsLoading(true)
@@ -440,6 +445,10 @@ export function ProductsTable({
                 <DropdownMenuItem onClick={doExport}>
                   <FileSpreadsheet className="h-4 w-4 mr-2" />
                   Download Excel
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={doExportPdf}>
+                  <FileText className="h-4 w-4 mr-2" />
+                  Download PDF
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
