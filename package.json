@@ -12,6 +12,9 @@
     "test": "vitest",
     "test:run": "vitest run",
     "verify": "npm run type-check && npm run lint && npm run build",
+    "check-migrations": "tsx scripts/check-migrations.ts",
+    "check-schema-drift": "bash scripts/check-schema-drift.sh",
+    "apply-migration": "bash scripts/apply-migration.sh",
     "prepare": "husky"
   },
   "dependencies": {
@@ -52,6 +55,7 @@
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.1",
     "@types/bcryptjs": "^2.4.6",
+    "@types/mssql": "^9.1.8",
     "@types/node": "^20",
     "@types/nodemailer": "^7.0.4",
     "@types/react": "^19",
