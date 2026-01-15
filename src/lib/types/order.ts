@@ -17,11 +17,13 @@ export interface OrderQuantities {
 /**
  * Valid order statuses matching .NET CustomerOrders.OrderStatus values.
  * 'Draft' is used for server-side cart persistence before submission.
+ * 'Partially Shipped' indicates some items shipped but not all.
  */
 export const ORDER_STATUSES = [
   'Draft',
   'Pending',
   'Processing',
+  'Partially Shipped',
   'Shipped',
   'Invoiced',
   'Cancelled',
@@ -61,6 +63,9 @@ export interface AdminOrderRow {
   orderDate: string;
   inShopify: boolean;
   isTransferredToShopify: boolean | null;
+  // Shopify status fields (synced from Shopify)
+  shopifyFulfillmentStatus: string | null;
+  shopifyFinancialStatus: string | null;
   // Shipment summary fields (optional - populated when shipments exist)
   shippedTotal: number | null;
   shippedTotalFormatted: string | null;

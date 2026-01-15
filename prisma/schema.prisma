@@ -45,15 +45,19 @@ model CustomerOrders {
   IsShipped              Boolean
   OrderStatus            String                   @db.NVarChar(50)
   IsTransferredToShopify Boolean?
+  IsPreOrder             Boolean?
   CustomerID             Int?
   RepID                  Int?
-  ShopifyOrderID         String?                  @db.NVarChar(50)
-  PaymentTerms           String?                  @db.NVarChar(200)
-  ApprovalDate           DateTime?                @db.DateTime
-  BrandNotes             String?                  @db.NVarChar(Max)
-  CustomerOrdersComments CustomerOrdersComments[]
-  CustomerOrdersItems    CustomerOrdersItems[]
-  Shipments              Shipments[]
+  ShopifyOrderID             String?                  @db.NVarChar(50)
+  ShopifyFulfillmentStatus   String?                  @db.NVarChar(20)
+  ShopifyFinancialStatus     String?                  @db.NVarChar(20)
+  ShopifyStatusSyncedAt      DateTime?                @db.DateTime
+  PaymentTerms               String?                  @db.NVarChar(200)
+  ApprovalDate               DateTime?                @db.DateTime
+  BrandNotes                 String?                  @db.NVarChar(Max)
+  CustomerOrdersComments     CustomerOrdersComments[]
+  CustomerOrdersItems        CustomerOrdersItems[]
+  Shipments                  Shipments[]
 
   @@index([CustomerID], map: "IX_CustomerOrders_CustomerID")
   @@index([OrderDate], map: "IX_CustomerOrders_OrderDate")
@@ -80,6 +84,12 @@ model CustomerOrdersItems {
   PriceCurrency   String          @db.NVarChar(50)
   Notes           String          @db.NVarChar(Max)
   LineDiscount    Float?          @default(0)
+  // Line item fulfillment status tracking
+  Status          String?         @default("Open") @db.NVarChar(20) // Open | Shipped | Cancelled
+  CancelledQty    Int?            @default(0)
+  CancelledReason String?         @db.NVarChar(100) // "Out of stock", "Discontinued", "Customer request", etc.
+  CancelledAt     DateTime?       @db.DateTime
+  CancelledBy     String?         @db.NVarChar(255)
   CustomerOrders  CustomerOrders  @relation(fields: [CustomerOrderID], references: [ID], onUpdate: NoAction, map: "FK_CustomerOrdersItems_CustomerOrders")
   ShipmentItems   ShipmentItems[]
 
@@ -751,4 +761,28 @@ model ShipmentTracking {
   Shipment       Shipments @relation(fields: [ShipmentID], references: [ID], onUpdate: NoAction, map: "FK_ShipmentTracking_Shipments")
 
   @@index([ShipmentID], map: "IX_ShipmentTracking_ShipmentID")
+}
+
+/// Tracks which SQL migrations have been applied to the database
+model SchemaMigrations {
+  ID        Int      @id(map: "PK_SchemaMigrations") @default(autoincrement())
+  Name      String   @unique(map: "UQ_SchemaMigrations_Name") @db.NVarChar(255)
+  AppliedAt DateTime @default(now()) @db.DateTime
+
+  @@map("SchemaMigrations")
+}
+
+/// Feature interest tracking - captures user expectations for upcoming features
+model FeatureInterest {
+  ID              BigInt   @id(map: "PK_FeatureInterest") @default(autoincrement())
+  Feature         String   @db.NVarChar(100)
+  SelectedOptions String?  @db.NVarChar(Max)
+  FreeText        String?  @db.NVarChar(Max)
+  OrderId         BigInt?
+  OrderNumber     String?  @db.NVarChar(50)
+  UserId          String?  @db.NVarChar(255)
+  CreatedAt       DateTime @default(now()) @db.DateTime
+
+  @@index([Feature], map: "IX_FeatureInterest_Feature")
+  @@index([CreatedAt], map: "IX_FeatureInterest_CreatedAt")
 }

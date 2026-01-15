@@ -162,6 +162,39 @@ async function shopifyFetch<T>(
 // Orders API
 // ============================================================================
 
+/**
+ * Order details returned from Shopify GET /orders/{id}.json
+ */
+export interface ShopifyOrderDetails {
+  id: number
+  name: string
+  order_number: number
+  financial_status: string | null
+  fulfillment_status: string | null
+  cancelled_at: string | null
+  closed_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+/**
+ * Get a single order from Shopify by ID.
+ * Used for syncing order status back to OHN.
+ */
+export async function getOrder(
+  orderId: string
+): Promise<{ order?: ShopifyOrderDetails; error?: string }> {
+  const { data, error } = await shopifyFetch<{ order: ShopifyOrderDetails }>(
+    `/orders/${orderId}.json?fields=id,name,order_number,financial_status,fulfillment_status,cancelled_at,closed_at,created_at,updated_at`
+  )
+
+  if (error) {
+    return { error }
+  }
+
+  return { order: data?.order }
+}
+
 export async function createOrder(
   orderData: ShopifyOrderRequest
 ): Promise<{ order?: ShopifyOrderResponse['order']; error?: string }> {
@@ -420,6 +453,7 @@ export const shopify = {
   isConfigured: isShopifyConfigured,
   orders: {
     create: createOrder,
+    get: getOrder,
   },
   customers: {
     create: createCustomer,

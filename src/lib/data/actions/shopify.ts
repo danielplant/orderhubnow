@@ -9,7 +9,13 @@ import {
   type ShopifyCustomerRequest,
 } from '@/lib/shopify/client'
 import { findShopifyVariant, findCachedShopifyCustomer } from '@/lib/data/queries/shopify'
-import type { ShopifyTransferResult, AddMissingSkuInput } from '@/lib/types/shopify'
+import type {
+  ShopifyTransferResult,
+  AddMissingSkuInput,
+  ShopifyValidationResult,
+  BulkTransferResult,
+  InventoryStatusItem,
+} from '@/lib/types/shopify'
 
 // ============================================================================
 // Auth Helper
@@ -477,7 +483,10 @@ export async function transferOrderToShopify(
       // Success on retry
       await prisma.customerOrders.update({
         where: { ID: order.ID },
-        data: { IsTransferredToShopify: true },
+        data: {
+          IsTransferredToShopify: true,
+          ShopifyOrderID: String(retryResult.order.id),
+        },
       })
 
       revalidatePath('/admin/orders')
@@ -503,7 +512,10 @@ export async function transferOrderToShopify(
     // 9. Success - update database
     await prisma.customerOrders.update({
       where: { ID: order.ID },
-      data: { IsTransferredToShopify: true },
+      data: {
+        IsTransferredToShopify: true,
+        ShopifyOrderID: String(createdOrder.id),
+      },
     })
 
     revalidatePath('/admin/orders')
@@ -518,6 +530,395 @@ export async function transferOrderToShopify(
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Failed to transfer order to Shopify'
     return { success: false, error: message }
+  }
+}
+
+// ============================================================================
+// Order Validation (Pre-Transfer Check)
+// ============================================================================
+
+/**
+ * Validate an order before transferring to Shopify.
+ * Checks:
+ * - All SKUs exist in Shopify (blockers if missing)
+ * - Customer exists in Shopify cache
+ * - Inventory availability vs ordered quantities (warnings, not blockers)
+ */
+export async function validateOrderForShopify(
+  orderId: string
+): Promise<ShopifyValidationResult> {
+  try {
+    await requireAdmin()
+
+    // Get order info
+    const order = await prisma.customerOrders.findUnique({
+      where: { ID: BigInt(orderId) },
+      select: {
+        ID: true,
+        OrderNumber: true,
+        StoreName: true,
+        OrderAmount: true,
+        CustomerEmail: true,
+        IsTransferredToShopify: true,
+      },
+    })
+
+    if (!order) {
+      return {
+        valid: false,
+        orderId,
+        orderNumber: '',
+        storeName: '',
+        orderAmount: 0,
+        itemCount: 0,
+        missingSkus: [],
+        customerEmail: null,
+        customerExists: false,
+        inventoryStatus: [],
+      }
+    }
+
+    // Get order items
+    const orderItems = await prisma.customerOrdersItems.findMany({
+      where: { CustomerOrderID: order.ID },
+      select: {
+        SKU: true,
+        SKUVariantID: true,
+        Quantity: true,
+      },
+    })
+
+    // Check customer exists in Shopify cache
+    let customerExists = false
+    if (order.CustomerEmail) {
+      const cachedCustomer = await findCachedShopifyCustomer(order.CustomerEmail)
+      customerExists = !!cachedCustomer
+    }
+
+    // Check each item for Shopify variant and inventory
+    const missingSkus: string[] = []
+    const inventoryStatus: InventoryStatusItem[] = []
+
+    for (const item of orderItems) {
+      // Check if SKU exists in Shopify
+      const variant = await findShopifyVariant(
+        item.SKUVariantID > 0 ? item.SKUVariantID : null,
+        item.SKU
+      )
+
+      if (!variant || !variant.shopifyId) {
+        missingSkus.push(item.SKU)
+        continue
+      }
+
+      // Check local inventory (Sku table)
+      const localSku = await prisma.sku.findFirst({
+        where: { SkuID: variant.skuId },
+        select: { Quantity: true },
+      })
+
+      const available = localSku?.Quantity ?? 0
+      const ordered = item.Quantity
+
+      let status: InventoryStatusItem['status'] = 'ok'
+      if (available === 0) {
+        status = 'backorder'
+      } else if (available < ordered) {
+        status = 'partial'
+      }
+
+      inventoryStatus.push({
+        sku: variant.skuId,
+        ordered,
+        available,
+        status,
+      })
+    }
+
+    return {
+      valid: missingSkus.length === 0,
+      orderId,
+      orderNumber: order.OrderNumber,
+      storeName: order.StoreName,
+      orderAmount: order.OrderAmount,
+      itemCount: orderItems.length,
+      missingSkus,
+      customerEmail: order.CustomerEmail,
+      customerExists,
+      inventoryStatus,
+    }
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'Failed to validate order'
+    console.error('validateOrderForShopify error:', message)
+    return {
+      valid: false,
+      orderId,
+      orderNumber: '',
+      storeName: '',
+      orderAmount: 0,
+      itemCount: 0,
+      missingSkus: [],
+      customerEmail: null,
+      customerExists: false,
+      inventoryStatus: [],
+    }
+  }
+}
+
+// ============================================================================
+// Bulk Transfer Orders to Shopify
+// ============================================================================
+
+/**
+ * Transfer multiple orders to Shopify.
+ * Processes orders sequentially with a delay to respect rate limits.
+ */
+export async function bulkTransferOrdersToShopify(
+  orderIds: string[]
+): Promise<BulkTransferResult> {
+  await requireAdmin()
+
+  const results: BulkTransferResult['results'] = []
+  let successCount = 0
+  let failedCount = 0
+
+  for (let i = 0; i < orderIds.length; i++) {
+    const orderId = orderIds[i]
+
+    // Get order number for result tracking
+    const order = await prisma.customerOrders.findUnique({
+      where: { ID: BigInt(orderId) },
+      select: { OrderNumber: true },
+    })
+
+    const orderNumber = order?.OrderNumber ?? orderId
+
+    try {
+      const result = await transferOrderToShopify(orderId)
+
+      if (result.success) {
+        successCount++
+        results.push({
+          orderId,
+          orderNumber,
+          success: true,
+          shopifyOrderNumber: result.shopifyOrderNumber,
+        })
+      } else {
+        failedCount++
+        results.push({
+          orderId,
+          orderNumber,
+          success: false,
+          error: result.error || 'Unknown error',
+        })
+      }
+    } catch (e) {
+      failedCount++
+      results.push({
+        orderId,
+        orderNumber,
+        success: false,
+        error: e instanceof Error ? e.message : 'Unknown error',
+      })
+    }
+
+    // Rate limiting delay (500ms between orders, skip on last)
+    if (i < orderIds.length - 1) {
+      await new Promise((resolve) => setTimeout(resolve, 500))
+    }
+  }
+
+  return {
+    success: successCount,
+    failed: failedCount,
+    results,
+  }
+}
+
+// ============================================================================
+// Sync Order Status FROM Shopify
+// ============================================================================
+
+export interface SyncOrderStatusResult {
+  success: boolean
+  orderId: string
+  shopifyOrderId?: string
+  fulfillmentStatus?: string | null
+  financialStatus?: string | null
+  error?: string
+}
+
+/**
+ * Sync a single order's status from Shopify.
+ * Fetches fulfillment_status and financial_status from Shopify
+ * and updates the local database.
+ */
+export async function syncOrderStatusFromShopify(
+  orderId: string
+): Promise<SyncOrderStatusResult> {
+  try {
+    await requireAdmin()
+
+    if (!shopify.isConfigured()) {
+      return {
+        success: false,
+        orderId,
+        error: 'Shopify is not configured',
+      }
+    }
+
+    // Get order from database
+    const order = await prisma.customerOrders.findUnique({
+      where: { ID: BigInt(orderId) },
+      select: {
+        ID: true,
+        ShopifyOrderID: true,
+        IsTransferredToShopify: true,
+      },
+    })
+
+    if (!order) {
+      return { success: false, orderId, error: 'Order not found' }
+    }
+
+    if (!order.IsTransferredToShopify || !order.ShopifyOrderID) {
+      return { success: false, orderId, error: 'Order has not been transferred to Shopify' }
+    }
+
+    // Fetch order from Shopify
+    const { order: shopifyOrder, error } = await shopify.orders.get(order.ShopifyOrderID)
+
+    if (error) {
+      return { success: false, orderId, shopifyOrderId: order.ShopifyOrderID, error }
+    }
+
+    if (!shopifyOrder) {
+      return { success: false, orderId, shopifyOrderId: order.ShopifyOrderID, error: 'Order not found in Shopify' }
+    }
+
+    // Update local database with Shopify status
+    await prisma.customerOrders.update({
+      where: { ID: order.ID },
+      data: {
+        ShopifyFulfillmentStatus: shopifyOrder.fulfillment_status,
+        ShopifyFinancialStatus: shopifyOrder.financial_status,
+        ShopifyStatusSyncedAt: new Date(),
+      },
+    })
+
+    revalidatePath('/admin/orders')
+    revalidatePath(`/admin/orders/${orderId}`)
+
+    return {
+      success: true,
+      orderId,
+      shopifyOrderId: order.ShopifyOrderID,
+      fulfillmentStatus: shopifyOrder.fulfillment_status,
+      financialStatus: shopifyOrder.financial_status,
+    }
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'Failed to sync order status'
+    return { success: false, orderId, error: message }
+  }
+}
+
+export interface BulkSyncResult {
+  success: boolean
+  synced: number
+  failed: number
+  errors: Array<{ orderId: string; error: string }>
+}
+
+/**
+ * Sync status for all orders that have been transferred to Shopify
+ * but haven't been synced recently (within the specified minutes).
+ * 
+ * Used by the cron job for reconciliation.
+ */
+export async function syncAllPendingOrderStatuses(options?: {
+  syncedMoreThanMinutesAgo?: number
+  transferredWithinDays?: number
+  limit?: number
+}): Promise<BulkSyncResult> {
+  const syncedMoreThanMinutesAgo = options?.syncedMoreThanMinutesAgo ?? 30
+  const transferredWithinDays = options?.transferredWithinDays ?? 30
+  const limit = options?.limit ?? 100
+
+  const cutoffDate = new Date()
+  cutoffDate.setMinutes(cutoffDate.getMinutes() - syncedMoreThanMinutesAgo)
+
+  const oldestOrderDate = new Date()
+  oldestOrderDate.setDate(oldestOrderDate.getDate() - transferredWithinDays)
+
+  try {
+    // Find orders that need syncing
+    const ordersToSync = await prisma.customerOrders.findMany({
+      where: {
+        IsTransferredToShopify: true,
+        ShopifyOrderID: { not: null },
+        OrderDate: { gte: oldestOrderDate },
+        OR: [
+          { ShopifyStatusSyncedAt: null },
+          { ShopifyStatusSyncedAt: { lt: cutoffDate } },
+        ],
+      },
+      select: {
+        ID: true,
+        ShopifyOrderID: true,
+      },
+      take: limit,
+      orderBy: { OrderDate: 'desc' },
+    })
+
+    if (ordersToSync.length === 0) {
+      return { success: true, synced: 0, failed: 0, errors: [] }
+    }
+
+    let synced = 0
+    let failed = 0
+    const errors: Array<{ orderId: string; error: string }> = []
+
+    for (const order of ordersToSync) {
+      if (!order.ShopifyOrderID) continue
+
+      try {
+        const { order: shopifyOrder, error } = await shopify.orders.get(order.ShopifyOrderID)
+
+        if (error || !shopifyOrder) {
+          failed++
+          errors.push({ orderId: String(order.ID), error: error || 'Order not found in Shopify' })
+          continue
+        }
+
+        await prisma.customerOrders.update({
+          where: { ID: order.ID },
+          data: {
+            ShopifyFulfillmentStatus: shopifyOrder.fulfillment_status,
+            ShopifyFinancialStatus: shopifyOrder.financial_status,
+            ShopifyStatusSyncedAt: new Date(),
+          },
+        })
+
+        synced++
+      } catch (e) {
+        failed++
+        errors.push({
+          orderId: String(order.ID),
+          error: e instanceof Error ? e.message : 'Unknown error',
+        })
+      }
+
+      // Small delay to avoid rate limiting
+      await new Promise(resolve => setTimeout(resolve, 100))
+    }
+
+    revalidatePath('/admin/orders')
+
+    return { success: true, synced, failed, errors }
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'Failed to sync order statuses'
+    return { success: false, synced: 0, failed: 0, errors: [{ orderId: 'bulk', error: message }] }
   }
 }
 

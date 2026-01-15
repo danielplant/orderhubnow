@@ -189,6 +189,8 @@ export async function getOrders(
         ShipEndDate: true,
         OrderDate: true,
         IsTransferredToShopify: true,
+        ShopifyFulfillmentStatus: true,
+        ShopifyFinancialStatus: true,
       },
     }),
     
@@ -206,6 +208,7 @@ export async function getOrders(
     Draft: 0,
     Pending: 0,
     Processing: 0,
+    'Partially Shipped': 0,
     Shipped: 0,
     Invoiced: 0,
     Cancelled: 0,
@@ -259,6 +262,9 @@ export async function getOrders(
         orderDate: o.OrderDate.toISOString().slice(0, 10),
         inShopify: !!o.IsTransferredToShopify,
         isTransferredToShopify: o.IsTransferredToShopify,
+        // Shopify status fields
+        shopifyFulfillmentStatus: o.ShopifyFulfillmentStatus,
+        shopifyFinancialStatus: o.ShopifyFinancialStatus,
         // Shipment summary fields
         shippedTotal,
         shippedTotalFormatted: shippedTotal !== null ? formatCurrency(shippedTotal, currency) : null,
@@ -342,6 +348,8 @@ export async function getOrderById(orderId: string): Promise<AdminOrderRow | nul
       ShipEndDate: true,
       OrderDate: true,
       IsTransferredToShopify: true,
+      ShopifyFulfillmentStatus: true,
+      ShopifyFinancialStatus: true,
     },
   });
 
@@ -382,6 +390,9 @@ export async function getOrderById(orderId: string): Promise<AdminOrderRow | nul
     orderDate: order.OrderDate.toISOString().slice(0, 10),
     inShopify: !!order.IsTransferredToShopify,
     isTransferredToShopify: order.IsTransferredToShopify,
+    // Shopify status fields
+    shopifyFulfillmentStatus: order.ShopifyFulfillmentStatus,
+    shopifyFinancialStatus: order.ShopifyFinancialStatus,
     // Shipment summary fields
     shippedTotal,
     shippedTotalFormatted: shippedTotal !== null ? formatCurrency(shippedTotal, currency) : null,
@@ -511,6 +522,7 @@ export async function getOrdersByRep(
         Draft: 0,
         Pending: 0,
         Processing: 0,
+        'Partially Shipped': 0,
         Shipped: 0,
         Invoiced: 0,
         Cancelled: 0,
@@ -567,6 +579,8 @@ export async function getOrdersByRep(
         ShipEndDate: true,
         OrderDate: true,
         IsTransferredToShopify: true,
+        ShopifyFulfillmentStatus: true,
+        ShopifyFinancialStatus: true,
       },
     }),
     prisma.customerOrders.groupBy({
@@ -582,6 +596,7 @@ export async function getOrdersByRep(
     Draft: 0,
     Pending: 0,
     Processing: 0,
+    'Partially Shipped': 0,
     Shipped: 0,
     Invoiced: 0,
     Cancelled: 0,
@@ -643,6 +658,9 @@ export async function getOrdersByRep(
         orderDate: o.OrderDate.toISOString().slice(0, 10),
         inShopify: !!o.IsTransferredToShopify,
         isTransferredToShopify: o.IsTransferredToShopify,
+        // Shopify status fields
+        shopifyFulfillmentStatus: o.ShopifyFulfillmentStatus,
+        shopifyFinancialStatus: o.ShopifyFinancialStatus,
         category: categoryMap.get(o.OrderNumber) ?? '',
         // Shipment summary fields
         shippedTotal,
@@ -682,6 +700,7 @@ export interface OrderForEditing {
   orderDate: string;
   website: string;
   inShopify: boolean;
+  isPreOrder: boolean;
   items: Array<{
     id: string;
     sku: string;
@@ -775,6 +794,8 @@ export async function getOrderForEditing(
     orderDate: order.OrderDate.toISOString().slice(0, 10),
     website: order.Website || '',
     inShopify: !!order.IsTransferredToShopify,
+    // Use stored IsPreOrder, fallback to order number prefix for legacy orders
+    isPreOrder: order.IsPreOrder ?? order.OrderNumber.startsWith('P'),
     items: items.map((item) => ({
       id: String(item.ID),
       sku: item.SKU,

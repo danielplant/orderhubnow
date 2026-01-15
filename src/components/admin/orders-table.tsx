@@ -14,6 +14,7 @@ import {
   DropdownMenuItem,
   DateRangePopover,
   type DateRange,
+  SearchInput,
 } from '@/components/ui'
 import { BulkActionsBar } from '@/components/admin/bulk-actions-bar'
 import { OrderCommentsModal } from '@/components/admin/order-comments-modal'
@@ -42,6 +43,7 @@ const ORDER_STATUS_TABS: Array<{ label: 'All' | OrderStatus; value: string }> = 
   { label: 'All', value: 'All' },
   { label: 'Pending', value: 'Pending' },
   { label: 'Processing', value: 'Processing' },
+  { label: 'Partially Shipped', value: 'Partially Shipped' },
   { label: 'Shipped', value: 'Shipped' },
   { label: 'Invoiced', value: 'Invoiced' },
   { label: 'Cancelled', value: 'Cancelled' },
@@ -56,6 +58,8 @@ function getStatusBadgeStatus(status: OrderStatus) {
       return 'invoiced'
     case 'Shipped':
       return 'shipped'
+    case 'Partially Shipped':
+      return 'partially-shipped'
     case 'Processing':
       return 'processing'
     case 'Pending':
@@ -294,11 +298,35 @@ export function OrdersTable({ initialOrders, total, statusCounts, reps }: Orders
       {
         id: 'inShopify',
         header: 'Sync',
-        cell: (o) => (
-          <span className={cn('text-sm', o.inShopify ? 'text-success' : 'text-warning')}>
-            {o.inShopify ? 'In Shopify' : 'Pending'}
-          </span>
-        ),
+        cell: (o) => {
+          if (!o.inShopify) {
+            return <span className="text-sm text-warning">Pending</span>
+          }
+          // Show Shopify status if synced
+          const fulfillment = o.shopifyFulfillmentStatus
+          const payment = o.shopifyFinancialStatus
+          
+          // Format status nicely
+          const formatStatus = (s: string | null) => {
+            if (!s) return null
+            return s.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
+          }
+          
+          const fulfillmentLabel = formatStatus(fulfillment) || 'Unfulfilled'
+          const paymentLabel = formatStatus(payment) || '—'
+          
+          const fulfillmentColor = fulfillment === 'fulfilled' ? 'text-success' : 
+                                   fulfillment === 'partial' ? 'text-warning' : 'text-muted-foreground'
+          const paymentColor = payment === 'paid' ? 'text-success' : 
+                              payment === 'pending' ? 'text-warning' : 'text-muted-foreground'
+          
+          return (
+            <div className="text-xs space-y-0.5">
+              <div className={fulfillmentColor}>{fulfillmentLabel}</div>
+              <div className={paymentColor}>{paymentLabel}</div>
+            </div>
+          )
+        },
       },
       {
         id: 'actions',
@@ -416,11 +444,11 @@ export function OrdersTable({ initialOrders, total, statusCounts, reps }: Orders
 
         {/* Filters Row */}
         <div className="flex flex-wrap gap-3 p-4">
-          <input
+          <SearchInput
             value={q}
-            onChange={(e) => setParam('q', e.target.value || null)}
+            onValueChange={(v) => setParam('q', v || null)}
             placeholder="Search store name..."
-            className="h-10 w-full max-w-md rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="h-10 w-full max-w-md"
           />
 
           <select

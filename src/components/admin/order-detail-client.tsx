@@ -3,15 +3,23 @@
 import * as React from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { Button, Card, CardContent, CardHeader, CardTitle, Input } from '@/components/ui'
+import { Button, Card, CardContent, CardHeader, CardTitle, Input, FeatureInterestModal } from '@/components/ui'
 import { EditShipmentModal } from './edit-shipment-modal'
 import { ShipmentModal } from './shipment-modal'
 import { OrderAdjustments } from './order-adjustments'
 import { formatCurrency, cn } from '@/lib/utils'
 import { getTrackingUrl } from '@/lib/types/shipment'
 import { updateOrderDetails } from '@/lib/data/actions/orders'
-import type { ShipmentRow, Carrier } from '@/lib/types/shipment'
-import { Pencil, X, Check, Loader2 } from 'lucide-react'
+import { syncOrderStatusFromShopify } from '@/lib/data/actions/shopify'
+import type { ShipmentRow, Carrier, LineItemStatus, CancelReason } from '@/lib/types/shipment'
+import { Pencil, X, Check, Loader2, RefreshCw, RotateCcw } from 'lucide-react'
+
+const RETURNS_OPTIONS = [
+  'Generate RMA number',
+  'Send return label to customer',
+  'Create credit memo',
+  'Track returned items',
+]
 
 // ============================================================================
 // Types
@@ -24,6 +32,12 @@ interface OrderItem {
   price: number
   currency: 'USD' | 'CAD'
   shippedQuantity: number
+  cancelledQuantity: number
+  remainingQuantity: number
+  status: LineItemStatus
+  cancelledReason: CancelReason | null
+  cancelledAt: string | null
+  cancelledBy: string | null
 }
 
 interface ShipmentHistoryProps {
@@ -159,15 +173,29 @@ export function ShipmentHistory({
                     Shipping: {formatCurrency(shipment.shippingCost, currency)}
                   </div>
                 </div>
-                {canCreateShipment && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setEditingShipment(shipment)}
-                  >
-                    Edit
-                  </Button>
-                )}
+                <div className="flex gap-2">
+                  <FeatureInterestModal
+                    feature="Returns"
+                    trigger={
+                      <Button variant="outline" size="sm">
+                        <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
+                        Return
+                      </Button>
+                    }
+                    question="What would you expect when requesting a return?"
+                    options={RETURNS_OPTIONS}
+                    context={{ orderId, orderNumber }}
+                  />
+                  {canCreateShipment && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setEditingShipment(shipment)}
+                    >
+                      Edit
+                    </Button>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -399,6 +427,117 @@ export function PDFSettingsCard({
             </div>
           )}
         </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+// ============================================================================
+// Shopify Status Card
+// ============================================================================
+
+function formatShopifyStatus(status: string | null | undefined): string {
+  if (!status) return 'Unfulfilled'
+  return status
+    .split('_')
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ')
+}
+
+function getStatusColor(status: string | null | undefined, type: 'fulfillment' | 'financial'): string {
+  if (!status) {
+    return type === 'fulfillment' ? 'text-warning' : 'text-muted-foreground'
+  }
+  
+  if (type === 'fulfillment') {
+    if (status === 'fulfilled') return 'text-success'
+    if (status === 'partial') return 'text-warning'
+    return 'text-muted-foreground'
+  }
+  
+  // financial
+  if (status === 'paid') return 'text-success'
+  if (status === 'pending') return 'text-warning'
+  if (status === 'refunded' || status === 'voided') return 'text-destructive'
+  return 'text-muted-foreground'
+}
+
+interface ShopifyStatusCardProps {
+  orderId: string
+  shopifyOrderId: string
+  fulfillmentStatus: string | null | undefined
+  financialStatus: string | null | undefined
+  lastSyncedAt: string | null
+}
+
+export function ShopifyStatusCard({
+  orderId,
+  shopifyOrderId,
+  fulfillmentStatus,
+  financialStatus,
+  lastSyncedAt,
+}: ShopifyStatusCardProps) {
+  const router = useRouter()
+  const [isSyncing, setIsSyncing] = React.useState(false)
+  const [error, setError] = React.useState<string | null>(null)
+
+  const handleSync = async () => {
+    setIsSyncing(true)
+    setError(null)
+    try {
+      const result = await syncOrderStatusFromShopify(orderId)
+      if (result.success) {
+        router.refresh()
+      } else {
+        setError(result.error || 'Failed to sync')
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to sync')
+    } finally {
+      setIsSyncing(false)
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <CardTitle className="text-base">Shopify Status</CardTitle>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={handleSync}
+          disabled={isSyncing}
+          title="Sync status from Shopify"
+        >
+          <RefreshCw className={cn('h-4 w-4', isSyncing && 'animate-spin')} />
+        </Button>
+      </CardHeader>
+      <CardContent className="space-y-2 text-sm">
+        <div className="flex justify-between gap-4">
+          <span className="text-muted-foreground">Shopify Order ID</span>
+          <span className="font-mono text-xs">{shopifyOrderId}</span>
+        </div>
+        <div className="flex justify-between gap-4">
+          <span className="text-muted-foreground">Fulfillment</span>
+          <span className={cn('font-medium', getStatusColor(fulfillmentStatus, 'fulfillment'))}>
+            {formatShopifyStatus(fulfillmentStatus)}
+          </span>
+        </div>
+        <div className="flex justify-between gap-4">
+          <span className="text-muted-foreground">Payment</span>
+          <span className={cn('font-medium', getStatusColor(financialStatus, 'financial'))}>
+            {formatShopifyStatus(financialStatus)}
+          </span>
+        </div>
+        <div className="flex justify-between gap-4 pt-2 border-t border-border">
+          <span className="text-muted-foreground">Last Synced</span>
+          <span className="text-xs text-muted-foreground">
+            {lastSyncedAt ? new Date(lastSyncedAt).toLocaleString() : 'Never'}
+          </span>
+        </div>
+        {error && (
+          <div className="text-xs text-destructive pt-1">{error}</div>
+        )}
       </CardContent>
     </Card>
   )

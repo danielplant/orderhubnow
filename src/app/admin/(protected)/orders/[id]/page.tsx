@@ -6,7 +6,7 @@ import { formatCurrency } from '@/lib/utils'
 import { Card, CardContent, CardHeader, CardTitle, Button, StatusBadge } from '@/components/ui'
 import type { OrderStatus } from '@/lib/types/order'
 import { getShipmentsForOrder, getOrderItemsWithFulfillment } from '@/lib/data/actions/shipments'
-import { LineItemsSection, ShipmentHistory, PDFSettingsCard } from '@/components/admin/order-detail-client'
+import { LineItemsSection, ShipmentHistory, PDFSettingsCard, ShopifyStatusCard } from '@/components/admin/order-detail-client'
 
 function getStatusBadgeStatus(status: OrderStatus) {
   switch (status) {
@@ -16,6 +16,8 @@ function getStatusBadgeStatus(status: OrderStatus) {
       return 'invoiced'
     case 'Shipped':
       return 'shipped'
+    case 'Partially Shipped':
+      return 'partially-shipped'
     case 'Processing':
       return 'processing'
     case 'Pending':
@@ -56,6 +58,10 @@ export default async function AdminOrderDetailsPage(props: { params: Promise<{ i
       OrderDate: true,
       Website: true,
       IsTransferredToShopify: true,
+      ShopifyOrderID: true,
+      ShopifyFulfillmentStatus: true,
+      ShopifyFinancialStatus: true,
+      ShopifyStatusSyncedAt: true,
       // PDF settings fields
       PaymentTerms: true,
       ApprovalDate: true,
@@ -94,6 +100,12 @@ export default async function AdminOrderDetailsPage(props: { params: Promise<{ i
     price: item.unitPrice,
     currency: (item.priceCurrency as 'USD' | 'CAD') || currency,
     shippedQuantity: item.shippedQuantity,
+    cancelledQuantity: item.cancelledQuantity,
+    remainingQuantity: item.remainingQuantity,
+    status: item.status,
+    cancelledReason: item.cancelledReason,
+    cancelledAt: item.cancelledAt,
+    cancelledBy: item.cancelledBy,
   }))
 
   return (
@@ -204,6 +216,16 @@ export default async function AdminOrderDetailsPage(props: { params: Promise<{ i
           approvalDate={order.ApprovalDate?.toISOString().slice(0, 10) || ''}
           brandNotes={order.BrandNotes || ''}
         />
+
+        {order.IsTransferredToShopify && order.ShopifyOrderID && (
+          <ShopifyStatusCard
+            orderId={id}
+            shopifyOrderId={order.ShopifyOrderID}
+            fulfillmentStatus={order.ShopifyFulfillmentStatus}
+            financialStatus={order.ShopifyFinancialStatus}
+            lastSyncedAt={order.ShopifyStatusSyncedAt?.toISOString() ?? null}
+          />
+        )}
 
         <Card className="lg:col-span-2">
           <CardHeader>
