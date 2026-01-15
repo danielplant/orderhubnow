@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Skip TypeScript during build - we run tsc separately in deploy.sh
+  typescript: { ignoreBuildErrors: true },
   reactCompiler: true,
   images: {
     remotePatterns: [

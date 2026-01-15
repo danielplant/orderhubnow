@@ -105,15 +105,28 @@ echo "[7/8] Pushing to GitHub..."
 git push origin main
 echo "✓ Pushed to GitHub"
 
-# Step 8: Deploy to EC2
+# Step 8: Deploy to EC2 (rsync pre-built artifacts, no rebuild)
 echo ""
 echo "[8/8] Deploying to EC2..."
+
+# Kill any stuck build processes from previous deploys
+echo "  Cleaning up any stuck processes..."
+ssh -i "$EC2_KEY" "$EC2_HOST" "pkill -f 'tsc|next build' 2>/dev/null || true"
+
+# Sync source code
+echo "  Syncing source code..."
+ssh -i "$EC2_KEY" "$EC2_HOST" "cd $EC2_APP_DIR && git fetch origin main && git reset --hard origin/main"
+
+# Rsync the pre-built .next folder (much faster than rebuilding on EC2)
+echo "  Uploading pre-built assets..."
+rsync -avz --delete -e "ssh -i $EC2_KEY" \
+    .next/ "$EC2_HOST:$EC2_APP_DIR/.next/"
+
+# Install production dependencies only and restart
+echo "  Installing dependencies and restarting..."
 ssh -i "$EC2_KEY" "$EC2_HOST" "cd $EC2_APP_DIR && \
-    git fetch origin main && \
-    git reset --hard origin/main && \
-    npm ci && \
+    npm ci --omit=dev && \
     npx prisma generate && \
-    npm run build && \
     pm2 restart orderhubnow"
 
 echo ""
