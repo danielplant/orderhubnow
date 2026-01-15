@@ -1,6 +1,7 @@
 // shadcn/ui components (Radix-based, accessible)
 export { Button, buttonVariants } from "./button";
 export { Input } from "./input";
+export { SearchInput, type SearchInputProps } from "./search-input";
 export { Popover, PopoverTrigger, PopoverContent, PopoverAnchor } from "./popover";
 export { Card, CardHeader, CardFooter, CardTitle, CardDescription, CardContent } from "./card";
 export { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "./tooltip";
@@ -66,3 +67,6 @@ export { InlineEdit, type InlineEditProps } from "./inline-edit";
 
 // Date components
 export { DateRangePopover, type DateRange, type DateRangePopoverProps } from "./date-range-popover";
+
+// Feature interest
+export { FeatureInterestModal, type FeatureInterestModalProps } from "./feature-interest-modal";
