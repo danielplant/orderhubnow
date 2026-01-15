@@ -15,6 +15,13 @@ const eslintConfig = defineConfig([
     // Project docs may contain archived reference code.
     "docs/**",
   ]),
+  // Allow require() in scripts and sql-migrations directories (Node.js utility scripts)
+  {
+    files: ["scripts/**/*.js", "sql-migrations/**/*.js"],
+    rules: {
+      "@typescript-eslint/no-require-imports": "off",
+    },
+  },
 ]);
 
 export default eslintConfig;

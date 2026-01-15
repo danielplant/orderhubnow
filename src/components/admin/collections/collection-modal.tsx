@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useTransition } from 'react'
 import Image from 'next/image'
+import Link from 'next/link'
 import {
   Dialog,
   DialogContent,
@@ -352,9 +353,9 @@ export function CollectionModal({
               ) : (
                 <p className="text-sm text-muted-foreground">
                   No Shopify values mapped to this collection yet.{' '}
-                  <a href="/admin/collections/mapping" className="underline">
+                  <Link href="/admin/collections/mapping" className="underline">
                     Go to Mapping
-                  </a>
+                  </Link>
                 </p>
               )}
             </div>
