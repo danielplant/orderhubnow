@@ -15,6 +15,7 @@ import type {
   OrderItemWithFulfillment,
 } from '@/lib/types/shipment'
 import { getTrackingUrl } from '@/lib/types/shipment'
+import { findShopifyVariant } from '@/lib/data/queries/shopify'
 
 // ============================================================================
 // Auth Helper
@@ -352,6 +353,7 @@ export async function addTrackingNumber(
 
 /**
  * Fetch all shipments for an order with items and tracking.
+ * Also looks up clean Shopify SKUs for display.
  */
 export async function getShipmentsForOrder(orderId: string): Promise<ShipmentRow[]> {
   try {
@@ -369,6 +371,7 @@ export async function getShipmentsForOrder(orderId: string): Promise<ShipmentRow
               select: {
                 ID: true,
                 SKU: true,
+                SKUVariantID: true,
                 Quantity: true,
                 Price: true,
                 Notes: true,
@@ -381,41 +384,61 @@ export async function getShipmentsForOrder(orderId: string): Promise<ShipmentRow
       orderBy: { CreatedAt: 'desc' },
     })
 
-    return shipments.map((s): ShipmentRow => ({
-      id: s.ID.toString(),
-      orderId: s.CustomerOrderID.toString(),
-      orderNumber: s.CustomerOrders.OrderNumber,
-      shippedSubtotal: s.ShippedSubtotal,
-      shippingCost: s.ShippingCost,
-      shippedTotal: s.ShippedTotal,
-      shipDate: s.ShipDate?.toISOString() ?? null,
-      internalNotes: s.InternalNotes,
-      createdBy: s.CreatedBy,
-      createdAt: s.CreatedAt.toISOString(),
-      updatedAt: s.UpdatedAt?.toISOString() ?? null,
-      shopifyFulfillmentId: s.ShopifyFulfillmentID,
-      tracking: s.ShipmentTracking.map((t): TrackingRecord => ({
-        id: t.ID.toString(),
-        carrier: t.Carrier as TrackingRecord['carrier'],
-        trackingNumber: t.TrackingNumber,
-        addedAt: t.AddedAt.toISOString(),
-        trackingUrl: getTrackingUrl(t.Carrier as TrackingRecord['carrier'], t.TrackingNumber),
-      })),
-      items: s.ShipmentItems.map((si): ShipmentItemRow => {
-        const unitPrice = si.PriceOverride ?? si.OrderItem.Price
+    // Process shipments with Shopify SKU lookups
+    const shipmentsWithShopifySku = await Promise.all(
+      shipments.map(async (s): Promise<ShipmentRow> => {
+        // Look up Shopify SKUs for all items in this shipment
+        const itemsWithShopifySku = await Promise.all(
+          s.ShipmentItems.map(async (si): Promise<ShipmentItemRow> => {
+            const unitPrice = si.PriceOverride ?? si.OrderItem.Price
+
+            // Look up clean Shopify SKU
+            const shopifyVariant = await findShopifyVariant(
+              si.OrderItem.SKUVariantID > 0 ? si.OrderItem.SKUVariantID : null,
+              si.OrderItem.SKU
+            )
+            const displaySku = shopifyVariant?.skuId ?? si.OrderItem.SKU
+
+            return {
+              id: si.ID.toString(),
+              orderItemId: si.OrderItemID.toString(),
+              sku: displaySku,
+              productName: si.OrderItem.Notes || displaySku,
+              orderedQuantity: si.OrderItem.Quantity,
+              shippedQuantity: si.QuantityShipped,
+              unitPrice: si.OrderItem.Price,
+              priceOverride: si.PriceOverride ?? undefined,
+              lineTotal: unitPrice * si.QuantityShipped,
+            }
+          })
+        )
+
         return {
-          id: si.ID.toString(),
-          orderItemId: si.OrderItemID.toString(),
-          sku: si.OrderItem.SKU,
-          productName: si.OrderItem.Notes || si.OrderItem.SKU, // Notes often has product name
-          orderedQuantity: si.OrderItem.Quantity,
-          shippedQuantity: si.QuantityShipped,
-          unitPrice: si.OrderItem.Price,
-          priceOverride: si.PriceOverride ?? undefined,
-          lineTotal: unitPrice * si.QuantityShipped,
+          id: s.ID.toString(),
+          orderId: s.CustomerOrderID.toString(),
+          orderNumber: s.CustomerOrders.OrderNumber,
+          shippedSubtotal: s.ShippedSubtotal,
+          shippingCost: s.ShippingCost,
+          shippedTotal: s.ShippedTotal,
+          shipDate: s.ShipDate?.toISOString() ?? null,
+          internalNotes: s.InternalNotes,
+          createdBy: s.CreatedBy,
+          createdAt: s.CreatedAt.toISOString(),
+          updatedAt: s.UpdatedAt?.toISOString() ?? null,
+          shopifyFulfillmentId: s.ShopifyFulfillmentID,
+          tracking: s.ShipmentTracking.map((t): TrackingRecord => ({
+            id: t.ID.toString(),
+            carrier: t.Carrier as TrackingRecord['carrier'],
+            trackingNumber: t.TrackingNumber,
+            addedAt: t.AddedAt.toISOString(),
+            trackingUrl: getTrackingUrl(t.Carrier as TrackingRecord['carrier'], t.TrackingNumber),
+          })),
+          items: itemsWithShopifySku,
         }
-      }),
-    }))
+      })
+    )
+
+    return shipmentsWithShopifySku
   } catch (e) {
     console.error('getShipmentsForOrder error:', e)
     return []
@@ -504,6 +527,7 @@ export async function getShipmentSummaryForOrder(
 
 /**
  * Get order line items with shipped quantities for shipment modal.
+ * Also looks up the clean Shopify SKU for display.
  */
 export async function getOrderItemsWithFulfillment(
   orderId: string
@@ -518,6 +542,7 @@ export async function getOrderItemsWithFulfillment(
           select: {
             ID: true,
             SKU: true,
+            SKUVariantID: true,
             Quantity: true,
             Price: true,
             PriceCurrency: true,
@@ -548,20 +573,33 @@ export async function getOrderItemsWithFulfillment(
       shippedByItem.set(key, (shippedByItem.get(key) ?? 0) + si.QuantityShipped)
     }
 
-    return order.CustomerOrdersItems.map((item): OrderItemWithFulfillment => {
-      const shippedQty = shippedByItem.get(item.ID.toString()) ?? 0
-      return {
-        id: item.ID.toString(),
-        sku: item.SKU,
-        productName: item.Notes || item.SKU,
-        orderedQuantity: item.Quantity,
-        shippedQuantity: shippedQty,
-        remainingQuantity: Math.max(0, item.Quantity - shippedQty),
-        unitPrice: item.Price,
-        priceCurrency: item.PriceCurrency,
-        notes: item.Notes,
-      }
-    })
+    // Look up Shopify SKUs for all items
+    const itemsWithShopify = await Promise.all(
+      order.CustomerOrdersItems.map(async (item) => {
+        const shippedQty = shippedByItem.get(item.ID.toString()) ?? 0
+
+        // Look up clean Shopify SKU
+        const shopifyVariant = await findShopifyVariant(
+          item.SKUVariantID > 0 ? item.SKUVariantID : null,
+          item.SKU
+        )
+
+        return {
+          id: item.ID.toString(),
+          sku: item.SKU,
+          shopifySku: shopifyVariant?.skuId ?? null,
+          productName: item.Notes || item.SKU,
+          orderedQuantity: item.Quantity,
+          shippedQuantity: shippedQty,
+          remainingQuantity: Math.max(0, item.Quantity - shippedQty),
+          unitPrice: item.Price,
+          priceCurrency: item.PriceCurrency,
+          notes: item.Notes,
+        } satisfies OrderItemWithFulfillment
+      })
+    )
+
+    return itemsWithShopify
   } catch (e) {
     console.error('getOrderItemsWithFulfillment error:', e)
     return []

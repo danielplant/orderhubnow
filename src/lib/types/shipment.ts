@@ -126,6 +126,7 @@ export interface OrderShipmentSummary {
 export interface OrderItemWithFulfillment {
   id: string;
   sku: string;
+  shopifySku: string | null; // Clean SKU from Shopify (null if not matched)
   productName: string;
   orderedQuantity: number;
   shippedQuantity: number; // Sum across all shipments

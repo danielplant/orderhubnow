@@ -86,9 +86,10 @@ export default async function AdminOrderDetailsPage(props: { params: Promise<{ i
   ])
 
   // Transform items for client component
+  // Use Shopify SKU (clean) when available, fallback to legacy SKU
   const items = itemsWithFulfillment.map((item) => ({
     id: item.id,
-    sku: item.sku,
+    sku: item.shopifySku ?? item.sku,
     quantity: item.orderedQuantity,
     price: item.unitPrice,
     currency: (item.priceCurrency as 'USD' | 'CAD') || currency,
