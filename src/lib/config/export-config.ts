@@ -15,13 +15,22 @@ import type {
   CurrencyConfig,
 } from '@/lib/types/export'
 
+import { THUMBNAIL_SIZES, type ThumbnailSize } from '@/lib/utils/thumbnails'
+
 /**
  * Thumbnail settings for export
- * Note: Thumbnails are 120x120px, displayed at ~96px (1 inch) in Excel
+ * Thumbnails are stored in S3 at multiple sizes (120, 240, 480px)
+ * Exports use the smallest size for efficiency
  */
 export const EXPORT_THUMBNAIL = {
-  widthPx: 96, // Display width in Excel (1 inch at 96dpi)
-  quality: 80,
+  /** Which size variant to use for exports */
+  exportSize: 'sm' as ThumbnailSize,
+  /** Display width in Excel (1 inch at 96dpi) */
+  excelDisplayPx: 96,
+  /** Display width in PDF */
+  pdfDisplayPx: 60,
+  /** The actual pixel size of the source thumbnail */
+  sourceSize: THUMBNAIL_SIZES.sm, // 120px
 } as const
 
 /**

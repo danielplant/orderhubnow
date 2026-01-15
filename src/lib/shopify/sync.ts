@@ -1229,15 +1229,15 @@ export async function runFullSync(options?: {
       // Log summary for debugging
       logThumbnailSyncSummary(stats)
 
-      // Update SKUs that got new or changed thumbnail paths
+      // Update SKUs that got new thumbnails - store cache key only (not full path)
       const updates = results.filter(
-        r => r.status === 'generated' && r.thumbnailPath
+        r => r.status === 'generated' && r.cacheKey
       )
 
       for (const update of updates) {
         await prisma.sku.updateMany({
           where: { SkuID: update.skuId },
-          data: { ThumbnailPath: update.thumbnailPath },
+          data: { ThumbnailPath: update.cacheKey },  // Store just the 16-char cache key
         })
       }
 

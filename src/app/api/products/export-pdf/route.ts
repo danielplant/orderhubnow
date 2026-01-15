@@ -12,13 +12,13 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import fs from 'fs'
-import path from 'path'
 import { auth } from '@/lib/auth/providers'
 import { prisma } from '@/lib/prisma'
 import { generatePdf, wrapHtml, formatDate } from '@/lib/pdf/generate'
 import { parsePrice, parseSkuId, resolveColor } from '@/lib/utils'
 import { extractSize, sortBySize } from '@/lib/utils/size-sort'
+import { extractCacheKey, getThumbnailS3Key } from '@/lib/utils/thumbnails'
+import { getFromS3 } from '@/lib/s3'
 import type { CurrencyMode } from '@/lib/types/export'
 
 // ============================================================================
@@ -69,18 +69,20 @@ function formatPrice(priceCAD: number, priceUSD: number, mode: CurrencyMode): st
 }
 
 /**
- * Get image URL for PDF - prefers local thumbnail (as base64), falls back to Shopify CDN
- * Local thumbnails are faster and already optimized
+ * Get image data URL for PDF - fetches from S3, falls back to Shopify CDN
  */
-function getImageUrl(thumbnailPath: string | null, shopifyUrl: string | null): string | null {
-  // Try local thumbnail first (faster, already optimized)
-  if (thumbnailPath) {
+async function getImageDataUrl(
+  thumbnailRef: string | null,
+  shopifyUrl: string | null
+): Promise<string | null> {
+  // Try S3 first
+  const cacheKey = extractCacheKey(thumbnailRef)
+  if (cacheKey) {
     try {
-      const fullPath = path.join(process.cwd(), 'public', thumbnailPath)
-      if (fs.existsSync(fullPath)) {
-        const buffer = fs.readFileSync(fullPath)
-        const base64 = buffer.toString('base64')
-        return `data:image/png;base64,${base64}`
+      const s3Key = getThumbnailS3Key(cacheKey, 'sm')
+      const buffer = await getFromS3(s3Key)
+      if (buffer) {
+        return `data:image/png;base64,${buffer.toString('base64')}`
       }
     } catch {
       // Fall through to Shopify CDN
@@ -89,7 +91,17 @@ function getImageUrl(thumbnailPath: string | null, shopifyUrl: string | null): s
 
   // Fallback to Shopify CDN with resize
   if (shopifyUrl) {
-    return `${shopifyUrl}${shopifyUrl.includes('?') ? '&' : '?'}width=100`
+    try {
+      const response = await fetch(`${shopifyUrl}${shopifyUrl.includes('?') ? '&' : '?'}width=120`, {
+        signal: AbortSignal.timeout(5000),
+      })
+      if (response.ok) {
+        const buffer = Buffer.from(await response.arrayBuffer())
+        return `data:image/png;base64,${buffer.toString('base64')}`
+      }
+    } catch {
+      // Return null
+    }
   }
 
   return null
@@ -231,8 +243,18 @@ export async function GET(request: NextRequest) {
     const totalSkus = skus.length
     const totalQuantity = skus.reduce((sum, s) => sum + (s.Quantity ?? 0), 0)
 
+    // Pre-fetch all images for first rows of each group (parallel fetch)
+    const firstRowSkus = skus.filter(s => s.isFirstInGroup)
+    const imageDataUrls = await Promise.all(
+      firstRowSkus.map(async (sku) => {
+        const dataUrl = await getImageDataUrl(sku.ThumbnailPath, sku.ShopifyImageURL)
+        return { baseSku: sku.baseSku, dataUrl }
+      })
+    )
+    const imageMap = new Map(imageDataUrls.map(i => [i.baseSku, i.dataUrl]))
+
     // Generate HTML
-    const html = generateProductsPdfHtml(skus, {
+    const html = generateProductsPdfHtml(skus, imageMap, {
       totalStyles,
       totalSkus,
       totalQuantity,
@@ -297,6 +319,7 @@ interface SkuForPdf {
 
 function generateProductsPdfHtml(
   skus: SkuForPdf[],
+  imageMap: Map<string, string | null>,
   summary: {
     totalStyles: number
     totalSkus: number
@@ -339,8 +362,8 @@ function generateProductsPdfHtml(
         // Units per SKU
         const unitsPerSku = sku.UnitsPerSku ?? 1
 
-        // Get image URL - prefers local thumbnail, falls back to Shopify CDN
-        const imageUrl = getImageUrl(sku.ThumbnailPath, sku.ShopifyImageURL)
+        // Get pre-fetched image data URL from map
+        const imageUrl = imageMap.get(sku.baseSku)
 
         // Build row with firstRowOnly logic
         const imageCell = sku.isFirstInGroup && imageUrl

@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3'
+import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3'
 
 const bucket = process.env.AWS_S3_BUCKET_NAME
 const region = process.env.AWS_REGION || 'us-east-1'
@@ -71,4 +71,39 @@ export function getKeyFromS3Url(url: string): string | null {
     return url.slice(prefix.length)
   }
   return null
+}
+
+/**
+ * Fetch a file from S3 as a Buffer
+ * @param key - S3 key (path) to fetch
+ * @returns Buffer or null if file doesn't exist
+ */
+export async function getFromS3(key: string): Promise<Buffer | null> {
+  if (!bucket) {
+    throw new Error('AWS_S3_BUCKET_NAME environment variable is not set')
+  }
+
+  try {
+    const command = new GetObjectCommand({
+      Bucket: bucket,
+      Key: key,
+    })
+
+    const response = await s3Client.send(command)
+
+    if (!response.Body) return null
+
+    // Convert stream to buffer
+    const chunks: Uint8Array[] = []
+    for await (const chunk of response.Body as AsyncIterable<Uint8Array>) {
+      chunks.push(chunk)
+    }
+    return Buffer.concat(chunks)
+  } catch (error) {
+    // Return null for missing files (NoSuchKey)
+    if ((error as { name?: string }).name === 'NoSuchKey') {
+      return null
+    }
+    throw error
+  }
 }

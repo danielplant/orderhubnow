@@ -1,19 +1,19 @@
 /**
- * Thumbnail utilities with content-hash based caching
+ * Thumbnail utilities with content-hash based caching and S3 storage
  *
  * Uses a deterministic hash of (imageUrl + settings version) to:
  * 1. Automatically invalidate when source image changes
  * 2. Automatically invalidate when thumbnail settings change
  * 3. Deduplicate identical images used by multiple SKUs
  *
+ * Storage: S3 with multiple sizes (120px, 240px, 480px)
  * Cache key = sha256(imageUrl + THUMBNAIL_SETTINGS_VERSION).slice(0, 16)
- * Filename = {cacheKey}.png
+ * S3 key = thumbnails/{size}/{cacheKey}.png
  */
 
 import crypto from 'crypto'
 import sharp from 'sharp'
-import fs from 'fs'
-import path from 'path'
+import { uploadToS3 } from '@/lib/s3'
 
 // =============================================================================
 // Configuration - BUMP VERSION WHEN SETTINGS CHANGE
@@ -23,19 +23,29 @@ import path from 'path'
  * Thumbnail settings version - INCREMENT THIS when any setting below changes.
  * This ensures all thumbnails are regenerated when settings change.
  */
-export const THUMBNAIL_SETTINGS_VERSION = 2
+export const THUMBNAIL_SETTINGS_VERSION = 3
 
 /**
- * Thumbnail dimensions and quality settings
+ * Available thumbnail sizes
+ */
+export const THUMBNAIL_SIZES = {
+  sm: 120,  // For exports (Excel, PDF)
+  md: 240,  // For UI display
+  lg: 480,  // For high-DPI / zoom
+} as const
+
+export type ThumbnailSize = keyof typeof THUMBNAIL_SIZES
+
+/**
+ * Thumbnail generation settings
  */
 export const THUMBNAIL_CONFIG = {
-  size: 120,        // Width and height in pixels
+  sizes: THUMBNAIL_SIZES,
   quality: 80,      // PNG quality (1-100)
   fit: 'contain' as const,
   background: { r: 255, g: 255, b: 255, alpha: 1 },
+  format: 'png' as const,
 } as const
-
-const THUMBNAILS_DIR = path.join(process.cwd(), 'public', 'thumbnails')
 
 // =============================================================================
 // Cache Key Generation
@@ -58,19 +68,70 @@ export function generateThumbnailCacheKey(imageUrl: string): string {
 }
 
 /**
- * Extract cache key from a thumbnail path.
- * Returns null if path doesn't match expected format.
+ * Extract cache key from various formats:
+ * - New format: just the 16-char cache key (abc123def456abc1)
+ * - Old format: /thumbnails/{cacheKey}.png
+ * - S3 URL format: .../thumbnails/{size}/{cacheKey}.png
+ *
+ * Returns null if format doesn't match.
  */
-export function extractCacheKeyFromPath(thumbnailPath: string | null): string | null {
-  if (!thumbnailPath) return null
+export function extractCacheKey(thumbnailRef: string | null): string | null {
+  if (!thumbnailRef) return null
 
-  // Expected format: /thumbnails/{16-char-hash}.png
-  const match = thumbnailPath.match(/\/thumbnails\/([a-f0-9]{16})\.png$/)
-  return match ? match[1] : null
+  // New format: just the 16-char cache key
+  if (/^[a-f0-9]{16}$/.test(thumbnailRef)) {
+    return thumbnailRef
+  }
+
+  // Old format: /thumbnails/{cacheKey}.png
+  const oldMatch = thumbnailRef.match(/\/thumbnails\/([a-f0-9]{16})\.png$/)
+  if (oldMatch) return oldMatch[1]
+
+  // S3 URL format: .../thumbnails/{size}/{cacheKey}.png
+  const s3Match = thumbnailRef.match(/\/thumbnails\/\d+\/([a-f0-9]{16})\.png/)
+  if (s3Match) return s3Match[1]
+
+  return null
+}
+
+// =============================================================================
+// S3 URL Generation
+// =============================================================================
+
+/**
+ * Get S3 key for a thumbnail
+ * @param cacheKey - 16-char cache key
+ * @param size - Thumbnail size variant
+ * @returns S3 key like "thumbnails/120/abc123def456abc1.png"
+ */
+export function getThumbnailS3Key(cacheKey: string, size: ThumbnailSize = 'sm'): string {
+  const sizePx = THUMBNAIL_SIZES[size]
+  return `thumbnails/${sizePx}/${cacheKey}.png`
 }
 
 /**
+ * Get full S3 URL for a thumbnail
+ * @param cacheKey - 16-char cache key
+ * @param size - Thumbnail size variant
+ * @returns Full S3 URL
+ */
+export function getThumbnailUrl(cacheKey: string, size: ThumbnailSize = 'sm'): string {
+  const bucket = process.env.AWS_S3_BUCKET_NAME
+  const region = process.env.AWS_REGION || 'us-east-1'
+  const key = getThumbnailS3Key(cacheKey, size)
+  return `https://${bucket}.s3.${region}.amazonaws.com/${key}`
+}
+
+// =============================================================================
+// Thumbnail Status Checking
+// =============================================================================
+
+/**
  * Check if a thumbnail needs regeneration.
+ *
+ * For S3 storage, we trust the database cache key. If the cache key matches
+ * what we'd generate from the current URL, we assume the S3 files exist.
+ * This avoids expensive HEAD requests during sync.
  *
  * Returns { needsRegen: boolean, reason: string } for debugging.
  */
@@ -88,7 +149,7 @@ export function checkThumbnailStatus(
   }
 
   const expectedCacheKey = generateThumbnailCacheKey(imageUrl)
-  const currentCacheKey = extractCacheKeyFromPath(currentThumbnailPath)
+  const currentCacheKey = extractCacheKey(currentThumbnailPath)
 
   // No current thumbnail
   if (!currentThumbnailPath || !currentCacheKey) {
@@ -108,17 +169,7 @@ export function checkThumbnailStatus(
     }
   }
 
-  // Check if file actually exists on disk
-  const fullPath = path.join(process.cwd(), 'public', currentThumbnailPath)
-  if (!fs.existsSync(fullPath)) {
-    return {
-      needsRegen: true,
-      reason: `File missing on disk: ${fullPath}`,
-      expectedCacheKey
-    }
-  }
-
-  // All good - no regeneration needed
+  // Cache hit - trust that S3 has the files
   return {
     needsRegen: false,
     reason: 'Cache hit - thumbnail up to date',
@@ -131,38 +182,17 @@ export function checkThumbnailStatus(
 // =============================================================================
 
 /**
- * Ensure thumbnails directory exists
+ * Fetch an image from URL and resize to all thumbnail sizes.
+ * Returns a Map of size -> Buffer, or null if fetch fails.
  */
-export function ensureThumbnailsDir(): void {
-  if (!fs.existsSync(THUMBNAILS_DIR)) {
-    fs.mkdirSync(THUMBNAILS_DIR, { recursive: true })
-  }
-}
-
-/**
- * Get full filesystem path for a cache key
- */
-function getThumbnailFilePath(cacheKey: string): string {
-  return path.join(THUMBNAILS_DIR, `${cacheKey}.png`)
-}
-
-/**
- * Get public URL path for a cache key
- */
-function getThumbnailUrlPath(cacheKey: string): string {
-  return `/thumbnails/${cacheKey}.png`
-}
-
-/**
- * Fetch an image from URL and resize to thumbnail.
- * Returns PNG buffer or null if fetch fails.
- */
-export async function fetchAndResizeImage(imageUrl: string): Promise<Buffer | null> {
+export async function generateThumbnailSizes(
+  imageUrl: string
+): Promise<Map<ThumbnailSize, Buffer> | null> {
   if (!imageUrl) return null
 
   try {
     const response = await fetch(imageUrl, {
-      signal: AbortSignal.timeout(10000), // 10 second timeout
+      signal: AbortSignal.timeout(15000), // 15 second timeout
     })
 
     if (!response.ok) {
@@ -171,55 +201,84 @@ export async function fetchAndResizeImage(imageUrl: string): Promise<Buffer | nu
     }
 
     const arrayBuffer = await response.arrayBuffer()
-    const buffer = Buffer.from(arrayBuffer)
+    const sourceBuffer = Buffer.from(arrayBuffer)
 
-    const thumbnail = await sharp(buffer)
-      .resize(THUMBNAIL_CONFIG.size, THUMBNAIL_CONFIG.size, {
-        fit: THUMBNAIL_CONFIG.fit,
-        background: THUMBNAIL_CONFIG.background,
+    const results = new Map<ThumbnailSize, Buffer>()
+
+    // Generate all sizes in parallel
+    const sizes: ThumbnailSize[] = ['sm', 'md', 'lg']
+    const buffers = await Promise.all(
+      sizes.map(async (size) => {
+        const px = THUMBNAIL_SIZES[size]
+        const buffer = await sharp(sourceBuffer)
+          .resize(px, px, {
+            fit: THUMBNAIL_CONFIG.fit,
+            background: THUMBNAIL_CONFIG.background,
+          })
+          .png({ quality: THUMBNAIL_CONFIG.quality })
+          .toBuffer()
+        return { size, buffer }
       })
-      .png({ quality: THUMBNAIL_CONFIG.quality })
-      .toBuffer()
+    )
 
-    return thumbnail
+    for (const { size, buffer } of buffers) {
+      results.set(size, buffer)
+    }
+
+    return results
   } catch (error) {
-    console.warn(`[Thumbnail] Failed to fetch/resize ${imageUrl}:`, error)
+    console.warn(`[Thumbnail] Failed to generate sizes for ${imageUrl}:`, error)
     return null
   }
 }
 
 /**
- * Generate and save a thumbnail for an image URL.
- * Returns the public URL path if successful, null if failed.
+ * Upload all thumbnail sizes to S3
+ * @param cacheKey - 16-char cache key
+ * @param buffers - Map of size -> Buffer
+ * @returns true if all uploads succeeded
+ */
+export async function uploadThumbnailsToS3(
+  cacheKey: string,
+  buffers: Map<ThumbnailSize, Buffer>
+): Promise<boolean> {
+  try {
+    const uploads = Array.from(buffers.entries()).map(([size, buffer]) => {
+      const key = getThumbnailS3Key(cacheKey, size)
+      return uploadToS3(buffer, key, 'image/png')
+    })
+
+    await Promise.all(uploads)
+    return true
+  } catch (error) {
+    console.error(`[Thumbnail] S3 upload failed for ${cacheKey}:`, error)
+    return false
+  }
+}
+
+/**
+ * Generate and upload thumbnails for an image URL.
+ * Returns the cache key if successful.
  *
- * This is idempotent - if the file already exists with matching hash, it returns the path.
+ * This generates all size variants (120, 240, 480) and uploads to S3.
  */
 export async function generateThumbnail(
   imageUrl: string
-): Promise<{ path: string | null; cacheKey: string; fromCache: boolean }> {
+): Promise<{ cacheKey: string; success: boolean }> {
   const cacheKey = generateThumbnailCacheKey(imageUrl)
-  const filePath = getThumbnailFilePath(cacheKey)
-  const urlPath = getThumbnailUrlPath(cacheKey)
 
-  // Check if already exists (race condition protection)
-  if (fs.existsSync(filePath)) {
-    return { path: urlPath, cacheKey, fromCache: true }
+  // Generate all sizes
+  const buffers = await generateThumbnailSizes(imageUrl)
+  if (!buffers) {
+    return { cacheKey, success: false }
   }
 
-  // Generate new thumbnail
-  const thumbnailBuffer = await fetchAndResizeImage(imageUrl)
-  if (!thumbnailBuffer) {
-    return { path: null, cacheKey, fromCache: false }
-  }
+  // Upload to S3
+  const uploaded = await uploadThumbnailsToS3(cacheKey, buffers)
 
-  // Save to disk
-  try {
-    ensureThumbnailsDir()
-    fs.writeFileSync(filePath, thumbnailBuffer)
-    return { path: urlPath, cacheKey, fromCache: false }
-  } catch (error) {
-    console.error(`[Thumbnail] Failed to save ${filePath}:`, error)
-    return { path: null, cacheKey, fromCache: false }
+  return {
+    cacheKey,
+    success: uploaded,
   }
 }
 
@@ -235,7 +294,7 @@ export interface ThumbnailSyncItem {
 
 export interface ThumbnailSyncResult {
   skuId: string
-  thumbnailPath: string | null
+  cacheKey: string | null
   status: 'skipped' | 'generated' | 'failed' | 'no_image'
   reason: string
 }
@@ -250,7 +309,7 @@ export interface ThumbnailSyncStats {
 
 /**
  * Process thumbnails for a batch of SKUs with smart caching.
- * Only regenerates when necessary (URL changed, settings changed, or file missing).
+ * Only regenerates when necessary (URL changed, settings changed, or missing).
  *
  * Returns detailed results for each SKU and aggregate stats.
  */
@@ -282,7 +341,7 @@ export async function processThumbnailsBatch(
         if (!item.imageUrl) {
           return {
             skuId: item.skuId,
-            thumbnailPath: null,
+            cacheKey: null,
             status: 'no_image',
             reason: 'No image URL',
           }
@@ -294,31 +353,22 @@ export async function processThumbnailsBatch(
         if (!status.needsRegen) {
           return {
             skuId: item.skuId,
-            thumbnailPath: item.currentThumbnailPath,
+            cacheKey: status.expectedCacheKey,
             status: 'skipped',
             reason: status.reason,
           }
         }
 
-        // Generate new thumbnail
+        // Generate new thumbnails and upload to S3
         const result = await generateThumbnail(item.imageUrl)
 
-        if (result.path) {
-          return {
-            skuId: item.skuId,
-            thumbnailPath: result.path,
-            status: result.fromCache ? 'skipped' : 'generated',
-            reason: result.fromCache
-              ? 'Found existing file with matching hash'
-              : `Generated new thumbnail (${status.reason})`,
-          }
-        } else {
-          return {
-            skuId: item.skuId,
-            thumbnailPath: null,
-            status: 'failed',
-            reason: `Failed to generate: ${status.reason}`,
-          }
+        return {
+          skuId: item.skuId,
+          cacheKey: result.success ? result.cacheKey : null,
+          status: result.success ? 'generated' : 'failed',
+          reason: result.success
+            ? `Generated new thumbnail (${status.reason})`
+            : 'Failed to generate',
         }
       })
     )
@@ -348,58 +398,38 @@ export async function processThumbnailsBatch(
 // =============================================================================
 
 /**
- * @deprecated Use generateThumbnail() instead
- * Kept for backwards compatibility with existing code
+ * Fetch and resize a single image (for fallback in exports)
+ * Returns smallest size buffer for export use
  */
-export async function fetchThumbnail(imageUrl: string): Promise<Buffer | null> {
-  return fetchAndResizeImage(imageUrl)
-}
+export async function fetchAndResizeImage(imageUrl: string): Promise<Buffer | null> {
+  if (!imageUrl) return null
 
-/**
- * @deprecated Use checkThumbnailStatus() and file path instead
- * Read a thumbnail from disk by SKU ID (legacy format)
- */
-export function readThumbnail(skuId: string): Buffer | null {
-  // Try legacy format first
-  const legacyPath = path.join(THUMBNAILS_DIR, `${skuId.replace(/[^a-zA-Z0-9-_]/g, '_')}.png`)
-  if (fs.existsSync(legacyPath)) {
-    return fs.readFileSync(legacyPath)
-  }
-  return null
-}
+  try {
+    const response = await fetch(imageUrl, {
+      signal: AbortSignal.timeout(10000),
+    })
 
-/**
- * @deprecated Use generateThumbnail() instead
- */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-export async function saveThumbnail(imageUrl: string, _skuId: string): Promise<string | null> {
-  const result = await generateThumbnail(imageUrl)
-  return result.path
-}
-
-/**
- * @deprecated Use processThumbnailsBatch() instead
- */
-export async function saveThumbnailsBatch(
-  items: Array<{ skuId: string; imageUrl: string | null }>
-): Promise<Map<string, string>> {
-  const results = new Map<string, string>()
-
-  const syncItems: ThumbnailSyncItem[] = items.map(item => ({
-    skuId: item.skuId,
-    imageUrl: item.imageUrl,
-    currentThumbnailPath: null, // Legacy API doesn't track current path
-  }))
-
-  const { results: syncResults } = await processThumbnailsBatch(syncItems)
-
-  for (const result of syncResults) {
-    if (result.thumbnailPath) {
-      results.set(result.skuId, result.thumbnailPath)
+    if (!response.ok) {
+      console.warn(`[Thumbnail] HTTP ${response.status} fetching ${imageUrl}`)
+      return null
     }
-  }
 
-  return results
+    const arrayBuffer = await response.arrayBuffer()
+    const buffer = Buffer.from(arrayBuffer)
+
+    const thumbnail = await sharp(buffer)
+      .resize(THUMBNAIL_SIZES.sm, THUMBNAIL_SIZES.sm, {
+        fit: THUMBNAIL_CONFIG.fit,
+        background: THUMBNAIL_CONFIG.background,
+      })
+      .png({ quality: THUMBNAIL_CONFIG.quality })
+      .toBuffer()
+
+    return thumbnail
+  } catch (error) {
+    console.warn(`[Thumbnail] Failed to fetch/resize ${imageUrl}:`, error)
+    return null
+  }
 }
 
 // =============================================================================
@@ -407,32 +437,19 @@ export async function saveThumbnailsBatch(
 // =============================================================================
 
 /**
- * Get diagnostic information about thumbnail cache status
+ * Get diagnostic information about thumbnail configuration
  */
 export function getThumbnailDiagnostics(): {
   settingsVersion: number
   config: typeof THUMBNAIL_CONFIG
-  thumbnailsDir: string
-  thumbnailsDirExists: boolean
-  fileCount: number
+  sizes: typeof THUMBNAIL_SIZES
+  s3Bucket: string | undefined
 } {
-  const thumbnailsDirExists = fs.existsSync(THUMBNAILS_DIR)
-  let fileCount = 0
-
-  if (thumbnailsDirExists) {
-    try {
-      fileCount = fs.readdirSync(THUMBNAILS_DIR).filter(f => f.endsWith('.png')).length
-    } catch {
-      fileCount = -1 // Error reading directory
-    }
-  }
-
   return {
     settingsVersion: THUMBNAIL_SETTINGS_VERSION,
     config: THUMBNAIL_CONFIG,
-    thumbnailsDir: THUMBNAILS_DIR,
-    thumbnailsDirExists,
-    fileCount,
+    sizes: THUMBNAIL_SIZES,
+    s3Bucket: process.env.AWS_S3_BUCKET_NAME,
   }
 }
 
@@ -442,7 +459,7 @@ export function getThumbnailDiagnostics(): {
 export function logThumbnailSyncSummary(stats: ThumbnailSyncStats): void {
   console.log('\n=== Thumbnail Sync Summary ===')
   console.log(`Settings Version: ${THUMBNAIL_SETTINGS_VERSION}`)
-  console.log(`Config: ${THUMBNAIL_CONFIG.size}x${THUMBNAIL_CONFIG.size}px @ ${THUMBNAIL_CONFIG.quality}% quality`)
+  console.log(`Sizes: ${Object.entries(THUMBNAIL_SIZES).map(([k, v]) => `${k}=${v}px`).join(', ')}`)
   console.log('---')
   console.log(`Total SKUs:    ${stats.total}`)
   console.log(`  Skipped:     ${stats.skipped} (cache hit)`)

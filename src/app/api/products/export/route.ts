@@ -15,12 +15,11 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import ExcelJS from 'exceljs'
-import path from 'path'
-import fs from 'fs'
 import { auth } from '@/lib/auth/providers'
 import { prisma } from '@/lib/prisma'
 import { parsePrice, parseSkuId, resolveColor } from '@/lib/utils'
-import { fetchAndResizeImage } from '@/lib/utils/thumbnails'
+import { extractCacheKey, getThumbnailS3Key, fetchAndResizeImage } from '@/lib/utils/thumbnails'
+import { getFromS3 } from '@/lib/s3'
 import { extractSize, sortBySize } from '@/lib/utils/size-sort'
 import {
   EXPORT_COLUMNS,
@@ -68,18 +67,29 @@ function parseCurrencyMode(value: string | undefined): CurrencyMode {
 }
 
 /**
- * Read thumbnail from disk by path
+ * Fetch thumbnail from S3, falling back to Shopify CDN
  */
-function readThumbnailFromPath(thumbnailPath: string | null): Buffer | null {
-  if (!thumbnailPath) return null
-  try {
-    const fullPath = path.join(process.cwd(), 'public', thumbnailPath)
-    if (fs.existsSync(fullPath)) {
-      return fs.readFileSync(fullPath)
+async function fetchThumbnailForExport(
+  thumbnailRef: string | null,
+  shopifyImageUrl: string | null
+): Promise<Buffer | null> {
+  // Try S3 first
+  const cacheKey = extractCacheKey(thumbnailRef)
+  if (cacheKey) {
+    try {
+      const s3Key = getThumbnailS3Key(cacheKey, EXPORT_THUMBNAIL.exportSize)
+      const buffer = await getFromS3(s3Key)
+      if (buffer) return buffer
+    } catch {
+      // Fall through to Shopify
     }
-  } catch {
-    // Ignore errors
   }
+
+  // Fallback: fetch from Shopify URL
+  if (shopifyImageUrl) {
+    return fetchAndResizeImage(shopifyImageUrl)
+  }
+
   return null
 }
 
@@ -347,17 +357,11 @@ export async function GET(request: NextRequest) {
 
       // Add thumbnail image only for first row of each baseSku group
       if (sku.isFirstInGroup) {
-        let thumbnailBuffer: Buffer | null = null
-
-        // Try to read pre-generated thumbnail from disk
-        if (sku.ThumbnailPath) {
-          thumbnailBuffer = readThumbnailFromPath(sku.ThumbnailPath)
-        }
-
-        // Fallback: fetch from Shopify URL if no local thumbnail
-        if (!thumbnailBuffer && sku.ShopifyImageURL) {
-          thumbnailBuffer = await fetchAndResizeImage(sku.ShopifyImageURL)
-        }
+        // Fetch thumbnail from S3 (or fallback to Shopify)
+        const thumbnailBuffer = await fetchThumbnailForExport(
+          sku.ThumbnailPath,
+          sku.ShopifyImageURL
+        )
 
         if (thumbnailBuffer) {
           const imageId = workbook.addImage({
@@ -368,7 +372,7 @@ export async function GET(request: NextRequest) {
 
           sheet.addImage(imageId, {
             tl: { col: 0, row: rowIndex - 1 },
-            ext: { width: EXPORT_THUMBNAIL.widthPx, height: EXPORT_THUMBNAIL.widthPx },
+            ext: { width: EXPORT_THUMBNAIL.excelDisplayPx, height: EXPORT_THUMBNAIL.excelDisplayPx },
           })
         }
       }

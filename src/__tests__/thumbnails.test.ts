@@ -13,31 +13,21 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import crypto from 'crypto'
 import {
   generateThumbnailCacheKey,
-  extractCacheKeyFromPath,
+  extractCacheKey,
   checkThumbnailStatus,
   THUMBNAIL_SETTINGS_VERSION,
   THUMBNAIL_CONFIG,
+  THUMBNAIL_SIZES,
 } from '@/lib/utils/thumbnails'
 
-// Mock fs module for file existence checks
-vi.mock('fs', () => ({
-  default: {
-    existsSync: vi.fn(),
-    mkdirSync: vi.fn(),
-    writeFileSync: vi.fn(),
-    readFileSync: vi.fn(),
-    readdirSync: vi.fn(() => []),
-  },
-  existsSync: vi.fn(),
-  mkdirSync: vi.fn(),
-  writeFileSync: vi.fn(),
-  readFileSync: vi.fn(),
-  readdirSync: vi.fn(() => []),
-}))
+// Note: S3 storage implementation doesn't require fs mocks
+// checkThumbnailStatus trusts the DB cache key without filesystem checks
 
 describe('THUMBNAIL_CONFIG', () => {
   it('should have expected default configuration', () => {
-    expect(THUMBNAIL_CONFIG.size).toBe(120)
+    expect(THUMBNAIL_SIZES.sm).toBe(120)
+    expect(THUMBNAIL_SIZES.md).toBe(240)
+    expect(THUMBNAIL_SIZES.lg).toBe(480)
     expect(THUMBNAIL_CONFIG.quality).toBe(80)
     expect(THUMBNAIL_CONFIG.fit).toBe('contain')
     expect(THUMBNAIL_CONFIG.background).toEqual({ r: 255, g: 255, b: 255, alpha: 1 })
@@ -105,46 +95,46 @@ describe('generateThumbnailCacheKey', () => {
   })
 })
 
-describe('extractCacheKeyFromPath', () => {
+describe('extractCacheKey', () => {
   it('should extract cache key from valid thumbnail path', () => {
-    const key = extractCacheKeyFromPath('/thumbnails/abc123def456abc1.png')
+    const key = extractCacheKey('/thumbnails/abc123def456abc1.png')
     expect(key).toBe('abc123def456abc1')
   })
 
   it('should return null for null input', () => {
-    expect(extractCacheKeyFromPath(null)).toBeNull()
+    expect(extractCacheKey(null)).toBeNull()
   })
 
   it('should return null for empty string', () => {
-    expect(extractCacheKeyFromPath('')).toBeNull()
+    expect(extractCacheKey('')).toBeNull()
   })
 
   it('should return null for paths not matching expected format', () => {
     // Wrong extension
-    expect(extractCacheKeyFromPath('/thumbnails/abc123def456abc1.jpg')).toBeNull()
+    expect(extractCacheKey('/thumbnails/abc123def456abc1.jpg')).toBeNull()
 
     // Wrong directory
-    expect(extractCacheKeyFromPath('/images/abc123def456abc1.png')).toBeNull()
+    expect(extractCacheKey('/images/abc123def456abc1.png')).toBeNull()
 
     // Wrong key length (too short)
-    expect(extractCacheKeyFromPath('/thumbnails/abc123.png')).toBeNull()
+    expect(extractCacheKey('/thumbnails/abc123.png')).toBeNull()
 
     // Wrong key length (too long)
-    expect(extractCacheKeyFromPath('/thumbnails/abc123def456abc1abc2.png')).toBeNull()
+    expect(extractCacheKey('/thumbnails/abc123def456abc1abc2.png')).toBeNull()
 
     // Invalid characters in key
-    expect(extractCacheKeyFromPath('/thumbnails/abc123def456abc!.png')).toBeNull()
+    expect(extractCacheKey('/thumbnails/abc123def456abc!.png')).toBeNull()
   })
 
   it('should handle legacy SKU-based paths by returning null', () => {
     // Legacy format used SKU ID with underscores
-    expect(extractCacheKeyFromPath('/thumbnails/744-MU-7_8.png')).toBeNull()
-    expect(extractCacheKeyFromPath('/thumbnails/LULU_FC_2T.png')).toBeNull()
+    expect(extractCacheKey('/thumbnails/744-MU-7_8.png')).toBeNull()
+    expect(extractCacheKey('/thumbnails/LULU_FC_2T.png')).toBeNull()
   })
 
   it('should extract key regardless of full path prefix', () => {
-    expect(extractCacheKeyFromPath('/thumbnails/1234567890abcdef.png')).toBe('1234567890abcdef')
-    expect(extractCacheKeyFromPath('/public/thumbnails/1234567890abcdef.png')).toBe('1234567890abcdef')
+    expect(extractCacheKey('/thumbnails/1234567890abcdef.png')).toBe('1234567890abcdef')
+    expect(extractCacheKey('/public/thumbnails/1234567890abcdef.png')).toBe('1234567890abcdef')
   })
 })
 
@@ -176,11 +166,7 @@ describe('checkThumbnailStatus', () => {
     expect(status.reason).toBe('No existing thumbnail')
   })
 
-  it('should return needsRegen=true when cache keys do not match', async () => {
-    const fs = await import('fs')
-    // Mock file exists so we test the key comparison logic, not file existence
-    ;(fs.default.existsSync as ReturnType<typeof vi.fn>).mockReturnValue(true)
-
+  it('should return needsRegen=true when cache keys do not match', () => {
     const imageUrl = 'https://example.com/image.jpg'
     const expectedKey = generateThumbnailCacheKey(imageUrl)
     // Use a valid 16-char hex key that doesn't match
@@ -194,23 +180,9 @@ describe('checkThumbnailStatus', () => {
     expect(status.reason).toContain(expectedKey)
   })
 
-  it('should return needsRegen=true when file is missing on disk', async () => {
-    const fs = await import('fs')
-    ;(fs.default.existsSync as ReturnType<typeof vi.fn>).mockReturnValue(false)
-
-    const imageUrl = 'https://example.com/image.jpg'
-    const cacheKey = generateThumbnailCacheKey(imageUrl)
-
-    const status = checkThumbnailStatus(imageUrl, `/thumbnails/${cacheKey}.png`)
-
-    expect(status.needsRegen).toBe(true)
-    expect(status.reason).toContain('File missing on disk')
-  })
-
-  it('should return needsRegen=false when cache key matches and file exists', async () => {
-    const fs = await import('fs')
-    ;(fs.default.existsSync as ReturnType<typeof vi.fn>).mockReturnValue(true)
-
+  it('should return needsRegen=false when cache key matches (S3 storage trusts DB)', () => {
+    // With S3 storage, we trust that if the cache key matches, the files exist in S3
+    // No filesystem check is performed
     const imageUrl = 'https://example.com/image.jpg'
     const cacheKey = generateThumbnailCacheKey(imageUrl)
 
@@ -221,10 +193,19 @@ describe('checkThumbnailStatus', () => {
     expect(status.expectedCacheKey).toBe(cacheKey)
   })
 
-  it('should detect when URL changes require regeneration', async () => {
-    const fs = await import('fs')
-    ;(fs.default.existsSync as ReturnType<typeof vi.fn>).mockReturnValue(true)
+  it('should return needsRegen=false when cache key matches (new format - cache key only)', () => {
+    const imageUrl = 'https://example.com/image.jpg'
+    const cacheKey = generateThumbnailCacheKey(imageUrl)
 
+    // New format: just the cache key, no path
+    const status = checkThumbnailStatus(imageUrl, cacheKey)
+
+    expect(status.needsRegen).toBe(false)
+    expect(status.reason).toBe('Cache hit - thumbnail up to date')
+    expect(status.expectedCacheKey).toBe(cacheKey)
+  })
+
+  it('should detect when URL changes require regeneration', () => {
     const oldUrl = 'https://example.com/old-image.jpg'
     const newUrl = 'https://example.com/new-image.jpg'
     const oldCacheKey = generateThumbnailCacheKey(oldUrl)
@@ -292,7 +273,7 @@ describe('Settings version changes', () => {
   it('should document current settings version', () => {
     // This test serves as documentation and will fail if version changes
     // Update this test when THUMBNAIL_SETTINGS_VERSION is bumped
-    expect(THUMBNAIL_SETTINGS_VERSION).toBe(2)
+    expect(THUMBNAIL_SETTINGS_VERSION).toBe(3)
   })
 
   it('should produce different keys when version would change', () => {
