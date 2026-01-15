@@ -15,6 +15,8 @@ import type {
   ShopifyValidationResult,
   BulkTransferResult,
   InventoryStatusItem,
+  SyncOrderStatusResult,
+  BulkSyncResult,
 } from '@/lib/types/shopify'
 
 // ============================================================================
@@ -740,15 +742,6 @@ export async function bulkTransferOrdersToShopify(
 // Sync Order Status FROM Shopify
 // ============================================================================
 
-export interface SyncOrderStatusResult {
-  success: boolean
-  orderId: string
-  shopifyOrderId?: string
-  fulfillmentStatus?: string | null
-  financialStatus?: string | null
-  error?: string
-}
-
 /**
  * Sync a single order's status from Shopify.
  * Fetches fulfillment_status and financial_status from Shopify
@@ -821,13 +814,6 @@ export async function syncOrderStatusFromShopify(
     const message = e instanceof Error ? e.message : 'Failed to sync order status'
     return { success: false, orderId, error: message }
   }
-}
-
-export interface BulkSyncResult {
-  success: boolean
-  synced: number
-  failed: number
-  errors: Array<{ orderId: string; error: string }>
 }
 
 /**

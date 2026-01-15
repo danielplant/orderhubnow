@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { prisma } from '@/lib/prisma'
 import { auth } from '@/lib/auth/providers'
-import type { OrderStatus } from '@/lib/types/order'
+import type { OrderStatus, CreateOrderResult, UpdateOrderInput, UpdateOrderResult } from '@/lib/types/order'
 import { createOrderInputSchema, type CreateOrderInput } from '@/lib/schemas/order'
 import { sendOrderEmails } from '@/lib/email/send-order-emails'
 
@@ -235,16 +235,6 @@ async function getNextOrderNumberFallback(prefix: string): Promise<string> {
 }
 
 /**
- * Result shape from createOrder action.
- */
-export interface CreateOrderResult {
-  success: boolean
-  orderId?: string
-  orderNumber?: string
-  error?: string
-}
-
-/**
  * Create a new order from buyer cart submission.
  * Matches .NET MyOrder.aspx.cs btnSaveOrder_Click behavior:
  * - Creates CustomerOrders header
@@ -318,6 +308,7 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
           IsShipped: false,
           OrderStatus: 'Pending',
           IsTransferredToShopify: false,
+          IsPreOrder: data.isPreOrder,
           // Strong ownership fields - enables resilient rep filtering
           RepID: parseInt(data.salesRepId),
           CustomerID: customerId, // May be null for new customers initially
@@ -453,39 +444,6 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
 // ============================================================================
 // Order Update (Edit Items)
 // ============================================================================
-
-/**
- * Input for updating an existing order.
- */
-export interface UpdateOrderInput {
-  orderId: string
-  storeName: string
-  buyerName: string
-  salesRepId: string
-  customerEmail: string
-  customerPhone: string
-  currency: 'USD' | 'CAD'
-  shipStartDate: string
-  shipEndDate: string
-  orderNotes?: string
-  customerPO?: string
-  website?: string
-  items: Array<{
-    sku: string
-    skuVariantId: number
-    quantity: number
-    price: number
-  }>
-}
-
-/**
- * Result shape from updateOrder action.
- */
-export interface UpdateOrderResult {
-  success: boolean
-  orderNumber?: string
-  error?: string
-}
 
 /**
  * Update an existing order.
@@ -755,7 +713,7 @@ export async function updateOrderCurrency(input: {
  * - Copies all line items
  * - Generates new order number (A or P prefix based on isATS)
  */
-export async function duplicateOrder(_input: {
+export async function duplicateOrder(_: {
   orderId: string
 }): Promise<{ success: boolean; newOrderId?: string; error?: string }> {
   return { 

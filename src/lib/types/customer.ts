@@ -58,3 +58,42 @@ export interface CustomerInput {
   website?: string | null
   additionalInfo?: string | null
 }
+
+// ============================================================================
+// Customer Lookup Types (for autocomplete)
+// ============================================================================
+
+/**
+ * Store name suggestion for autocomplete.
+ */
+export interface StoreSuggestion {
+  id: number
+  storeName: string
+}
+
+/**
+ * Customer data for auto-filling the order form.
+ */
+export interface CustomerAutoFill {
+  id: number
+  storeName: string
+  buyerName: string | null
+  email: string | null
+  phone: string | null
+  website: string | null
+  rep: string | null
+  // Billing address
+  street1: string | null
+  street2: string | null
+  city: string | null
+  stateProvince: string | null
+  zipPostal: string | null
+  country: string | null
+  // Shipping address
+  shippingStreet1: string | null
+  shippingStreet2: string | null
+  shippingCity: string | null
+  shippingStateProvince: string | null
+  shippingZipPostal: string | null
+  shippingCountry: string | null
+}

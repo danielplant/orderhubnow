@@ -1,18 +1,20 @@
 'use client'
 
 import * as React from 'react'
-import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Button, Card, CardContent, CardHeader, CardTitle, Input, FeatureInterestModal } from '@/components/ui'
 import { EditShipmentModal } from './edit-shipment-modal'
 import { ShipmentModal } from './shipment-modal'
+import { VoidShipmentDialog } from './void-shipment-dialog'
+import { ResendEmailDialog } from './resend-email-dialog'
 import { OrderAdjustments } from './order-adjustments'
 import { formatCurrency, cn } from '@/lib/utils'
+import { formatDate, formatDateTime } from '@/lib/utils/format'
 import { getTrackingUrl } from '@/lib/types/shipment'
 import { updateOrderDetails } from '@/lib/data/actions/orders'
 import { syncOrderStatusFromShopify } from '@/lib/data/actions/shopify'
 import type { ShipmentRow, Carrier, LineItemStatus, CancelReason } from '@/lib/types/shipment'
-import { Pencil, X, Check, Loader2, RefreshCw, RotateCcw } from 'lucide-react'
+import { Pencil, X, Check, Loader2, RefreshCw, RotateCcw, FileText, Printer, Mail, Ban } from 'lucide-react'
 
 const RETURNS_OPTIONS = [
   'Generate RMA number',
@@ -47,6 +49,9 @@ interface ShipmentHistoryProps {
   orderStatus: string
   shipments: ShipmentRow[]
   currency: 'USD' | 'CAD'
+  customerEmail?: string
+  repEmail?: string
+  repName?: string
 }
 
 // ============================================================================
@@ -100,11 +105,24 @@ export function ShipmentHistory({
   orderStatus,
   shipments,
   currency,
+  customerEmail,
+  repEmail,
+  repName,
 }: ShipmentHistoryProps) {
   const [editingShipment, setEditingShipment] = React.useState<ShipmentRow | null>(null)
   const [showCreateShipment, setShowCreateShipment] = React.useState(false)
+  const [voidingShipment, setVoidingShipment] = React.useState<{ id: string; number: number } | null>(null)
+  const [resendingEmail, setResendingEmail] = React.useState<{
+    shipmentId: string
+    shipmentNumber: number
+    recipient: 'customer' | 'rep'
+    email: string
+    hasTracking: boolean
+  } | null>(null)
 
-  const totalShipped = shipments.reduce((sum, s) => sum + s.shippedTotal, 0)
+  // Calculate totals excluding voided shipments
+  const activeShipments = shipments.filter((s) => !s.isVoided)
+  const totalShipped = activeShipments.reduce((sum, s) => sum + s.shippedTotal, 0)
   const variance = totalShipped - orderAmount
 
   const canCreateShipment = orderStatus !== 'Invoiced' && orderStatus !== 'Cancelled'
@@ -143,61 +161,95 @@ export function ShipmentHistory({
       {shipments.length === 0 ? (
         <div className="text-sm text-muted-foreground">No shipments recorded yet.</div>
       ) : (
-        shipments.map((shipment, index) => (
-          <div
-            key={shipment.id}
-            className="rounded-lg border border-border bg-background p-4"
-          >
-            <div className="flex items-start justify-between mb-3">
-              <div>
-                <div className="font-medium">
-                  Shipment #{index + 1}
-                  {shipment.shipDate && (
-                    <span className="ml-2 text-sm font-normal text-muted-foreground">
-                      {new Date(shipment.shipDate).toLocaleDateString()}
+        shipments.map((shipment, index) => {
+          const hasTracking = shipment.tracking.length > 0
+          return (
+            <div
+              key={shipment.id}
+              className={cn(
+                'rounded-lg border border-border bg-background p-4',
+                shipment.isVoided && 'opacity-60 bg-muted/50'
+              )}
+            >
+              <div className="flex items-start justify-between mb-3">
+                <div>
+                  <div className="font-medium flex items-center gap-2">
+                    <span className={shipment.isVoided ? 'line-through' : ''}>
+                      Shipment #{index + 1}
                     </span>
-                  )}
-                </div>
-                <div className="text-xs text-muted-foreground">
-                  Created by {shipment.createdBy} on{' '}
-                  {new Date(shipment.createdAt).toLocaleString()}
-                </div>
-              </div>
-              <div className="flex items-start gap-4">
-                <div className="text-right">
-                  <div className="font-semibold">
-                    {formatCurrency(shipment.shippedTotal, currency)}
+                    {shipment.isVoided && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-2 py-0.5 text-xs font-medium text-destructive">
+                        <Ban className="h-3 w-3" />
+                        Voided
+                      </span>
+                    )}
+                    {shipment.shipDate && !shipment.isVoided && (
+                      <span className="text-sm font-normal text-muted-foreground">
+                        {formatDate(shipment.shipDate)}
+                      </span>
+                    )}
                   </div>
                   <div className="text-xs text-muted-foreground">
-                    Items: {formatCurrency(shipment.shippedSubtotal, currency)} +
-                    Shipping: {formatCurrency(shipment.shippingCost, currency)}
+                    Created by {shipment.createdBy} on{' '}
+                    {formatDateTime(shipment.createdAt)}
                   </div>
+                  {shipment.isVoided && shipment.voidedAt && (
+                    <div className="text-xs text-destructive mt-1">
+                      Voided by {shipment.voidedBy} on{' '}
+                      {formatDate(shipment.voidedAt)} - {shipment.voidReason}
+                    </div>
+                  )}
                 </div>
-                <div className="flex gap-2">
-                  <FeatureInterestModal
-                    feature="Returns"
-                    trigger={
-                      <Button variant="outline" size="sm">
-                        <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
-                        Return
-                      </Button>
-                    }
-                    question="What would you expect when requesting a return?"
-                    options={RETURNS_OPTIONS}
-                    context={{ orderId, orderNumber }}
-                  />
-                  {canCreateShipment && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setEditingShipment(shipment)}
-                    >
-                      Edit
-                    </Button>
+                <div className="flex items-start gap-4">
+                  <div className="text-right">
+                    <div className={cn('font-semibold', shipment.isVoided && 'line-through')}>
+                      {formatCurrency(shipment.shippedTotal, currency)}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      Items: {formatCurrency(shipment.shippedSubtotal, currency)} +
+                      Shipping: {formatCurrency(shipment.shippingCost, currency)}
+                    </div>
+                  </div>
+                  {!shipment.isVoided && (
+                    <div className="flex gap-2">
+                      <FeatureInterestModal
+                        feature="Returns"
+                        trigger={
+                          <Button variant="outline" size="sm">
+                            <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
+                            Return
+                          </Button>
+                        }
+                        question="What would you expect when requesting a return?"
+                        options={RETURNS_OPTIONS}
+                        context={{ orderId, orderNumber }}
+                      />
+                      {canCreateShipment && (
+                        <>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setEditingShipment(shipment)}
+                          >
+                            <Pencil className="h-3.5 w-3.5 mr-1.5" />
+                            Edit
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() =>
+                              setVoidingShipment({ id: shipment.id, number: index + 1 })
+                            }
+                          >
+                            <Ban className="h-3.5 w-3.5 mr-1.5 text-destructive" />
+                            Void
+                          </Button>
+                        </>
+                      )}
+                    </div>
                   )}
                 </div>
               </div>
-            </div>
 
             {/* Tracking Numbers */}
             {shipment.tracking.length > 0 && (
@@ -227,6 +279,29 @@ export function ShipmentHistory({
                 })}
               </div>
             )}
+
+            {/* Document Downloads */}
+            <div className="mb-3 flex items-center gap-2 text-xs">
+              <span className="text-muted-foreground">Documents:</span>
+              <a
+                href={`/api/shipments/${shipment.id}/packing-slip`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 rounded-md bg-orange-50 hover:bg-orange-100 text-orange-700 px-2 py-1 transition-colors"
+              >
+                <Printer className="h-3 w-3" />
+                Packing Slip
+              </a>
+              <a
+                href={`/api/shipments/${shipment.id}/invoice`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 rounded-md bg-blue-50 hover:bg-blue-100 text-blue-700 px-2 py-1 transition-colors"
+              >
+                <FileText className="h-3 w-3" />
+                Invoice
+              </a>
+            </div>
 
             {/* Shipped Items */}
             <div className="overflow-x-auto">
@@ -261,6 +336,51 @@ export function ShipmentHistory({
               </table>
             </div>
 
+            {/* Notifications Row */}
+            {!shipment.isVoided && (customerEmail || repEmail) && (
+              <div className="mt-3 pt-3 border-t border-border/50">
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="text-muted-foreground">Notifications:</span>
+                  {customerEmail && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setResendingEmail({
+                          shipmentId: shipment.id,
+                          shipmentNumber: index + 1,
+                          recipient: 'customer',
+                          email: customerEmail,
+                          hasTracking,
+                        })
+                      }
+                      className="inline-flex items-center gap-1.5 rounded-md bg-purple-50 hover:bg-purple-100 text-purple-700 px-2 py-1 transition-colors"
+                    >
+                      <Mail className="h-3 w-3" />
+                      Resend to Customer
+                    </button>
+                  )}
+                  {repEmail && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setResendingEmail({
+                          shipmentId: shipment.id,
+                          shipmentNumber: index + 1,
+                          recipient: 'rep',
+                          email: repEmail,
+                          hasTracking,
+                        })
+                      }
+                      className="inline-flex items-center gap-1.5 rounded-md bg-green-50 hover:bg-green-100 text-green-700 px-2 py-1 transition-colors"
+                    >
+                      <Mail className="h-3 w-3" />
+                      Resend to Rep
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* Notes */}
             {shipment.internalNotes && (
               <div className="mt-3 pt-3 border-t border-border/50">
@@ -269,7 +389,8 @@ export function ShipmentHistory({
               </div>
             )}
           </div>
-        ))
+          )
+        })
       )}
 
       {/* Edit Shipment Modal */}
@@ -286,9 +407,35 @@ export function ShipmentHistory({
         orderNumber={orderNumber}
         orderAmount={orderAmount}
         currency={currency}
+        customerEmail={customerEmail}
+        repEmail={repEmail}
+        repName={repName}
         open={showCreateShipment}
         onOpenChange={setShowCreateShipment}
       />
+
+      {/* Void Shipment Dialog */}
+      {voidingShipment && (
+        <VoidShipmentDialog
+          shipmentId={voidingShipment.id}
+          shipmentNumber={voidingShipment.number}
+          open={!!voidingShipment}
+          onOpenChange={(open) => !open && setVoidingShipment(null)}
+        />
+      )}
+
+      {/* Resend Email Dialog */}
+      {resendingEmail && (
+        <ResendEmailDialog
+          shipmentId={resendingEmail.shipmentId}
+          shipmentNumber={resendingEmail.shipmentNumber}
+          recipient={resendingEmail.recipient}
+          email={resendingEmail.email}
+          hasTracking={resendingEmail.hasTracking}
+          open={!!resendingEmail}
+          onOpenChange={(open) => !open && setResendingEmail(null)}
+        />
+      )}
     </div>
   )
 }
@@ -532,7 +679,7 @@ export function ShopifyStatusCard({
         <div className="flex justify-between gap-4 pt-2 border-t border-border">
           <span className="text-muted-foreground">Last Synced</span>
           <span className="text-xs text-muted-foreground">
-            {lastSyncedAt ? new Date(lastSyncedAt).toLocaleString() : 'Never'}
+            {lastSyncedAt ? formatDateTime(lastSyncedAt) : 'Never'}
           </span>
         </div>
         {error && (

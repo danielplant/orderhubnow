@@ -17,12 +17,14 @@ import { CategoryTotalsWidget } from '@/components/admin/category-totals-widget'
 import { POSoldWidget } from '@/components/admin/po-sold-widget';
 import { ExceptionAlertsWidget } from '@/components/admin/exception-alerts-widget';
 import { AtRiskAccountsWidget } from '@/components/admin/at-risk-accounts-widget';
+import { OpenItemsWidget } from '@/components/admin/open-items-widget';
 import { 
   getCategoryTotals, 
   getPOSoldData,
   getPOSoldGrandTotal,
 } from '@/lib/data/queries/dashboard';
 import { getExceptionReport, getAtRiskAccounts } from '@/lib/data/queries/reports';
+import { getOpenItemsSummary } from '@/lib/data/queries/open-items';
 import type { TimePeriod, DateRange } from '@/lib/data/mappers/dashboard';
 import { getDateRangeForPeriod } from '@/lib/data/mappers/dashboard';
 
@@ -111,6 +113,24 @@ async function AtRiskAccountsSection() {
   return <AtRiskAccountsWidget accounts={accounts} maxItems={5} />;
 }
 
+// Server component for Open Items
+async function OpenItemsSection() {
+  const summary = await getOpenItemsSummary().catch(() => null);
+
+  if (!summary) {
+    return (
+      <div className="rounded-lg border bg-muted/30 p-6 text-center">
+        <AlertTriangle className="mx-auto h-8 w-8 text-muted-foreground mb-2" />
+        <p className="text-sm text-muted-foreground">
+          Unable to load open items.
+        </p>
+      </div>
+    );
+  }
+
+  return <OpenItemsWidget summary={summary} />;
+}
+
 // Period label mapping
 const PERIOD_LABELS: Record<TimePeriod, string> = {
   today: 'Today',
@@ -185,7 +205,7 @@ export default async function AdminDashboard({ searchParams }: PageProps) {
       <DashboardMetrics period={period} customRange={customRange} />
 
       {/* Alert Section */}
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid gap-6 lg:grid-cols-3">
         {/* Exception Alerts */}
         <Suspense fallback={<SmallWidgetSkeleton />}>
           <ExceptionAlertsSection />
@@ -194,6 +214,11 @@ export default async function AdminDashboard({ searchParams }: PageProps) {
         {/* At-Risk Accounts */}
         <Suspense fallback={<SmallWidgetSkeleton />}>
           <AtRiskAccountsSection />
+        </Suspense>
+
+        {/* Open Items */}
+        <Suspense fallback={<SmallWidgetSkeleton />}>
+          <OpenItemsSection />
         </Suspense>
       </div>
 

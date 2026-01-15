@@ -7,9 +7,11 @@ import {
   type DataTableColumn,
   Button,
   StatusBadge,
+  SearchInput,
 } from '@/components/ui'
 import { BulkActionsBar } from '@/components/admin/bulk-actions-bar'
 import { cn } from '@/lib/utils'
+import { formatDate } from '@/lib/utils/format'
 import type { MissingShopifySku, MissingSkusResult } from '@/lib/types/shopify'
 import { ignoreMissingSku, bulkIgnoreMissingSkus } from '@/lib/data/actions/shopify'
 import { Check, X } from 'lucide-react'
@@ -43,7 +45,6 @@ export function MissingSkusTable({
   initialData,
   total,
   statusCounts,
-  categories,
 }: MissingSkusTableProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -161,7 +162,7 @@ export function MissingSkusTable({
         header: 'Discovered',
         cell: (row) => (
           <span className="text-sm text-muted-foreground">
-            {new Date(row.dateAdded).toLocaleDateString()}
+            {formatDate(row.dateAdded)}
           </span>
         ),
       },
@@ -237,11 +238,11 @@ export function MissingSkusTable({
 
         {/* Filters Row */}
         <div className="flex flex-wrap gap-3 p-4">
-          <input
+          <SearchInput
             value={search}
-            onChange={(e) => setParam('q', e.target.value || null)}
+            onValueChange={(v) => setParam('q', v || null)}
             placeholder="Search SKU, description, color..."
-            className="h-10 w-full max-w-md rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="h-10 w-full max-w-md"
           />
         </div>
       </div>

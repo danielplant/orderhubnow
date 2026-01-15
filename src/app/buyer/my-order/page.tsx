@@ -26,7 +26,7 @@ interface Props {
  */
 export default async function MyOrderPage({ searchParams }: Props) {
   const params = await searchParams
-  const isPreOrder = params.isPreOrder === 'true'
+  const isPreOrderParam = params.isPreOrder === 'true'
   const editOrderId = params.editOrder
   const returnTo = params.returnTo || '/buyer/select-journey'
   const draftId = params.draft || null
@@ -67,6 +67,9 @@ export default async function MyOrderPage({ searchParams }: Props) {
     existingOrder = await getOrderForEditing(editOrderId)
     // If order not found or not editable, existingOrder will be null
   }
+
+  // Use order's isPreOrder when editing, otherwise use URL param
+  const isPreOrder = existingOrder?.isPreOrder ?? isPreOrderParam
 
   return (
     <MyOrderClient

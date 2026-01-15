@@ -22,8 +22,8 @@ import { createOrder, updateOrder } from '@/lib/data/actions/orders'
 import {
   suggestStoreNames,
   getCustomerForAutoFill,
-  type StoreSuggestion,
 } from '@/lib/data/actions/customers'
+import type { StoreSuggestion } from '@/lib/types/customer'
 import { findRepByCustomerCode } from '@/lib/utils/rep-matching'
 import {
   normalizeStateProvince,
@@ -31,7 +31,7 @@ import {
   normalizeWebsite,
 } from '@/lib/utils/form-normalization'
 import { formatCurrency } from '@/lib/utils'
-import { isValidReturnTo, isRepPortalReturn } from '@/lib/utils/rep-context'
+import { isRepPortalReturn } from '@/lib/utils/rep-context'
 import type { Currency } from '@/lib/types'
 import type { OrderForEditing } from '@/lib/data/queries/orders'
 
@@ -458,7 +458,7 @@ export function OrderForm({
             setIsSubmitting(false)
           }
         }
-      } catch (error) {
+      } catch {
         toast.error('An unexpected error occurred')
         setIsSubmitting(false)
       }

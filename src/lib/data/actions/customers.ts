@@ -2,20 +2,11 @@
 
 import { revalidatePath } from 'next/cache'
 import { prisma } from '@/lib/prisma'
-import type { CustomerInput } from '@/lib/types/customer'
+import type { CustomerInput, StoreSuggestion, CustomerAutoFill } from '@/lib/types/customer'
 
 // ============================================================================
 // Customer Lookup (for buyer order form autocomplete)
 // ============================================================================
-
-/**
- * Suggest store names matching a prefix for autocomplete.
- * Used in buyer order form to find existing customers.
- */
-export interface StoreSuggestion {
-  id: number
-  storeName: string
-}
 
 export async function suggestStoreNames(prefix: string): Promise<StoreSuggestion[]> {
   // Require at least 3 chars to avoid too many results
@@ -44,33 +35,6 @@ export async function suggestStoreNames(prefix: string): Promise<StoreSuggestion
     id: c.ID,
     storeName: c.StoreName ?? '',
   }))
-}
-
-/**
- * Customer data for auto-filling the order form.
- */
-export interface CustomerAutoFill {
-  id: number
-  storeName: string
-  buyerName: string | null
-  email: string | null
-  phone: string | null
-  website: string | null
-  rep: string | null
-  // Billing address
-  street1: string | null
-  street2: string | null
-  city: string | null
-  stateProvince: string | null
-  zipPostal: string | null
-  country: string | null
-  // Shipping address
-  shippingStreet1: string | null
-  shippingStreet2: string | null
-  shippingCity: string | null
-  shippingStateProvince: string | null
-  shippingZipPostal: string | null
-  shippingCountry: string | null
 }
 
 /**

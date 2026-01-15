@@ -7,6 +7,8 @@ import { Card, CardContent, CardHeader, CardTitle, Button, StatusBadge } from '@
 import type { OrderStatus } from '@/lib/types/order'
 import { getShipmentsForOrder, getOrderItemsWithFulfillment } from '@/lib/data/actions/shipments'
 import { LineItemsSection, ShipmentHistory, PDFSettingsCard, ShopifyStatusCard } from '@/components/admin/order-detail-client'
+import { ActivityLogPanel } from '@/components/admin/activity-log-panel'
+import { getOrderActivityLog } from '@/lib/audit/activity-logger'
 
 function getStatusBadgeStatus(status: OrderStatus) {
   switch (status) {
@@ -76,7 +78,17 @@ export default async function AdminOrderDetailsPage(props: { params: Promise<{ i
   const currency: 'USD' | 'CAD' = order.Country?.toUpperCase().includes('CAD') ? 'CAD' : 'USD'
   const status = order.OrderStatus as OrderStatus
 
-  const [itemsWithFulfillment, comments, shipments] = await Promise.all([
+  // Get rep email if there's a sales rep
+  const rep = order.SalesRep
+    ? await prisma.reps.findFirst({
+        where: { Name: order.SalesRep },
+        select: { Email1: true, Email2: true, Name: true },
+      })
+    : null
+  const repEmail = rep?.Email1 || rep?.Email2 || undefined
+  const repName = rep?.Name || undefined
+
+  const [itemsWithFulfillment, comments, shipments, activityLogs] = await Promise.all([
     getOrderItemsWithFulfillment(id),
     prisma.customerOrdersComments.findMany({
       where: { OrderID: BigInt(orderId) },
@@ -89,6 +101,7 @@ export default async function AdminOrderDetailsPage(props: { params: Promise<{ i
       orderBy: { AddedDate: 'desc' },
     }),
     getShipmentsForOrder(id),
+    getOrderActivityLog(id),
   ])
 
   // Transform items for client component
@@ -259,6 +272,9 @@ export default async function AdminOrderDetailsPage(props: { params: Promise<{ i
               orderStatus={status}
               shipments={shipments}
               currency={currency}
+              customerEmail={order.CustomerEmail || undefined}
+              repEmail={repEmail}
+              repName={repName}
             />
           </CardContent>
         </Card>
@@ -283,6 +299,11 @@ export default async function AdminOrderDetailsPage(props: { params: Promise<{ i
             )}
           </CardContent>
         </Card>
+
+        {/* Activity Log */}
+        <div className="lg:col-span-2">
+          <ActivityLogPanel entries={activityLogs} />
+        </div>
       </div>
     </main>
   )

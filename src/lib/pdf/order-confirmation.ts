@@ -65,6 +65,9 @@ interface LineItem {
   category?: string
   color?: string
   retailPrice?: number | null
+  // Unit pricing (for prepacks)
+  unitsPerSku?: number // 1 for singles, 2+ for prepacks
+  unitPrice?: number | null // Price per individual unit
 }
 
 interface OrderConfirmationInput {
@@ -83,14 +86,6 @@ function formatCurrency(amount: number, currency: 'USD' | 'CAD'): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(amount)
-}
-
-function formatDate(date: Date): string {
-  return date.toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  })
 }
 
 function formatDateShort(date: Date): string {
@@ -152,23 +147,32 @@ export function generateOrderConfirmationHtml(input: OrderConfirmationInput): st
   // Check if we have discounts
   const hasDiscounts = items.some((item) => item.discount > 0) || order.totalDiscount > 0
 
+  // Check if any items are prepacks (units > 1)
+  const hasPrepacks = items.some((item) => (item.unitsPerSku ?? 1) > 1)
+
   // ============================================================================
   // PAGE 1: Order Summary Table (No Images)
   // ============================================================================
   const summaryRows = items
     .map(
-      (item) => `
+      (item) => {
+        const units = item.unitsPerSku ?? 1
+        const unitPrice = item.unitPrice ?? item.price
+        return `
       <tr>
         <td class="cell-sku">${escapeHtml(getStyleFromSku(item.sku))}</td>
         <td class="cell-name">${item.description ? escapeHtml(item.description) : '—'}</td>
         <td class="cell-color">${item.color ? escapeHtml(item.color) : '—'}</td>
         <td class="cell-size">${item.size || '—'}</td>
         <td class="cell-qty">${item.quantity}</td>
+        ${hasPrepacks ? `<td class="cell-units">${units > 1 ? `${units}pc` : '1'}</td>` : ''}
         <td class="cell-price">${formatCurrency(item.price, order.currency)}</td>
+        ${hasPrepacks ? `<td class="cell-unit-price">${formatCurrency(unitPrice, order.currency)}</td>` : ''}
         ${hasDiscounts ? `<td class="cell-discount">${item.discount > 0 ? `${item.discount}%` : '—'}</td>` : ''}
         <td class="cell-total">${formatCurrency(item.lineTotal, order.currency)}</td>
       </tr>
     `
+      }
     )
     .join('')
 
@@ -322,7 +326,9 @@ export function generateOrderConfirmationHtml(input: OrderConfirmationInput): st
               <th class="th-color">Color</th>
               <th class="th-size">Size</th>
               <th class="th-qty">Qty</th>
-              <th class="th-price">Wholesale</th>
+              ${hasPrepacks ? '<th class="th-units">Units</th>' : ''}
+              <th class="th-price">${hasPrepacks ? 'Pack Price' : 'Wholesale'}</th>
+              ${hasPrepacks ? '<th class="th-unit-price">Unit Price</th>' : ''}
               ${hasDiscounts ? '<th class="th-discount">Discount</th>' : ''}
               <th class="th-total">Line Total</th>
             </tr>
@@ -630,7 +636,9 @@ export function generateOrderConfirmationHtml(input: OrderConfirmationInput): st
       .th-color { width: 80px; }
       .th-size { width: 50px; text-align: center; }
       .th-qty { width: 45px; text-align: center; }
+      .th-units { width: 45px; text-align: center; }
       .th-price { width: 75px; text-align: right; }
+      .th-unit-price { width: 75px; text-align: right; }
       .th-discount { width: 60px; text-align: center; }
       .th-total { width: 85px; text-align: right; }
 
@@ -639,7 +647,9 @@ export function generateOrderConfirmationHtml(input: OrderConfirmationInput): st
       .cell-color { }
       .cell-size { text-align: center; }
       .cell-qty { text-align: center; font-weight: 500; }
+      .cell-units { text-align: center; font-size: 7pt; color: #525252; }
       .cell-price { text-align: right; }
+      .cell-unit-price { text-align: right; font-size: 7pt; color: #525252; }
       .cell-discount { text-align: center; color: #16a34a; }
       .cell-total { text-align: right; font-weight: 600; }
 

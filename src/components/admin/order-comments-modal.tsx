@@ -11,6 +11,7 @@ import {
 } from '@/components/ui'
 import { addOrderComment } from '@/lib/data/actions/orders'
 import { getOrderComments } from '@/lib/data/queries/orders'
+import { formatDateTime } from '@/lib/utils/format'
 
 interface OrderCommentsModalProps {
   orderId: string | null
@@ -82,7 +83,7 @@ export function OrderCommentsModal({ orderId, open, onOpenChange }: OrderComment
               <div key={c.id} className="rounded-md border border-border p-3">
                 <p className="text-sm">{c.text}</p>
                 <p className="text-xs text-muted-foreground mt-2">
-                  {c.createdBy} • {new Date(c.createdAt).toLocaleString()}
+                  {c.createdBy} • {formatDateTime(c.createdAt)}
                 </p>
               </div>
             ))

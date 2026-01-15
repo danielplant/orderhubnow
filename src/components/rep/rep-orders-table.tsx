@@ -8,8 +8,8 @@ import {
   DataTable,
   type DataTableColumn,
   StatusBadge,
+  SearchInput,
 } from '@/components/ui'
-import { Input } from '@/components/ui/input'
 import {
   Select,
   SelectContent,
@@ -39,6 +39,7 @@ const ORDER_STATUS_OPTIONS: Array<{ label: string; value: 'All' | OrderStatus }>
   { label: 'Any', value: 'All' },
   { label: 'Pending', value: 'Pending' },
   { label: 'Processing', value: 'Processing' },
+  { label: 'Partially Shipped', value: 'Partially Shipped' },
   { label: 'Shipped', value: 'Shipped' },
   { label: 'Invoiced', value: 'Invoiced' },
   { label: 'Cancelled', value: 'Cancelled' },
@@ -53,6 +54,8 @@ function getStatusBadgeStatus(status: OrderStatus) {
       return 'invoiced'
     case 'Shipped':
       return 'shipped'
+    case 'Partially Shipped':
+      return 'partially-shipped'
     case 'Processing':
       return 'processing'
     case 'Pending':
@@ -77,8 +80,6 @@ export function RepOrdersTable({ orders, total, statusCounts }: RepOrdersTablePr
   const sort = searchParams.get('sort') || 'orderDate'
   const dir = (searchParams.get('dir') || 'desc') as 'asc' | 'desc'
 
-  const [storeSearch, setStoreSearch] = React.useState(q)
-
   // URL param helpers
   const setParam = React.useCallback(
     (key: string, value: string | null) => {
@@ -95,19 +96,6 @@ export function RepOrdersTable({ orders, total, statusCounts }: RepOrdersTablePr
       router.push(`?${params.toString()}`, { scroll: false })
     },
     [router, searchParams]
-  )
-
-  const handleSearch = React.useCallback(() => {
-    setParam('q', storeSearch.trim() || null)
-  }, [setParam, storeSearch])
-
-  const handleKeyDown = React.useCallback(
-    (e: React.KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === 'Enter') {
-        handleSearch()
-      }
-    },
-    [handleSearch]
   )
 
   const handleStatusChange = React.useCallback(
@@ -227,11 +215,10 @@ export function RepOrdersTable({ orders, total, statusCounts }: RepOrdersTablePr
     <div className="space-y-4">
       {/* Filters */}
       <div className="flex flex-wrap gap-4 items-center">
-        <Input
+        <SearchInput
           placeholder="Search by store name..."
-          value={storeSearch}
-          onChange={(e) => setStoreSearch(e.target.value)}
-          onKeyDown={handleKeyDown}
+          value={q}
+          onValueChange={(v) => setParam('q', v || null)}
           className="max-w-xs"
         />
         <Select value={status} onValueChange={handleStatusChange}>
@@ -247,7 +234,6 @@ export function RepOrdersTable({ orders, total, statusCounts }: RepOrdersTablePr
             ))}
           </SelectContent>
         </Select>
-        <Button onClick={handleSearch}>Update Orders Listing</Button>
 
         {orders.length > 0 && (
           <Button variant="outline" asChild className="ml-auto gap-2">

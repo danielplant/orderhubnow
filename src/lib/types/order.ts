@@ -99,3 +99,50 @@ export interface OrdersListInput {
   page?: number;
   pageSize?: number;
 }
+
+// ============================================================================
+// Order Action Types (used by server actions)
+// ============================================================================
+
+/**
+ * Result shape from createOrder action.
+ */
+export interface CreateOrderResult {
+  success: boolean
+  orderId?: string
+  orderNumber?: string
+  error?: string
+}
+
+/**
+ * Input for updating an existing order.
+ */
+export interface UpdateOrderInput {
+  orderId: string
+  storeName: string
+  buyerName: string
+  salesRepId: string
+  customerEmail: string
+  customerPhone: string
+  currency: 'USD' | 'CAD'
+  shipStartDate: string
+  shipEndDate: string
+  orderNotes?: string
+  customerPO?: string
+  website?: string
+  items: Array<{
+    sku: string
+    skuVariantId: number
+    quantity: number
+    price: number
+  }>
+}
+
+/**
+ * Result shape from updateOrder action.
+ */
+export interface UpdateOrderResult {
+  success: boolean
+  orderNumber?: string
+  error?: string
+}

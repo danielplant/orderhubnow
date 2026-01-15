@@ -15,6 +15,19 @@ model ActivityLogs {
   CustomerId  BigInt?
   AddressId   BigInt?
   OrderId     BigInt?
+  // Extended audit fields
+  EntityType  String?  @db.NVarChar(50)    // 'order', 'shipment', 'customer', 'item'
+  EntityID    BigInt?
+  Action      String?  @db.NVarChar(100)   // 'shipment_created', 'item_cancelled', etc.
+  OldValues   String?  @db.NVarChar(Max)   // JSON of previous state
+  NewValues   String?  @db.NVarChar(Max)   // JSON of new state
+  PerformedBy String?  @db.NVarChar(255)
+  IPAddress   String?  @db.NVarChar(50)
+  UserAgent   String?  @db.NVarChar(500)
+
+  @@index([EntityType, EntityID], map: "IX_ActivityLogs_EntityType")
+  @@index([Action], map: "IX_ActivityLogs_Action")
+  @@index([DateAdded(sort: Desc)], map: "IX_ActivityLogs_DateAdded")
 }
 
 model ApplicationExceptions {
@@ -368,6 +381,9 @@ model Sku {
   OrderEntryDescription   String?        @db.NVarChar(Max)
   MSRPCAD                 String?        @db.NVarChar(100)
   MSRPUSD                 String?        @db.NVarChar(100)
+  UnitsPerSku             Int?           @default(1)
+  UnitPriceCAD            Decimal?       @db.Decimal(10, 2)
+  UnitPriceUSD            Decimal?       @db.Decimal(10, 2)
   OnRouteAvailableDate    DateTime?      @db.DateTime
   Season                  String?        @db.NVarChar(500)
   DisplayPriority         Int?
@@ -730,11 +746,18 @@ model Shipments {
   CreatedAt        DateTime           @default(now()) @db.DateTime
   UpdatedAt        DateTime?          @db.DateTime
   ShopifyFulfillmentID String?        @db.NVarChar(50)
+  // Void fields - allows marking shipments as voided without deletion
+  VoidedAt         DateTime?          @db.DateTime
+  VoidedBy         String?            @db.NVarChar(255)
+  VoidReason       String?            @db.NVarChar(100)
+  VoidNotes        String?            @db.NVarChar(Max)
   CustomerOrders   CustomerOrders     @relation(fields: [CustomerOrderID], references: [ID], onUpdate: NoAction, map: "FK_Shipments_CustomerOrders")
   ShipmentItems    ShipmentItems[]
   ShipmentTracking ShipmentTracking[]
+  ShipmentDocuments ShipmentDocuments[]
 
   @@index([CustomerOrderID], map: "IX_Shipments_CustomerOrderID")
+  @@index([VoidedAt], map: "IX_Shipments_VoidedAt")
 }
 
 /// Line items included in a shipment - links to order items with quantity shipped
@@ -785,4 +808,27 @@ model FeatureInterest {
 
   @@index([Feature], map: "IX_FeatureInterest_Feature")
   @@index([CreatedAt], map: "IX_FeatureInterest_CreatedAt")
+}
+
+/// Shipment documents - stores generated PDFs (packing slips, invoices)
+model ShipmentDocuments {
+  ID             BigInt    @id(map: "PK_ShipmentDocuments") @default(autoincrement())
+  ShipmentID     BigInt
+  OrderID        BigInt
+  DocumentType   String    @db.NVarChar(50)  // 'packing_slip', 'shipping_invoice'
+  DocumentNumber String    @db.NVarChar(100) // 'PS-A10001-1', 'INV-A10001-1'
+  FileName       String    @db.NVarChar(255)
+  FilePath       String    @db.NVarChar(500) // S3 key or local path
+  FileSize       Int?
+  MimeType       String    @default("application/pdf") @db.NVarChar(100)
+  GeneratedAt    DateTime  @default(now()) @db.DateTime
+  GeneratedBy    String?   @db.NVarChar(255)
+  SentToCustomer Boolean   @default(false)
+  SentAt         DateTime? @db.DateTime
+  Shipment       Shipments @relation(fields: [ShipmentID], references: [ID], onDelete: Cascade, map: "FK_ShipmentDocuments_Shipment")
+
+  @@index([ShipmentID], map: "IX_ShipmentDocuments_ShipmentID")
+  @@index([OrderID], map: "IX_ShipmentDocuments_OrderID")
+  @@index([DocumentNumber], map: "IX_ShipmentDocuments_DocumentNumber")
+  @@index([DocumentType], map: "IX_ShipmentDocuments_DocumentType")
 }

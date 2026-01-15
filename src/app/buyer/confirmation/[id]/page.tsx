@@ -6,6 +6,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { CheckCircle2, Download } from 'lucide-react'
 import { ConfirmationClient } from './client'
+import { BrandHeader } from '@/components/buyer/brand-header'
 
 export const dynamic = 'force-dynamic'
 
@@ -48,7 +49,9 @@ export default async function ConfirmationPage({ params }: Props) {
   const currency = order.Country?.toUpperCase().includes('CAD') ? 'CAD' : 'USD'
 
   return (
-    <div className="container mx-auto py-12 px-4">
+    <div className="min-h-screen bg-background">
+      <BrandHeader />
+      <div className="container mx-auto py-12 px-4">
       {/* Client component to clear cart */}
       <ConfirmationClient />
 
@@ -119,6 +122,7 @@ export default async function ConfirmationPage({ params }: Props) {
             </div>
           </CardContent>
         </Card>
+      </div>
       </div>
     </div>
   )

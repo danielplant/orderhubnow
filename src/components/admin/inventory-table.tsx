@@ -2,11 +2,12 @@
 
 import * as React from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { DataTable, type DataTableColumn, Button } from '@/components/ui'
+import { DataTable, type DataTableColumn, Button, SearchInput } from '@/components/ui'
 import { InlineEdit } from '@/components/ui/inline-edit'
 import type { InventoryListItem } from '@/lib/data/queries/inventory'
 import { updateInventoryQuantity, updateInventoryOnRoute } from '@/lib/data/actions/inventory'
 import { cn } from '@/lib/utils'
+import { formatDate } from '@/lib/utils/format'
 import { AlertTriangle } from 'lucide-react'
 
 // ============================================================================
@@ -154,11 +155,36 @@ export function InventoryTable({
         ),
       },
       {
+        id: 'units',
+        header: 'Units',
+        cell: (r) => (
+          <span
+            className={cn(
+              'text-sm tabular-nums',
+              r.prepackMultiplier > 1 ? 'text-purple-600 font-medium' : 'text-muted-foreground'
+            )}
+          >
+            {r.prepackMultiplier > 1 ? `${r.prepackMultiplier}pc` : '1'}
+          </span>
+        ),
+      },
+      {
+        id: 'unitPrice',
+        header: 'Unit Price',
+        cell: (r) => (
+          <span className="text-sm tabular-nums text-muted-foreground">
+            {r.unitPriceCad != null
+              ? `$${r.unitPriceCad.toFixed(2)}`
+              : '—'}
+          </span>
+        ),
+      },
+      {
         id: 'lastUpdated',
         header: 'Last Updated',
         cell: (r) => (
           <span className="text-muted-foreground text-sm">
-            {r.lastUpdated ? new Date(r.lastUpdated).toLocaleDateString() : '—'}
+            {formatDate(r.lastUpdated)}
           </span>
         ),
       },
@@ -196,11 +222,11 @@ export function InventoryTable({
 
         {/* Filters Row */}
         <div className="flex flex-wrap gap-3 p-4 items-center">
-          <input
+          <SearchInput
             value={q}
-            onChange={(e) => setParam('q', e.target.value || null)}
+            onValueChange={(v) => setParam('q', v || null)}
             placeholder="Search by SKU or description..."
-            className="h-10 w-full max-w-md rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="h-10 w-full max-w-md"
           />
 
           <div className="ml-auto flex items-center gap-2 text-sm text-muted-foreground">

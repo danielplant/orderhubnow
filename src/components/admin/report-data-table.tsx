@@ -11,6 +11,7 @@ import * as React from 'react';
 import { DataTable, type DataTableColumn } from '@/components/ui/data-table';
 import { Badge } from '@/components/ui/badge';
 import { cn, formatCurrency, formatNumber } from '@/lib/utils';
+import { formatDate } from '@/lib/utils/format';
 import type { ColumnDefinition } from '@/lib/types/report';
 
 // Badge variants for different types
@@ -65,7 +66,7 @@ function formatCellValue(value: unknown, type: ColumnDefinition['type']): React.
     case 'percent':
       return `${(Number(value) * 100).toFixed(1)}%`;
     case 'date':
-      return new Date(String(value)).toLocaleDateString();
+      return formatDate(value as string);
     case 'badge':
       const strValue = String(value);
       const variant = BADGE_VARIANTS[strValue] || 'bg-muted text-muted-foreground';

@@ -10,6 +10,7 @@ import {
   Button,
 } from '@/components/ui'
 import { updateShipment, addTrackingNumber } from '@/lib/data/actions/shipments'
+import { toast } from 'sonner'
 import type { ShipmentRow, Carrier } from '@/lib/types/shipment'
 import { CARRIERS } from '@/lib/types/shipment'
 import { formatCurrency, cn } from '@/lib/utils'
@@ -40,6 +41,7 @@ export function EditShipmentModal({
   const [newTrackingNumber, setNewTrackingNumber] = React.useState('')
   const [isAddingTracking, setIsAddingTracking] = React.useState(false)
 
+
   // Initialize form when shipment changes
   React.useEffect(() => {
     if (shipment) {
@@ -65,10 +67,11 @@ export function EditShipmentModal({
       })
 
       if (result.success) {
+        toast.success('Shipment updated successfully')
         onOpenChange(false)
         router.refresh()
       } else {
-        alert(result.error || 'Failed to update shipment')
+        toast.error('Failed to update shipment', { description: result.error })
       }
     } finally {
       setIsSaving(false)
@@ -91,12 +94,14 @@ export function EditShipmentModal({
         setNewTrackingNumber('')
         router.refresh()
       } else {
-        alert(result.error || 'Failed to add tracking number')
+        toast.error('Failed to add tracking number', { description: result.error })
       }
     } finally {
       setIsAddingTracking(false)
     }
   }
+
+
 
   if (!shipment) return null
 

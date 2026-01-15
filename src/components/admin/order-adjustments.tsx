@@ -2,6 +2,7 @@
 
 import * as React from 'react'
 import { useRouter } from 'next/navigation'
+import { toast } from 'sonner'
 import {
   Dialog,
   DialogContent,
@@ -13,8 +14,11 @@ import {
   addOrderItem,
   updateOrderItem,
   removeOrderItem,
+  cancelOrderItem,
 } from '@/lib/data/actions/shipments'
+import { CANCEL_REASONS, type CancelReason, type LineItemStatus } from '@/lib/types/shipment'
 import { formatCurrency, cn } from '@/lib/utils'
+import { XCircle, Loader2 } from 'lucide-react'
 
 interface OrderItem {
   id: string
@@ -23,6 +27,12 @@ interface OrderItem {
   price: number
   currency: 'USD' | 'CAD'
   shippedQuantity: number
+  cancelledQuantity: number
+  remainingQuantity: number
+  status: LineItemStatus
+  cancelledReason: CancelReason | null
+  cancelledAt: string | null
+  cancelledBy: string | null
 }
 
 interface OrderAdjustmentsProps {
@@ -40,63 +50,145 @@ export function OrderAdjustments({
   items,
   currency,
 }: OrderAdjustmentsProps) {
-  const router = useRouter()
   const [showAddItem, setShowAddItem] = React.useState(false)
   const [editingItem, setEditingItem] = React.useState<OrderItem | null>(null)
+  const [cancellingItem, setCancellingItem] = React.useState<OrderItem | null>(null)
   const [isLocked] = React.useState(orderStatus === 'Invoiced' || orderStatus === 'Cancelled')
 
+  // Calculate fulfillment summary
+  const totalOrdered = items.reduce((sum, item) => sum + item.quantity, 0)
+  const totalShipped = items.reduce((sum, item) => sum + item.shippedQuantity, 0)
+  const totalCancelled = items.reduce((sum, item) => sum + item.cancelledQuantity, 0)
+  const totalOpen = items.reduce((sum, item) => sum + item.remainingQuantity, 0)
+  const fulfillmentPct = totalOrdered > 0 ? Math.round((totalShipped / totalOrdered) * 100) : 0
+
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
+      {/* Fulfillment Summary */}
+      <div className="flex items-center gap-4 text-sm">
+        <div className="flex items-center gap-2">
+          <div className="w-32 h-2 bg-muted rounded-full overflow-hidden">
+            <div 
+              className={cn(
+                'h-full transition-all',
+                fulfillmentPct === 100 ? 'bg-success' : fulfillmentPct >= 50 ? 'bg-warning' : 'bg-destructive'
+              )}
+              style={{ width: `${fulfillmentPct}%` }}
+            />
+          </div>
+          <span className="font-medium">{fulfillmentPct}%</span>
+        </div>
+        <span className="text-muted-foreground">
+          {totalShipped}/{totalOrdered} shipped
+          {totalCancelled > 0 && <span className="text-destructive"> | {totalCancelled} cancelled</span>}
+          {totalOpen > 0 && <span className="text-warning"> | {totalOpen} open</span>}
+        </span>
+      </div>
+
       {/* Items Table with Edit Controls */}
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-muted-foreground border-b border-border">
               <th className="py-2 pr-4">SKU</th>
-              <th className="py-2 pr-4 text-right">Qty</th>
+              <th className="py-2 pr-4 text-center w-20">Status</th>
+              <th className="py-2 pr-4 text-right">Ordered</th>
               <th className="py-2 pr-4 text-right">Shipped</th>
+              <th className="py-2 pr-4 text-right">Cancelled</th>
+              <th className="py-2 pr-4 text-right">Open</th>
               <th className="py-2 pr-4 text-right">Unit</th>
               <th className="py-2 pr-4 text-right">Total</th>
-              {!isLocked && <th className="py-2 pr-4 text-right w-24">Actions</th>}
+              {!isLocked && <th className="py-2 pr-4 text-right w-32">Actions</th>}
             </tr>
           </thead>
           <tbody>
             {items.map((item) => {
               const lineTotal = item.price * item.quantity
-              const canRemove = item.shippedQuantity === 0
+              const canRemove = item.shippedQuantity === 0 && item.cancelledQuantity === 0
+              const canCancel = item.remainingQuantity > 0
+              const isCancelled = item.status === 'Cancelled'
+              
               return (
-                <tr key={item.id} className="border-b border-border">
-                  <td className="py-2 pr-4 font-medium">{item.sku}</td>
-                  <td className="py-2 pr-4 text-right">{item.quantity}</td>
+                <tr 
+                  key={item.id} 
+                  className={cn(
+                    'border-b border-border',
+                    isCancelled && 'bg-muted/30'
+                  )}
+                >
+                  <td className={cn('py-2 pr-4 font-medium', isCancelled && 'line-through text-muted-foreground')}>
+                    {item.sku}
+                  </td>
+                  <td className="py-2 pr-4 text-center">
+                    <StatusBadge status={item.status} />
+                  </td>
+                  <td className={cn('py-2 pr-4 text-right', isCancelled && 'text-muted-foreground')}>
+                    {item.quantity}
+                  </td>
                   <td className="py-2 pr-4 text-right">
-                    <span
-                      className={cn(
-                        item.shippedQuantity > 0 && 'text-success font-medium'
-                      )}
-                    >
+                    <span className={cn(item.shippedQuantity > 0 && 'text-success font-medium')}>
                       {item.shippedQuantity}
                     </span>
                   </td>
                   <td className="py-2 pr-4 text-right">
+                    {item.cancelledQuantity > 0 ? (
+                      <span 
+                        className="text-destructive font-medium cursor-help"
+                        title={item.cancelledReason ? `${item.cancelledReason}${item.cancelledBy ? ` by ${item.cancelledBy}` : ''}` : undefined}
+                      >
+                        {item.cancelledQuantity}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">0</span>
+                    )}
+                  </td>
+                  <td className="py-2 pr-4 text-right">
+                    {item.remainingQuantity > 0 ? (
+                      <span className="text-warning font-medium">{item.remainingQuantity}</span>
+                    ) : (
+                      <span className="text-muted-foreground">0</span>
+                    )}
+                  </td>
+                  <td className={cn('py-2 pr-4 text-right', isCancelled && 'text-muted-foreground')}>
                     {formatCurrency(item.price, item.currency)}
                   </td>
-                  <td className="py-2 pr-4 text-right font-medium">
+                  <td className={cn('py-2 pr-4 text-right font-medium', isCancelled && 'text-muted-foreground line-through')}>
                     {formatCurrency(lineTotal, item.currency)}
                   </td>
                   {!isLocked && (
                     <td className="py-2 pr-4 text-right">
                       <div className="flex justify-end gap-1">
-                        <button
-                          onClick={() => setEditingItem(item)}
-                          className="text-xs text-primary hover:underline"
-                        >
-                          Edit
-                        </button>
-                        {canRemove && (
+                        {!isCancelled && (
                           <>
-                            <span className="text-muted-foreground">|</span>
-                            <RemoveItemButton itemId={item.id} sku={item.sku} />
+                            <button
+                              onClick={() => setEditingItem(item)}
+                              className="text-xs text-primary hover:underline"
+                            >
+                              Edit
+                            </button>
+                            {canCancel && (
+                              <>
+                                <span className="text-muted-foreground">|</span>
+                                <button
+                                  onClick={() => setCancellingItem(item)}
+                                  className="text-xs text-destructive hover:underline"
+                                >
+                                  Cancel
+                                </button>
+                              </>
+                            )}
+                            {canRemove && (
+                              <>
+                                <span className="text-muted-foreground">|</span>
+                                <RemoveItemButton itemId={item.id} sku={item.sku} />
+                              </>
+                            )}
                           </>
+                        )}
+                        {isCancelled && item.cancelledReason && (
+                          <span className="text-xs text-muted-foreground italic">
+                            {item.cancelledReason}
+                          </span>
                         )}
                       </div>
                     </td>
@@ -135,7 +227,34 @@ export function OrderAdjustments({
         item={editingItem}
         currency={currency}
       />
+
+      {/* Cancel Item Modal */}
+      <CancelItemModal
+        open={!!cancellingItem}
+        onOpenChange={(open) => !open && setCancellingItem(null)}
+        item={cancellingItem}
+        currency={currency}
+      />
     </div>
+  )
+}
+
+// ============================================================================
+// Status Badge Component
+// ============================================================================
+
+function StatusBadge({ status }: { status: LineItemStatus }) {
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium',
+        status === 'Open' && 'bg-warning/10 text-warning',
+        status === 'Shipped' && 'bg-success/10 text-success',
+        status === 'Cancelled' && 'bg-destructive/10 text-destructive'
+      )}
+    >
+      {status}
+    </span>
   )
 }
 
@@ -510,6 +629,182 @@ function EditItemModal({ open, onOpenChange, item, currency }: EditItemModalProp
             </Button>
             <Button onClick={handleSave} disabled={isSaving}>
               {isSaving ? 'Saving...' : 'Save Changes'}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ============================================================================
+// Cancel Item Modal
+// ============================================================================
+
+interface CancelItemModalProps {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  item: OrderItem | null
+  currency: 'USD' | 'CAD'
+}
+
+function CancelItemModal({ open, onOpenChange, item, currency }: CancelItemModalProps) {
+  const router = useRouter()
+  const [isSaving, setIsSaving] = React.useState(false)
+  const [quantity, setQuantity] = React.useState('')
+  const [reason, setReason] = React.useState<CancelReason>('Out of stock')
+
+  // Initialize form when item changes
+  React.useEffect(() => {
+    if (item) {
+      setQuantity(item.remainingQuantity.toString())
+      setReason('Out of stock')
+    }
+  }, [item])
+
+  const handleCancel = async () => {
+    if (!item) return
+
+    const qty = parseInt(quantity) || 0
+
+    if (qty <= 0) {
+      toast.error('Quantity must be greater than 0')
+      return
+    }
+
+    if (qty > item.remainingQuantity) {
+      toast.error(`Cannot cancel more than ${item.remainingQuantity} units`)
+      return
+    }
+
+    setIsSaving(true)
+    try {
+      const result = await cancelOrderItem(item.id, qty, reason)
+
+      if (result.success) {
+        toast.success(`Cancelled ${qty} units of ${item.sku}`, {
+          description: `Reason: ${reason}`,
+        })
+        onOpenChange(false)
+        router.refresh()
+      } else {
+        toast.error('Failed to cancel item', {
+          description: result.error || 'An unexpected error occurred',
+        })
+      }
+    } catch {
+      toast.error('Failed to cancel item', {
+        description: 'An unexpected error occurred',
+      })
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  if (!item) return null
+
+  const qty = parseInt(quantity) || 0
+  const cancelValue = qty * item.price
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-destructive">
+            <XCircle className="h-5 w-5" />
+            Cancel Item: {item.sku}
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          {/* Item Info */}
+          <div className="rounded-lg bg-muted/30 p-3 text-sm space-y-1">
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Ordered</span>
+              <span>{item.quantity} units</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Shipped</span>
+              <span className="text-success">{item.shippedQuantity} units</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Already Cancelled</span>
+              <span className="text-destructive">{item.cancelledQuantity} units</span>
+            </div>
+            <div className="flex justify-between border-t pt-1 mt-1">
+              <span className="font-medium">Available to Cancel</span>
+              <span className="font-medium text-warning">{item.remainingQuantity} units</span>
+            </div>
+          </div>
+
+          {/* Quantity to Cancel */}
+          <div>
+            <label htmlFor="cancel-quantity" className="text-sm font-medium">
+              Quantity to Cancel
+            </label>
+            <input
+              id="cancel-quantity"
+              type="number"
+              min="1"
+              max={item.remainingQuantity}
+              value={quantity}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setQuantity(e.target.value)}
+              className="mt-1 w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
+            />
+            <p className="text-xs text-muted-foreground mt-1">
+              Max: {item.remainingQuantity} units
+            </p>
+          </div>
+
+          {/* Reason Selector */}
+          <div>
+            <label htmlFor="cancel-reason" className="text-sm font-medium">
+              Reason for Cancellation
+            </label>
+            <select
+              id="cancel-reason"
+              value={reason}
+              onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setReason(e.target.value as CancelReason)}
+              className="mt-1 w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
+            >
+              {CANCEL_REASONS.map((r) => (
+                <option key={r} value={r}>
+                  {r}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Cancel Value */}
+          {cancelValue > 0 && (
+            <div className="rounded-lg bg-destructive/10 border border-destructive/20 p-3 text-sm">
+              <div className="flex justify-between">
+                <span className="text-destructive">Value to Cancel</span>
+                <span className="font-medium text-destructive">
+                  -{formatCurrency(cancelValue, currency)}
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* Actions */}
+          <div className="flex justify-end gap-3 pt-2 border-t">
+            <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>
+              Back
+            </Button>
+            <Button 
+              variant="destructive" 
+              onClick={handleCancel} 
+              disabled={isSaving || qty <= 0 || qty > item.remainingQuantity}
+            >
+              {isSaving ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Cancelling...
+                </>
+              ) : (
+                `Cancel ${qty} Units`
+              )}
             </Button>
           </div>
         </div>

@@ -162,6 +162,9 @@ export async function GET(request: NextRequest) {
         OnRoute: true,
         PriceCAD: true,
         PriceUSD: true,
+        UnitsPerSku: true,
+        UnitPriceCAD: true,
+        UnitPriceUSD: true,
         ShopifyImageURL: true,
         ThumbnailPath: true,
         CollectionID: true,
@@ -281,6 +284,9 @@ interface SkuForPdf {
   OnRoute: number | null
   PriceCAD: string | null
   PriceUSD: string | null
+  UnitsPerSku: number | null
+  UnitPriceCAD: unknown // Decimal from Prisma
+  UnitPriceUSD: unknown // Decimal from Prisma
   ShowInPreOrder: boolean | null
   ShopifyImageURL: string | null
   ThumbnailPath: string | null
@@ -323,7 +329,15 @@ function generateProductsPdfHtml(
         const material = sku.FabricContent ?? ''
         const priceCad = parsePrice(sku.PriceCAD)
         const priceUsd = parsePrice(sku.PriceUSD)
-        const wholesalePrice = formatPrice(priceCad, priceUsd, summary.currency)
+        const packPrice = formatPrice(priceCad, priceUsd, summary.currency)
+
+        // Unit price calculation
+        const unitPriceCad = sku.UnitPriceCAD ? Number(sku.UnitPriceCAD) : priceCad
+        const unitPriceUsd = sku.UnitPriceUSD ? Number(sku.UnitPriceUSD) : priceUsd
+        const unitPrice = formatPrice(unitPriceCad, unitPriceUsd, summary.currency)
+
+        // Units per SKU
+        const unitsPerSku = sku.UnitsPerSku ?? 1
 
         // Get image URL - prefers local thumbnail, falls back to Shopify CDN
         const imageUrl = getImageUrl(sku.ThumbnailPath, sku.ShopifyImageURL)
@@ -336,11 +350,12 @@ function generateProductsPdfHtml(
         const rowClass = sku.isLastInGroup ? 'group-last' : ''
 
         if (isPortrait) {
-          // Portrait layout: consolidated Product column
+          // Portrait layout: consolidated Product column with units info
           // First row: Style (bold), Color • Material, Description
           // Other rows: empty product cell
+          const unitsLabel = unitsPerSku > 1 ? ` (${unitsPerSku}pc)` : ''
           const productCell = sku.isFirstInGroup
-            ? `<div class="product-style">${sku.baseSku}</div>
+            ? `<div class="product-style">${sku.baseSku}${unitsLabel}</div>
                <div class="product-details">${color}${color && material ? ' • ' : ''}${material.substring(0, 25)}</div>
                <div class="product-details">${description.substring(0, 40)}${description.length > 40 ? '...' : ''}</div>`
             : ''
@@ -351,7 +366,8 @@ function generateProductsPdfHtml(
               <td class="product-cell">${productCell}</td>
               <td class="text-center">${sku.size || '—'}</td>
               <td class="text-right">${(sku.Quantity ?? 0).toLocaleString()}</td>
-              <td class="price-cell">${sku.isFirstInGroup ? wholesalePrice : ''}</td>
+              <td class="price-cell">${sku.isFirstInGroup ? packPrice : ''}</td>
+              <td class="price-cell">${sku.isFirstInGroup ? unitPrice : ''}</td>
               <td class="text-center qty-col-portrait"></td>
             </tr>
           `
@@ -364,12 +380,12 @@ function generateProductsPdfHtml(
               <td>${sku.SkuID}</td>
               <td class="desc-cell">${sku.isFirstInGroup ? description.substring(0, 35) + (description.length > 35 ? '...' : '') : ''}</td>
               <td>${sku.isFirstInGroup ? color : ''}</td>
-              <td>${sku.isFirstInGroup ? material.substring(0, 20) : ''}</td>
               <td class="text-center">${sku.size || '—'}</td>
               <td class="text-right">${(sku.Quantity ?? 0).toLocaleString()}</td>
-              <td>${sku.isFirstInGroup ? (sku.Collection?.name ?? '') : ''}</td>
               <td class="text-center">${sku.isFirstInGroup ? (sku.ShowInPreOrder ? 'Pre-Order' : 'ATS') : ''}</td>
-              <td class="price-cell">${sku.isFirstInGroup ? wholesalePrice : ''}</td>
+              <td class="text-center">${sku.isFirstInGroup ? unitsPerSku : ''}</td>
+              <td class="price-cell">${sku.isFirstInGroup ? packPrice : ''}</td>
+              <td class="price-cell">${sku.isFirstInGroup ? unitPrice : ''}</td>
               <td class="text-center qty-col"></td>
             </tr>
           `
@@ -399,7 +415,8 @@ function generateProductsPdfHtml(
           <th>Product</th>
           <th class="text-center">Size</th>
           <th class="text-right">Avail</th>
-          <th>Price</th>
+          <th>Pack Price</th>
+          <th>Unit Price</th>
           <th class="text-center qty-col-portrait">Order Qty</th>
         </tr>`
     : `<tr>
@@ -408,12 +425,12 @@ function generateProductsPdfHtml(
           <th>SKU</th>
           <th>Description</th>
           <th>Color</th>
-          <th>Material</th>
           <th class="text-center">Size</th>
-          <th class="text-right">Available</th>
-          <th>Collection</th>
+          <th class="text-right">Avail</th>
           <th class="text-center">Status</th>
-          <th>Wholesale</th>
+          <th class="text-center">Units</th>
+          <th>Pack Price</th>
+          <th>Unit Price</th>
           <th class="text-center qty-col">Qty</th>
         </tr>`
 

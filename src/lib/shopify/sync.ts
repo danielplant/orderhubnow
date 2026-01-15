@@ -10,6 +10,7 @@ import {
   logThumbnailSyncSummary,
   type ThumbnailSyncItem,
 } from '@/lib/utils/thumbnails'
+import { parseUnitsFromSku, calculateUnitPrice } from '@/lib/utils/units'
 
 // ============================================================================
 // GID Parsing
@@ -877,6 +878,9 @@ export async function transformToSkuTable(options?: { skipBackup?: boolean }): P
       OrderEntryDescription: string | null
       MSRPCAD: string | null
       MSRPUSD: string | null
+      UnitsPerSku: number
+      UnitPriceCAD: number | null
+      UnitPriceUSD: number | null
       DisplayPriority: number
       ShopifyProductVariantId: bigint | null
       ShopifyImageURL: string | null
@@ -900,8 +904,14 @@ export async function transformToSkuTable(options?: { skipBackup?: boolean }): P
           const collectionType = collectionTypeMap.get(collectionId)
           const isPreOrder = collectionType === 'PreOrder'
 
+          // Parse units from SKU prefix (e.g., "2PC-..." → 2)
+          const skuIdUpper = r.SkuID.toUpperCase()
+          const unitsPerSku = parseUnitsFromSku(skuIdUpper)
+          const unitPriceCAD = calculateUnitPrice(r.metafield_cad_ws_price_test, unitsPerSku)
+          const unitPriceUSD = calculateUnitPrice(r.metafield_usd_ws_price, unitsPerSku)
+
           inserts.push({
-            SkuID: r.SkuID.toUpperCase(),
+            SkuID: skuIdUpper,
             Description: r.DisplayName,
             Quantity: r.Quantity,
             Price: r.metafield_cad_ws_price_test && r.metafield_usd_ws_price
@@ -919,6 +929,9 @@ export async function transformToSkuTable(options?: { skipBackup?: boolean }): P
             OrderEntryDescription: r.metafield_order_entry_description,
             MSRPCAD: r.metafield_msrp_cad,
             MSRPUSD: r.metafield_msrp_us,
+            UnitsPerSku: unitsPerSku,
+            UnitPriceCAD: unitPriceCAD,
+            UnitPriceUSD: unitPriceUSD,
             DisplayPriority: 10000,
             ShopifyProductVariantId: r.ShopifyId,
             ShopifyImageURL: r.ShopifyProductImageURL,

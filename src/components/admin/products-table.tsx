@@ -15,6 +15,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
+  SearchInput,
 } from '@/components/ui'
 import type { CurrencyMode } from '@/lib/types/export'
 import { BulkActionsBar } from '@/components/admin/bulk-actions-bar'
@@ -305,8 +306,17 @@ export function ProductsTable({
         ),
       },
       {
-        id: 'wholesalePrice',
-        header: 'Wholesale Price',
+        id: 'units',
+        header: 'Units',
+        cell: (r) => (
+          <span className={cn('text-sm tabular-nums', r.unitsPerSku > 1 ? 'text-purple-600 font-medium' : 'text-muted-foreground')}>
+            {r.unitsPerSku > 1 ? `${r.unitsPerSku}pc` : '1'}
+          </span>
+        ),
+      },
+      {
+        id: 'packPrice',
+        header: 'Pack Price',
         cell: (r) => (
           <span className="text-sm text-muted-foreground">
             {r.priceCad > 0 || r.priceUsd > 0
@@ -314,6 +324,21 @@ export function ProductsTable({
               : '—'}
           </span>
         ),
+      },
+      {
+        id: 'unitPrice',
+        header: 'Unit Price',
+        cell: (r) => {
+          const unitCad = r.unitPriceCad ?? r.priceCad
+          const unitUsd = r.unitPriceUsd ?? r.priceUsd
+          return (
+            <span className={cn('text-sm', r.unitsPerSku > 1 ? 'text-foreground font-medium' : 'text-muted-foreground')}>
+              {unitCad > 0 || unitUsd > 0
+                ? `CAD: ${unitCad.toFixed(2)} / USD: ${unitUsd.toFixed(2)}`
+                : '—'}
+            </span>
+          )
+        },
       },
       {
         id: 'retailPrice',
@@ -418,11 +443,11 @@ export function ProductsTable({
 
         {/* Search + Actions Row */}
         <div className="flex flex-wrap gap-3 p-4">
-          <input
+          <SearchInput
             value={q}
-            onChange={(e) => setParam('q', e.target.value || null)}
+            onValueChange={(v) => setParam('q', v || null)}
             placeholder="Search SKU, description..."
-            className="h-10 w-full max-w-md rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="h-10 w-full max-w-md"
           />
 
           <div className="ml-auto flex gap-2">

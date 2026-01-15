@@ -53,6 +53,10 @@ export interface AdminSkuRow {
   msrpUsdRaw: string | null
   msrpCad: number
   msrpUsd: number
+  // Unit pricing (for prepacks)
+  unitsPerSku: number // 1 for singles, 2 for 2PC, 3 for 3PC, etc.
+  unitPriceCad: number | null
+  unitPriceUsd: number | null
   imageUrl: string | null
 }
 

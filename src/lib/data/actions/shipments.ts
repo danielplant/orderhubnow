@@ -13,9 +13,27 @@ import type {
   TrackingRecord,
   OrderShipmentSummary,
   OrderItemWithFulfillment,
+  Carrier,
+  CreateShipmentResult,
+  UpdateShipmentResult,
+  AddTrackingResult,
+  VoidShipmentInput,
+  VoidShipmentResult,
+  AddOrderItemInput,
+  AddOrderItemResult,
+  UpdateOrderItemInput,
+  UpdateOrderItemResult,
+  RemoveOrderItemResult,
+  CancelOrderItemResult,
+  BulkCancelResult,
+  ResendShipmentEmailInput,
+  ResendShipmentEmailResult,
 } from '@/lib/types/shipment'
 import { getTrackingUrl } from '@/lib/types/shipment'
 import { findShopifyVariant } from '@/lib/data/queries/shopify'
+import { generateShipmentDocuments } from '@/lib/pdf/generate-shipment-documents'
+import { sendShipmentEmails } from '@/lib/email/shipment-email-service'
+import { logShipmentCreated, logShipmentVoided, logItemCancelled } from '@/lib/audit/activity-logger'
 
 // ============================================================================
 // Auth Helper
@@ -30,15 +48,35 @@ async function requireAdmin() {
 }
 
 // ============================================================================
-// Create Shipment
+// Update Order Email
 // ============================================================================
 
-export interface CreateShipmentResult {
-  success: boolean
-  shipmentId?: string
-  shopifyFulfillmentId?: string | null
-  error?: string
+/**
+ * Update the customer email on an order record.
+ */
+export async function updateOrderEmail(
+  orderId: string,
+  email: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    await requireAdmin()
+
+    await prisma.customerOrders.update({
+      where: { ID: BigInt(orderId) },
+      data: { CustomerEmail: email },
+    })
+
+    revalidatePath(`/admin/orders/${orderId}`)
+    return { success: true }
+  } catch (e) {
+    console.error('updateOrderEmail error:', e)
+    return { success: false, error: 'Failed to update email' }
+  }
 }
+
+// ============================================================================
+// Create Shipment
+// ============================================================================
 
 /**
  * Create a new shipment for an order.
@@ -52,6 +90,13 @@ export async function createShipment(
   try {
     const session = await requireAdmin()
     const userName = session.user.name || session.user.loginId
+
+    // Track emails sent for result
+    const emailsSent: {
+      customer?: { email: string; attachments: string[] }
+      rep?: { email: string }
+      shopify?: boolean
+    } = {}
 
     // Validate order exists
     const order = await prisma.customerOrders.findUnique({
@@ -68,6 +113,7 @@ export async function createShipment(
             SKU: true,
             Quantity: true,
             Price: true,
+            CancelledQty: true,
           },
         },
       },
@@ -166,25 +212,41 @@ export async function createShipment(
         shippedByItem.set(key, (shippedByItem.get(key) ?? 0) + si.QuantityShipped)
       }
 
-      // Check if all items fully shipped
+      // Check if all items fully shipped (considering cancelled items)
       let fullyShipped = true
+      const hasShipments = allShipmentItems.length > 0
+      
       for (const orderItem of order.CustomerOrdersItems) {
         const shipped = shippedByItem.get(orderItem.ID.toString()) ?? 0
-        if (shipped < orderItem.Quantity) {
+        const cancelledQty = orderItem.CancelledQty ?? 0
+        const effectiveQuantity = orderItem.Quantity - cancelledQty
+        if (shipped < effectiveQuantity) {
           fullyShipped = false
           break
         }
       }
 
-      // Auto-update status if fully shipped
-      if (fullyShipped) {
-        await tx.customerOrders.update({
-          where: { ID: BigInt(input.orderId) },
-          data: {
-            OrderStatus: 'Shipped',
-            IsShipped: true,
-          },
-        })
+      // Auto-update status based on shipment state
+      // Only update if not already Invoiced or Cancelled
+      const currentStatus = order.OrderStatus
+      if (currentStatus !== 'Invoiced' && currentStatus !== 'Cancelled') {
+        if (fullyShipped) {
+          await tx.customerOrders.update({
+            where: { ID: BigInt(input.orderId) },
+            data: {
+              OrderStatus: 'Shipped',
+              IsShipped: true,
+            },
+          })
+        } else if (hasShipments && currentStatus !== 'Partially Shipped') {
+          // Set to Partially Shipped if there are shipments but not fully shipped
+          await tx.customerOrders.update({
+            where: { ID: BigInt(input.orderId) },
+            data: {
+              OrderStatus: 'Partially Shipped',
+            },
+          })
+        }
       }
 
       return shipment
@@ -198,7 +260,7 @@ export async function createShipment(
           fulfillment: {
             tracking_number: input.tracking?.trackingNumber,
             tracking_company: input.tracking?.carrier,
-            notify_customer: false, // Don't notify - this is wholesale B2B
+            notify_customer: input.notifyShopify ?? false, // Shopify's built-in notification
           },
         })
 
@@ -220,6 +282,161 @@ export async function createShipment(
       }
     }
 
+    // Generate and store shipment documents (packing slip + invoice)
+    try {
+      await generateShipmentDocuments({
+        shipmentId: result.ID.toString(),
+        generatedBy: userName,
+      })
+    } catch (docError) {
+      // Log error but don't fail shipment creation - documents can be regenerated
+      console.warn('Document generation warning:', docError)
+    }
+
+    // Log activity
+    await logShipmentCreated({
+      shipmentId: result.ID.toString(),
+      orderId: input.orderId,
+      orderNumber: order.OrderNumber || '',
+      unitsShipped: input.items.reduce((sum, i) => sum + i.quantityShipped, 0),
+      totalAmount: shippedTotal,
+      performedBy: userName,
+    })
+
+    // Send notification emails if requested
+    if (input.notifyCustomer || input.notifyRep) {
+      try {
+        // Get full order details for email
+        const orderDetails = await prisma.customerOrders.findUnique({
+          where: { ID: BigInt(input.orderId) },
+          select: {
+            OrderNumber: true,
+            StoreName: true,
+            BuyerName: true,
+            CustomerEmail: true,
+            SalesRep: true,
+            OrderAmount: true,
+            Country: true,
+          },
+        })
+
+        // Get all shipments to calculate shipment number and totals
+        const allShipments = await prisma.shipments.findMany({
+          where: { CustomerOrderID: BigInt(input.orderId) },
+          orderBy: { CreatedAt: 'asc' },
+          select: { ID: true, ShippedTotal: true },
+        })
+        const shipmentIndex = allShipments.findIndex((s) => s.ID === result.ID)
+        const shipmentNumber = shipmentIndex + 1
+        const totalShipments = allShipments.length
+        const previouslyShipped = allShipments
+          .filter((s) => s.ID < result.ID)
+          .reduce((sum, s) => sum + (s.ShippedTotal || 0), 0)
+
+        // Get shipped items with SKU details
+        const shipmentItems = await prisma.shipmentItems.findMany({
+          where: { ShipmentID: result.ID },
+          include: {
+            OrderItem: {
+              select: {
+                SKU: true,
+                Price: true,
+              },
+            },
+          },
+        })
+
+        // Get SKU details
+        const skuIds = shipmentItems.map((si) => si.OrderItem?.SKU).filter(Boolean) as string[]
+        const skus = await prisma.sku.findMany({
+          where: { SkuID: { in: skuIds } },
+          select: { SkuID: true, OrderEntryDescription: true, Description: true },
+        })
+        const skuMap = new Map(skus.map((s) => [s.SkuID, s]))
+
+        const emailItems = shipmentItems.map((si) => {
+          const sku = skuMap.get(si.OrderItem?.SKU || '')
+          const unitPrice = si.PriceOverride ?? si.OrderItem?.Price ?? 0
+          return {
+            sku: si.OrderItem?.SKU || 'Unknown',
+            productName: sku?.OrderEntryDescription || sku?.Description || si.OrderItem?.SKU || 'Unknown',
+            quantity: si.QuantityShipped,
+            unitPrice,
+            lineTotal: unitPrice * si.QuantityShipped,
+          }
+        })
+
+        const currency: 'USD' | 'CAD' = orderDetails?.Country === 'Canada' ? 'CAD' : 'USD'
+        const remainingBalance = (orderDetails?.OrderAmount || 0) - previouslyShipped - shippedTotal
+
+        // Get sales rep email
+        let salesRepEmail: string | undefined
+        if (orderDetails?.SalesRep) {
+          const rep = await prisma.reps.findFirst({
+            where: { Name: orderDetails.SalesRep },
+            select: { Email1: true, Email2: true },
+          })
+          salesRepEmail = rep?.Email1 || rep?.Email2 || undefined
+        }
+
+        await sendShipmentEmails({
+          shipmentId: result.ID.toString(),
+          orderId: input.orderId,
+          orderNumber: orderDetails?.OrderNumber || '',
+          storeName: orderDetails?.StoreName || '',
+          buyerName: orderDetails?.BuyerName || '',
+          customerEmail: input.customerEmailOverride || orderDetails?.CustomerEmail || '',
+          salesRep: orderDetails?.SalesRep || '',
+          salesRepEmail,
+          shipmentNumber,
+          totalShipments,
+          shipDate: input.shipDate ? new Date(input.shipDate) : new Date(),
+          carrier: input.tracking?.carrier,
+          trackingNumber: input.tracking?.trackingNumber,
+          items: emailItems,
+          currency,
+          subtotal: shippedSubtotal,
+          shippingCost: input.shippingCost,
+          shipmentTotal: shippedTotal,
+          orderTotal: orderDetails?.OrderAmount || 0,
+          previouslyShipped,
+          remainingBalance: Math.max(0, remainingBalance),
+          notifyCustomer: input.notifyCustomer ?? false,
+          attachInvoice: input.attachInvoice ?? false,
+          attachPackingSlip: input.attachPackingSlip ?? false,
+          notifyRep: input.notifyRep ?? false,
+        })
+
+        // Track what was sent
+        const effectiveEmail = input.customerEmailOverride || orderDetails?.CustomerEmail || ''
+        if (input.notifyCustomer && effectiveEmail) {
+          const attachments: string[] = []
+          if (input.attachInvoice) attachments.push('Invoice PDF')
+          if (input.attachPackingSlip) attachments.push('Packing Slip PDF')
+          emailsSent.customer = { email: effectiveEmail, attachments }
+        }
+        if (input.notifyRep && orderDetails?.SalesRep) {
+          // Get rep email from Reps table
+          const rep = await prisma.reps.findFirst({
+            where: { Name: orderDetails.SalesRep },
+            select: { Email1: true, Email2: true },
+          })
+          const repEmailAddr = rep?.Email1 || rep?.Email2
+          if (repEmailAddr) {
+            emailsSent.rep = { email: repEmailAddr }
+          }
+        }
+      } catch (emailError) {
+        // Log error but don't fail shipment creation
+        console.warn('Email sending warning:', emailError)
+      }
+    }
+
+    // Track Shopify notification
+    if (input.notifyShopify && shopifyFulfillmentId) {
+      emailsSent.shopify = true
+    }
+
     revalidatePath('/admin/orders')
     revalidatePath(`/admin/orders/${input.orderId}`)
 
@@ -227,6 +444,7 @@ export async function createShipment(
       success: true,
       shipmentId: result.ID.toString(),
       shopifyFulfillmentId,
+      emailsSent: Object.keys(emailsSent).length > 0 ? emailsSent : undefined,
     }
   } catch (e) {
     console.error('createShipment error:', e)
@@ -238,11 +456,6 @@ export async function createShipment(
 // ============================================================================
 // Update Shipment
 // ============================================================================
-
-export interface UpdateShipmentResult {
-  success: boolean
-  error?: string
-}
 
 /**
  * Update an existing shipment.
@@ -298,12 +511,6 @@ export async function updateShipment(
 // Add Tracking Number
 // ============================================================================
 
-export interface AddTrackingResult {
-  success: boolean
-  trackingId?: string
-  error?: string
-}
-
 /**
  * Add a tracking number to an existing shipment.
  */
@@ -343,6 +550,152 @@ export async function addTrackingNumber(
     console.error('addTrackingNumber error:', e)
     const message =
       e instanceof Error ? e.message : 'Failed to add tracking number'
+    return { success: false, error: message }
+  }
+}
+
+// ============================================================================
+// Void Shipment
+// ============================================================================
+
+/**
+ * Void a shipment - marks it as voided without deleting (preserves audit trail).
+ * Recalculates order status based on remaining non-voided shipments.
+ */
+export async function voidShipment(input: VoidShipmentInput): Promise<VoidShipmentResult> {
+  try {
+    const session = await requireAdmin()
+    const userName = session?.user?.name || session?.user?.loginId || 'System'
+
+    const shipment = await prisma.shipments.findUnique({
+      where: { ID: BigInt(input.shipmentId) },
+      select: {
+        ID: true,
+        CustomerOrderID: true,
+        VoidedAt: true,
+        CustomerOrders: {
+          select: {
+            ID: true,
+            OrderNumber: true,
+            OrderStatus: true,
+            CustomerOrdersItems: {
+              select: {
+                ID: true,
+                Quantity: true,
+                CancelledQty: true,
+              },
+            },
+          },
+        },
+      },
+    })
+
+    if (!shipment) {
+      return { success: false, error: 'Shipment not found' }
+    }
+
+    if (shipment.VoidedAt) {
+      return { success: false, error: 'Shipment is already voided' }
+    }
+
+    const orderId = shipment.CustomerOrderID.toString()
+    const order = shipment.CustomerOrders
+    const currentStatus = order.OrderStatus
+
+    // Don't allow voiding on invoiced orders
+    if (currentStatus === 'Invoiced') {
+      return { success: false, error: 'Cannot void shipments on invoiced orders' }
+    }
+
+    // Mark shipment as voided (soft delete)
+    await prisma.shipments.update({
+      where: { ID: BigInt(input.shipmentId) },
+      data: {
+        VoidedAt: new Date(),
+        VoidedBy: userName,
+        VoidReason: input.reason,
+        VoidNotes: input.notes?.trim() || null,
+      },
+    })
+
+    // Recalculate order status based on remaining non-voided shipments
+    const remainingShipments = await prisma.shipments.findMany({
+      where: {
+        CustomerOrderID: BigInt(orderId),
+        VoidedAt: null,
+      },
+      include: {
+        ShipmentItems: {
+          select: {
+            OrderItemID: true,
+            QuantityShipped: true,
+          },
+        },
+      },
+    })
+
+    // Sum shipped quantities from non-voided shipments
+    const shippedByItem = new Map<string, number>()
+    for (const s of remainingShipments) {
+      for (const si of s.ShipmentItems) {
+        const key = si.OrderItemID.toString()
+        shippedByItem.set(key, (shippedByItem.get(key) ?? 0) + si.QuantityShipped)
+      }
+    }
+
+    // Determine new order status
+    const hasAnyShipments = remainingShipments.length > 0
+    let fullyShipped = true
+
+    for (const orderItem of order.CustomerOrdersItems) {
+      const shipped = shippedByItem.get(orderItem.ID.toString()) ?? 0
+      const cancelledQty = orderItem.CancelledQty ?? 0
+      const effectiveQuantity = orderItem.Quantity - cancelledQty
+      if (shipped < effectiveQuantity) {
+        fullyShipped = false
+        break
+      }
+    }
+
+    // Update order status if needed
+    if (currentStatus !== 'Cancelled') {
+      let newStatus: string
+      if (fullyShipped && hasAnyShipments) {
+        newStatus = 'Shipped'
+      } else if (hasAnyShipments) {
+        newStatus = 'Partially Shipped'
+      } else {
+        newStatus = 'Pending'
+      }
+
+      if (newStatus !== currentStatus) {
+        await prisma.customerOrders.update({
+          where: { ID: BigInt(orderId) },
+          data: {
+            OrderStatus: newStatus,
+            IsShipped: newStatus === 'Shipped',
+          },
+        })
+      }
+    }
+
+    // Log activity
+    await logShipmentVoided({
+      shipmentId: input.shipmentId,
+      orderId,
+      orderNumber: order.OrderNumber || '',
+      reason: input.notes ? `${input.reason}: ${input.notes}` : input.reason,
+      performedBy: userName,
+    })
+
+    revalidatePath('/admin/orders')
+    revalidatePath(`/admin/orders/${orderId}`)
+    revalidatePath('/admin/open-items')
+
+    return { success: true }
+  } catch (e) {
+    console.error('voidShipment error:', e)
+    const message = e instanceof Error ? e.message : 'Failed to void shipment'
     return { success: false, error: message }
   }
 }
@@ -426,6 +779,12 @@ export async function getShipmentsForOrder(orderId: string): Promise<ShipmentRow
           createdAt: s.CreatedAt.toISOString(),
           updatedAt: s.UpdatedAt?.toISOString() ?? null,
           shopifyFulfillmentId: s.ShopifyFulfillmentID,
+          // Void status
+          isVoided: s.VoidedAt !== null,
+          voidedAt: s.VoidedAt?.toISOString() ?? null,
+          voidedBy: s.VoidedBy ?? null,
+          voidReason: s.VoidReason ?? null,
+          voidNotes: s.VoidNotes ?? null,
           tracking: s.ShipmentTracking.map((t): TrackingRecord => ({
             id: t.ID.toString(),
             carrier: t.Carrier as TrackingRecord['carrier'],
@@ -547,6 +906,11 @@ export async function getOrderItemsWithFulfillment(
             Price: true,
             PriceCurrency: true,
             Notes: true,
+            Status: true,
+            CancelledQty: true,
+            CancelledReason: true,
+            CancelledAt: true,
+            CancelledBy: true,
           },
         },
       },
@@ -577,6 +941,19 @@ export async function getOrderItemsWithFulfillment(
     const itemsWithShopify = await Promise.all(
       order.CustomerOrdersItems.map(async (item) => {
         const shippedQty = shippedByItem.get(item.ID.toString()) ?? 0
+        const cancelledQty = item.CancelledQty ?? 0
+        const remainingQty = Math.max(0, item.Quantity - shippedQty - cancelledQty)
+
+        // Determine status
+        let status: 'Open' | 'Shipped' | 'Cancelled' = (item.Status as 'Open' | 'Shipped' | 'Cancelled') || 'Open'
+        if (status === 'Open') {
+          // Auto-determine status based on quantities
+          if (cancelledQty >= item.Quantity) {
+            status = 'Cancelled'
+          } else if (shippedQty >= item.Quantity - cancelledQty) {
+            status = 'Shipped'
+          }
+        }
 
         // Look up clean Shopify SKU
         const shopifyVariant = await findShopifyVariant(
@@ -591,10 +968,15 @@ export async function getOrderItemsWithFulfillment(
           productName: item.Notes || item.SKU,
           orderedQuantity: item.Quantity,
           shippedQuantity: shippedQty,
-          remainingQuantity: Math.max(0, item.Quantity - shippedQty),
+          cancelledQuantity: cancelledQty,
+          remainingQuantity: remainingQty,
           unitPrice: item.Price,
           priceCurrency: item.PriceCurrency,
           notes: item.Notes,
+          status,
+          cancelledReason: (item.CancelledReason as OrderItemWithFulfillment['cancelledReason']) ?? null,
+          cancelledAt: item.CancelledAt?.toISOString() ?? null,
+          cancelledBy: item.CancelledBy ?? null,
         } satisfies OrderItemWithFulfillment
       })
     )
@@ -629,20 +1011,6 @@ export async function getShippedTotalForOrder(orderId: string): Promise<number> 
 // ============================================================================
 // Order Adjustments (Add/Edit/Remove Items)
 // ============================================================================
-
-export interface AddOrderItemInput {
-  orderId: string
-  sku: string
-  quantity: number
-  price: number
-  notes?: string
-}
-
-export interface AddOrderItemResult {
-  success: boolean
-  itemId?: string
-  error?: string
-}
 
 /**
  * Add a new item to an existing order.
@@ -704,18 +1072,6 @@ export async function addOrderItem(input: AddOrderItemInput): Promise<AddOrderIt
   }
 }
 
-export interface UpdateOrderItemInput {
-  itemId: string
-  quantity?: number
-  price?: number
-  notes?: string
-}
-
-export interface UpdateOrderItemResult {
-  success: boolean
-  error?: string
-}
-
 /**
  * Update an existing order item's quantity, price, or notes.
  */
@@ -770,11 +1126,6 @@ export async function updateOrderItem(input: UpdateOrderItemInput): Promise<Upda
     const message = e instanceof Error ? e.message : 'Failed to update item'
     return { success: false, error: message }
   }
-}
-
-export interface RemoveOrderItemResult {
-  success: boolean
-  error?: string
 }
 
 /**
@@ -854,6 +1205,204 @@ async function recalculateOrderTotal(orderId: string): Promise<number> {
   })
 
   return items.reduce((sum, item) => sum + (item.Quantity * item.Price), 0)
+}
+
+// ============================================================================
+// Cancel Order Item
+// ============================================================================
+
+/**
+ * Cancel all or part of an order item's quantity.
+ * Used when items are no longer available (out of stock, discontinued, etc.)
+ */
+export async function cancelOrderItem(
+  itemId: string,
+  quantity: number,
+  reason: string
+): Promise<CancelOrderItemResult> {
+  try {
+    const session = await requireAdmin()
+    const userName = session.user.name || session.user.loginId
+
+    const item = await prisma.customerOrdersItems.findUnique({
+      where: { ID: BigInt(itemId) },
+      select: {
+        ID: true,
+        SKU: true,
+        Quantity: true,
+        CustomerOrderID: true,
+        CancelledQty: true,
+        CustomerOrders: {
+          select: { OrderNumber: true, OrderStatus: true },
+        },
+      },
+    })
+
+    if (!item) {
+      return { success: false, error: 'Item not found' }
+    }
+
+    // Don't allow adjustments to invoiced or cancelled orders
+    const status = item.CustomerOrders.OrderStatus
+    if (status === 'Invoiced' || status === 'Cancelled') {
+      return { success: false, error: `Cannot modify ${status.toLowerCase()} orders` }
+    }
+
+    // Get shipped quantity
+    const shippedItems = await prisma.shipmentItems.findMany({
+      where: { OrderItemID: BigInt(itemId) },
+      select: { QuantityShipped: true },
+    })
+    const totalShipped = shippedItems.reduce((sum, si) => sum + si.QuantityShipped, 0)
+
+    // Calculate max cancellable quantity
+    const currentCancelled = item.CancelledQty ?? 0
+    const maxCancellable = item.Quantity - totalShipped - currentCancelled
+
+    if (quantity <= 0) {
+      return { success: false, error: 'Quantity must be greater than 0' }
+    }
+
+    if (quantity > maxCancellable) {
+      return {
+        success: false,
+        error: `Cannot cancel ${quantity} units. Only ${maxCancellable} units are available to cancel.`,
+      }
+    }
+
+    const newCancelledQty = currentCancelled + quantity
+    const newStatus = newCancelledQty >= item.Quantity - totalShipped ? 'Cancelled' : 'Open'
+
+    await prisma.customerOrdersItems.update({
+      where: { ID: BigInt(itemId) },
+      data: {
+        CancelledQty: newCancelledQty,
+        CancelledReason: reason,
+        CancelledAt: new Date(),
+        CancelledBy: userName,
+        Status: newStatus,
+      },
+    })
+
+    const orderId = item.CustomerOrderID.toString()
+
+    // Log activity
+    await logItemCancelled({
+      itemId,
+      orderId,
+      orderNumber: item.CustomerOrders.OrderNumber || '',
+      sku: item.SKU,
+      quantity,
+      reason,
+      performedBy: userName,
+    })
+
+    revalidatePath('/admin/orders')
+    revalidatePath(`/admin/orders/${orderId}`)
+
+    return { success: true }
+  } catch (e) {
+    console.error('cancelOrderItem error:', e)
+    const message = e instanceof Error ? e.message : 'Failed to cancel item'
+    return { success: false, error: message }
+  }
+}
+
+// ============================================================================
+// Bulk Cancel Items
+// ============================================================================
+
+/**
+ * Cancel all remaining units for multiple order items at once.
+ */
+export async function bulkCancelItems(
+  itemIds: string[],
+  reason: string
+): Promise<BulkCancelResult> {
+  try {
+    const session = await requireAdmin()
+    const userName = session.user.name || session.user.loginId
+
+    if (itemIds.length === 0) {
+      return { success: false, error: 'No items to cancel' }
+    }
+
+    // Get all items with their shipped quantities
+    const items = await prisma.customerOrdersItems.findMany({
+      where: { ID: { in: itemIds.map((id) => BigInt(id)) } },
+      select: {
+        ID: true,
+        SKU: true,
+        Quantity: true,
+        CustomerOrderID: true,
+        CancelledQty: true,
+        CustomerOrders: {
+          select: { OrderStatus: true },
+        },
+      },
+    })
+
+    // Get shipped quantities for all items
+    const shipmentItems = await prisma.shipmentItems.findMany({
+      where: { OrderItemID: { in: itemIds.map((id) => BigInt(id)) } },
+      select: {
+        OrderItemID: true,
+        QuantityShipped: true,
+      },
+    })
+
+    // Build shipped quantity map
+    const shippedByItem = new Map<string, number>()
+    for (const si of shipmentItems) {
+      const key = si.OrderItemID.toString()
+      shippedByItem.set(key, (shippedByItem.get(key) ?? 0) + si.QuantityShipped)
+    }
+
+    // Process each item
+    let cancelledCount = 0
+    const orderIdsToRevalidate = new Set<string>()
+
+    for (const item of items) {
+      // Skip invoiced/cancelled orders
+      const status = item.CustomerOrders.OrderStatus
+      if (status === 'Invoiced' || status === 'Cancelled') {
+        continue
+      }
+
+      const itemIdStr = item.ID.toString()
+      const totalShipped = shippedByItem.get(itemIdStr) ?? 0
+      const currentCancelled = item.CancelledQty ?? 0
+      const remainingToCancelQty = item.Quantity - totalShipped - currentCancelled
+
+      if (remainingToCancelQty > 0) {
+        await prisma.customerOrdersItems.update({
+          where: { ID: item.ID },
+          data: {
+            CancelledQty: currentCancelled + remainingToCancelQty,
+            CancelledReason: reason,
+            CancelledAt: new Date(),
+            CancelledBy: userName,
+            Status: 'Cancelled',
+          },
+        })
+        cancelledCount++
+        orderIdsToRevalidate.add(item.CustomerOrderID.toString())
+      }
+    }
+
+    // Revalidate all affected pages
+    revalidatePath('/admin/orders')
+    revalidatePath('/admin/open-items')
+    for (const orderId of orderIdsToRevalidate) {
+      revalidatePath(`/admin/orders/${orderId}`)
+    }
+
+    return { success: true, cancelledCount }
+  } catch (e) {
+    console.error('bulkCancelItems error:', e)
+    const message = e instanceof Error ? e.message : 'Failed to cancel items'
+    return { success: false, error: message }
+  }
 }
 
 // ============================================================================
@@ -968,5 +1517,161 @@ export async function getShipmentSummariesForOrders(
   } catch (e) {
     console.error('getShipmentSummariesForOrders error:', e)
     return new Map()
+  }
+}
+
+// ============================================================================
+// Resend Shipment Email
+// ============================================================================
+
+/**
+ * Resend shipment notification email.
+ */
+export async function resendShipmentEmail(
+  input: ResendShipmentEmailInput
+): Promise<ResendShipmentEmailResult> {
+  try {
+    await requireAdmin()
+
+    // Fetch shipment with all needed data
+    const shipment = await prisma.shipments.findUnique({
+      where: { ID: BigInt(input.shipmentId) },
+      include: {
+        ShipmentItems: {
+          include: {
+            OrderItem: {
+              select: {
+                ID: true,
+                SKU: true,
+                Price: true,
+              },
+            },
+          },
+        },
+        ShipmentTracking: true,
+        CustomerOrders: {
+          select: {
+            ID: true,
+            OrderNumber: true,
+            StoreName: true,
+            BuyerName: true,
+            CustomerEmail: true,
+            SalesRep: true,
+            OrderAmount: true,
+            Country: true,
+            RepID: true,
+          },
+        },
+      },
+    })
+
+    if (!shipment) {
+      return { success: false, error: 'Shipment not found' }
+    }
+
+    if (shipment.VoidedAt) {
+      return { success: false, error: 'Cannot resend email for voided shipment' }
+    }
+
+    const order = shipment.CustomerOrders
+
+    // Get rep email if sending to rep
+    let repEmail: string | undefined
+    if (input.recipient === 'rep' && order.RepID) {
+      const rep = await prisma.reps.findUnique({
+        where: { ID: order.RepID },
+        select: { Email1: true },
+      })
+      repEmail = rep?.Email1 || undefined
+    }
+
+    if (input.recipient === 'rep' && !repEmail) {
+      return { success: false, error: 'Rep email not found' }
+    }
+
+    // Count shipments for this order
+    const totalShipments = await prisma.shipments.count({
+      where: { CustomerOrderID: order.ID, VoidedAt: null },
+    })
+
+    const shipmentsBeforeThis = await prisma.shipments.count({
+      where: {
+        CustomerOrderID: order.ID,
+        ID: { lt: shipment.ID },
+        VoidedAt: null,
+      },
+    })
+    const shipmentNumber = shipmentsBeforeThis + 1
+
+    // Calculate previously shipped
+    const previousShipments = await prisma.shipments.findMany({
+      where: {
+        CustomerOrderID: order.ID,
+        ID: { lt: shipment.ID },
+        VoidedAt: null,
+      },
+      select: { ShippedTotal: true },
+    })
+    const previouslyShipped = previousShipments.reduce((sum, s) => sum + s.ShippedTotal, 0)
+
+    // Get SKU details for items
+    const skuIds = shipment.ShipmentItems.map((si) => si.OrderItem?.SKU).filter(Boolean) as string[]
+    const skus = await prisma.sku.findMany({
+      where: { SkuID: { in: skuIds } },
+      select: { SkuID: true, OrderEntryDescription: true, Description: true },
+    })
+    const skuMap = new Map(skus.map((s) => [s.SkuID, s]))
+
+    const emailItems = shipment.ShipmentItems.map((si) => {
+      const sku = skuMap.get(si.OrderItem?.SKU || '')
+      const unitPrice = si.PriceOverride ?? si.OrderItem?.Price ?? 0
+      return {
+        sku: si.OrderItem?.SKU || 'Unknown',
+        productName: sku?.OrderEntryDescription || sku?.Description || si.OrderItem?.SKU || 'Unknown',
+        quantity: si.QuantityShipped,
+        unitPrice,
+        lineTotal: unitPrice * si.QuantityShipped,
+      }
+    })
+
+    const currency: 'USD' | 'CAD' = order.Country === 'Canada' ? 'CAD' : 'USD'
+    const remainingBalance = Math.max(0, (order.OrderAmount || 0) - previouslyShipped - shipment.ShippedTotal)
+
+    // Get tracking info
+    const tracking = shipment.ShipmentTracking[0]
+
+    await sendShipmentEmails({
+      shipmentId: input.shipmentId,
+      orderId: order.ID.toString(),
+      orderNumber: order.OrderNumber || '',
+      storeName: order.StoreName || '',
+      buyerName: order.BuyerName || '',
+      customerEmail: order.CustomerEmail || '',
+      salesRep: order.SalesRep || '',
+      salesRepEmail: repEmail,
+      shipmentNumber,
+      totalShipments,
+      shipDate: shipment.ShipDate || new Date(),
+      carrier: input.includeTracking && tracking ? (tracking.Carrier as Carrier) : undefined,
+      trackingNumber: input.includeTracking && tracking ? tracking.TrackingNumber : undefined,
+      items: emailItems,
+      currency,
+      subtotal: shipment.ShippedSubtotal,
+      shippingCost: shipment.ShippingCost,
+      shipmentTotal: shipment.ShippedTotal,
+      orderTotal: order.OrderAmount || 0,
+      previouslyShipped,
+      remainingBalance,
+      notifyCustomer: input.recipient === 'customer',
+      attachInvoice: input.attachInvoice,
+      attachPackingSlip: false,
+      notifyRep: input.recipient === 'rep',
+    })
+
+    return { success: true }
+  } catch (e) {
+    console.error('resendShipmentEmail error:', e)
+    const message = e instanceof Error ? e.message : 'Failed to resend email'
+    return { success: false, error: message }
   }
 }

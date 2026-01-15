@@ -16,6 +16,7 @@ const statusBadgeVariants = cva(
       status: {
         pending: 'bg-muted border-border text-warning',
         processing: 'bg-muted border-border text-info',
+        'partially-shipped': 'bg-warning/10 border-warning/20 text-warning',
         shipped: 'bg-muted border-border text-success',
         invoiced: 'bg-preorder-bg border-preorder/20 text-preorder-text',
         cancelled: 'bg-muted border-border text-error',

@@ -13,8 +13,9 @@ export type NavItem = {
 
 export const adminNav: NavItem[] = [
   { name: 'Dashboard', path: '/admin' },
-  { name: 'Reports', path: '/admin/reports' },  // NEW: Reports link
+  { name: 'Reports', path: '/admin/reports' },
   { name: 'Orders', path: '/admin/orders' },
+  { name: 'Open Items', path: '/admin/open-items' },
   { name: 'Products', path: '/admin/products' },
   { name: 'Collections', path: '/admin/collections' },
   { name: 'Inventory', path: '/admin/inventory' },

@@ -2,19 +2,7 @@
 
 import { prisma } from '@/lib/prisma'
 import { auth } from '@/lib/auth/providers'
-
-export interface LogFeatureInterestInput {
-  feature: string
-  selectedOptions?: string[]
-  freeText?: string
-  orderId?: string
-  orderNumber?: string
-}
-
-export interface LogFeatureInterestResult {
-  success: boolean
-  error?: string
-}
+import type { LogFeatureInterestInput, LogFeatureInterestResult } from '@/lib/types/feature-interest'
 
 /**
  * Log user interest in an upcoming feature.

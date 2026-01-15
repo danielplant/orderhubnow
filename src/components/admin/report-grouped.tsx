@@ -10,6 +10,7 @@
 import * as React from 'react';
 import { ChevronDown, ChevronRight, ChevronsUpDown } from 'lucide-react';
 import { cn, formatPrice } from '@/lib/utils';
+import { formatDate } from '@/lib/utils/format';
 import { Button } from '@/components/ui/button';
 import type { ColumnDefinition } from '@/lib/types/report';
 
@@ -159,7 +160,7 @@ export function ReportGrouped<T extends Record<string, unknown>>({
       case 'percent':
         return `${(Number(value) * 100).toFixed(1)}%`;
       case 'date':
-        return new Date(value as string).toLocaleDateString();
+        return formatDate(value as string);
       default:
         return String(value);
     }

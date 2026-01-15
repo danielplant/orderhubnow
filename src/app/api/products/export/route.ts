@@ -148,6 +148,9 @@ export async function GET(request: NextRequest) {
         OnRoute: true,
         PriceCAD: true,
         PriceUSD: true,
+        UnitsPerSku: true,
+        UnitPriceCAD: true,
+        UnitPriceUSD: true,
         ShopifyImageURL: true,
         ThumbnailPath: true,
         CollectionID: true,
@@ -205,7 +208,7 @@ export async function GET(request: NextRequest) {
       : EXPORT_COLUMNS
 
     // Track which column keys are numeric for alignment
-    const numericColumnKeys = new Set(['available', 'onRoute', 'orderQty'])
+    const numericColumnKeys = new Set(['available', 'onRoute', 'units', 'orderQty'])
 
     // Set up columns from config
     sheet.columns = exportColumns.map((col) => ({
@@ -240,10 +243,18 @@ export async function GET(request: NextRequest) {
       const sku = skus[i]
       const rowIndex = i + 2 // 1-based, skip header
 
-      // Format prices based on currency mode
+      // Format pack prices based on currency mode
       const priceCad = parsePrice(sku.PriceCAD)
       const priceUsd = parsePrice(sku.PriceUSD)
-      const wholesalePrice = formatPrice(priceCad, priceUsd, currency)
+      const packPrice = formatPrice(priceCad, priceUsd, currency)
+
+      // Format unit prices based on currency mode
+      const unitPriceCad = sku.UnitPriceCAD ? Number(sku.UnitPriceCAD) : priceCad
+      const unitPriceUsd = sku.UnitPriceUSD ? Number(sku.UnitPriceUSD) : priceUsd
+      const unitPrice = formatPrice(unitPriceCad, unitPriceUsd, currency)
+
+      // Units per SKU (1 for singles, 2 for 2PC prepacks, etc.)
+      const unitsPerSku = sku.UnitsPerSku ?? 1
 
       // Resolve description and color with fallbacks
       const description = sku.OrderEntryDescription ?? sku.Description ?? ''
@@ -261,7 +272,9 @@ export async function GET(request: NextRequest) {
         available: sku.Quantity ?? 0,
         collection: sku.isFirstInGroup ? (sku.Collection?.name ?? '') : '',
         status: sku.isFirstInGroup ? (sku.ShowInPreOrder ? 'Pre-Order' : 'ATS') : '',
-        wholesale: sku.isFirstInGroup ? wholesalePrice : '',
+        units: sku.isFirstInGroup ? unitsPerSku : '',
+        packPrice: sku.isFirstInGroup ? packPrice : '',
+        unitPrice: sku.isFirstInGroup ? unitPrice : '',
         orderQty: '', // Empty for reps to fill
       }
 

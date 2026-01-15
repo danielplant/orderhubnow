@@ -73,7 +73,9 @@ export const EXPORT_COLUMNS: ExportColumn[] = [
   { key: 'onRoute', header: 'On Route', width: 8, type: 'number', firstRowOnly: false },
   { key: 'collection', header: 'Collection', width: 14, type: 'text', firstRowOnly: true },
   { key: 'status', header: 'Status', width: 8, type: 'text', firstRowOnly: true },
-  { key: 'wholesale', header: 'Wholesale', width: 10, type: 'currency', firstRowOnly: true },
+  { key: 'units', header: 'Units', width: 6, type: 'number', firstRowOnly: true },
+  { key: 'packPrice', header: 'Pack Price', width: 12, type: 'currency', firstRowOnly: true },
+  { key: 'unitPrice', header: 'Unit Price', width: 12, type: 'currency', firstRowOnly: true },
   { key: 'orderQty', header: 'Qty', width: 6, type: 'number', firstRowOnly: false },
 ]
 

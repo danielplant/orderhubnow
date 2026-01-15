@@ -93,6 +93,50 @@ export interface ShopifyTransferResult {
 }
 
 // ============================================================================
+// Order Validation (Pre-Transfer Check)
+// ============================================================================
+
+export type InventoryItemStatus = 'ok' | 'partial' | 'backorder'
+
+export interface InventoryStatusItem {
+  sku: string
+  ordered: number
+  available: number
+  status: InventoryItemStatus
+}
+
+export interface ShopifyValidationResult {
+  valid: boolean
+  orderId: string
+  orderNumber: string
+  storeName: string
+  orderAmount: number
+  itemCount: number
+  missingSkus: string[]
+  customerEmail: string | null
+  customerExists: boolean
+  inventoryStatus: InventoryStatusItem[]
+}
+
+// ============================================================================
+// Bulk Transfer
+// ============================================================================
+
+export interface BulkTransferOrderResult {
+  orderId: string
+  orderNumber: string
+  success: boolean
+  shopifyOrderNumber?: string
+  error?: string
+}
+
+export interface BulkTransferResult {
+  success: number
+  failed: number
+  results: BulkTransferOrderResult[]
+}
+
+// ============================================================================
 // Synced Products (for future enhancement)
 // ============================================================================
 
@@ -123,4 +167,24 @@ export interface AddMissingSkuInput {
   description?: string
   fabricContent?: string
   skuColor?: string
+}
+
+// ============================================================================
+// Order Status Sync
+// ============================================================================
+
+export interface SyncOrderStatusResult {
+  success: boolean
+  orderId: string
+  shopifyOrderId?: string
+  fulfillmentStatus?: string | null
+  financialStatus?: string | null
+  error?: string
+}
+
+export interface BulkSyncResult {
+  success: boolean
+  synced: number
+  failed: number
+  errors: Array<{ orderId: string; error: string }>
 }

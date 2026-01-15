@@ -19,7 +19,9 @@ export interface InventoryListItem {
   quantity: number
   onRoute: number
   effectiveQuantity: number
-  prepackMultiplier: 1 | 2 | 3 | 6
+  prepackMultiplier: number // 1 for singles, 2+ for prepacks
+  unitPriceCad: number | null
+  unitPriceUsd: number | null
   lastUpdated: string | null // ISO string for serialization
   isLowStock: boolean
   isOutOfStock: boolean
@@ -153,6 +155,9 @@ export async function getInventoryList(
         Quantity: true,
         OnRoute: true,
         DateModified: true,
+        UnitsPerSku: true,
+        UnitPriceCAD: true,
+        UnitPriceUSD: true,
       },
     }),
     prisma.sku.count({ where }),
@@ -164,11 +169,8 @@ export async function getInventoryList(
     // Effective quantity is the prepack-adjusted quantity (not including onRoute)
     const effective = getEffectiveQuantity(r.SkuID, qty)
 
-    let prepackMultiplier: 1 | 2 | 3 | 6 = 1
-    const lower = r.SkuID.toLowerCase()
-    if (lower.includes('pp-')) {
-      prepackMultiplier = lower.includes('2pc') ? 2 : lower.includes('3pc') ? 3 : 6
-    }
+    // Use database field if available, otherwise fall back to SKU parsing
+    const prepackMultiplier = r.UnitsPerSku ?? 1
 
     return {
       skuId: r.SkuID,
@@ -177,6 +179,8 @@ export async function getInventoryList(
       onRoute,
       effectiveQuantity: effective,
       prepackMultiplier,
+      unitPriceCad: r.UnitPriceCAD ? Number(r.UnitPriceCAD) : null,
+      unitPriceUsd: r.UnitPriceUSD ? Number(r.UnitPriceUSD) : null,
       lastUpdated: r.DateModified?.toISOString() ?? null,
       isLowStock: qty > 0 && qty <= lowThreshold,
       isOutOfStock: qty === 0,

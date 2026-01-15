@@ -15,10 +15,10 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  SearchInput,
 } from '@/components/ui'
 import type { Customer } from '@/lib/types/customer'
 import { createCustomer, updateCustomer, deleteCustomer } from '@/lib/data/actions/customers'
-import { cn } from '@/lib/utils'
 import {
   MoreHorizontal,
   Plus,
@@ -321,7 +321,7 @@ export function CustomersTable({ initialCustomers, total, reps }: CustomersTable
         ),
       },
     ],
-    [router]
+    [router, codeToName, openModal]
   )
 
   return (
@@ -329,11 +329,11 @@ export function CustomersTable({ initialCustomers, total, reps }: CustomersTable
       {/* Filters + Actions */}
       <div className="rounded-md border border-border bg-background">
         <div className="flex flex-wrap gap-3 p-4 items-center">
-          <input
+          <SearchInput
             value={q}
-            onChange={(e) => setParam('q', e.target.value || null)}
+            onValueChange={(v) => setParam('q', v || null)}
             placeholder="Search by store name, email, or rep..."
-            className="h-10 w-full max-w-md rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="h-10 w-full max-w-md"
           />
 
           <div className="ml-auto flex gap-2 items-center">
