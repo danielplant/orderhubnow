@@ -33,6 +33,7 @@ export type {
 // Admin product types
 export type {
   InventoryTab,
+  CollectionFilterMode,
   ProductsSortColumn,
   ProductsListInput,
   AdminSkuRow,

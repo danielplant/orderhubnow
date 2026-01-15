@@ -12,6 +12,8 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
+import fs from 'fs'
+import path from 'path'
 import { auth } from '@/lib/auth/providers'
 import { prisma } from '@/lib/prisma'
 import { generatePdf, wrapHtml, formatDate } from '@/lib/pdf/generate'
@@ -40,6 +42,16 @@ function parseCurrencyMode(value: string | undefined): CurrencyMode {
 }
 
 /**
+ * Parse orientation from query param
+ */
+function parseOrientation(value: string | undefined): 'landscape' | 'portrait' {
+  if (value === 'portrait') {
+    return 'portrait'
+  }
+  return 'landscape' // Default
+}
+
+/**
  * Format price based on currency mode
  */
 function formatPrice(priceCAD: number, priceUSD: number, mode: CurrencyMode): string {
@@ -56,6 +68,33 @@ function formatPrice(priceCAD: number, priceUSD: number, mode: CurrencyMode): st
   }
 }
 
+/**
+ * Get image URL for PDF - prefers local thumbnail (as base64), falls back to Shopify CDN
+ * Local thumbnails are faster and already optimized
+ */
+function getImageUrl(thumbnailPath: string | null, shopifyUrl: string | null): string | null {
+  // Try local thumbnail first (faster, already optimized)
+  if (thumbnailPath) {
+    try {
+      const fullPath = path.join(process.cwd(), 'public', thumbnailPath)
+      if (fs.existsSync(fullPath)) {
+        const buffer = fs.readFileSync(fullPath)
+        const base64 = buffer.toString('base64')
+        return `data:image/png;base64,${base64}`
+      }
+    } catch {
+      // Fall through to Shopify CDN
+    }
+  }
+
+  // Fallback to Shopify CDN with resize
+  if (shopifyUrl) {
+    return `${shopifyUrl}${shopifyUrl.includes('?') ? '&' : '?'}width=100`
+  }
+
+  return null
+}
+
 // ============================================================================
 // Main Handler
 // ============================================================================
@@ -70,11 +109,12 @@ export async function GET(request: NextRequest) {
 
     // Parse query params
     const searchParams = Object.fromEntries(request.nextUrl.searchParams.entries())
-    const tab = getString(searchParams.tab) ?? 'all'
     const q = getString(searchParams.q)
-    const collectionIdStr = getString(searchParams.collectionId)
-    const collectionId = collectionIdStr ? parseInt(collectionIdStr, 10) : undefined
     const currency = parseCurrencyMode(getString(searchParams.currency))
+    const orientation = parseOrientation(getString(searchParams.orientation))
+
+    // Parse collections param: 'all' | 'ats' | 'preorder' | '1,2,3'
+    const collectionsRaw = getString(searchParams.collections) ?? 'all'
 
     // Build where clause
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -88,27 +128,28 @@ export async function GET(request: NextRequest) {
       ]
     }
 
-    if (typeof collectionId === 'number' && Number.isFinite(collectionId)) {
-      where.CollectionID = collectionId
-    }
-
-    // Tab filter
-    if (tab === 'ats') {
-      where.AND = [
-        { OR: [{ ShowInPreOrder: false }, { ShowInPreOrder: null }] },
-      ]
-    } else if (tab === 'preorder') {
-      where.ShowInPreOrder = true
+    // Collections filter
+    if (collectionsRaw === 'ats') {
+      // Filter to products from ATS-type collections
+      where.Collection = { type: 'ATS' }
+    } else if (collectionsRaw === 'preorder') {
+      // Filter to products from PreOrder-type collections
+      where.Collection = { type: 'PreOrder' }
+    } else if (collectionsRaw !== 'all' && collectionsRaw !== 'specific') {
+      // Parse as comma-separated collection IDs
+      const ids = collectionsRaw.split(',').map(Number).filter(Number.isFinite)
+      if (ids.length > 0) {
+        where.CollectionID = { in: ids }
+      }
     }
 
     // PDF always filters out 0-availability SKUs
     where.Quantity = { gte: 1 }
 
-    // Fetch SKUs with all required fields including collection name (limit to 300 for PDF)
+    // Fetch SKUs with all required fields including collection name
     const rawSkus = await prisma.sku.findMany({
       where,
       orderBy: { SkuID: 'asc' },
-      take: 300,
       select: {
         ID: true,
         SkuID: true,
@@ -165,14 +206,21 @@ export async function GET(request: NextRequest) {
       })
     }
 
-    // Get collection name if filtered
+    // Get collection name if filtering by specific collections
     let collectionName: string | null = null
-    if (collectionId) {
-      const collection = await prisma.collection.findUnique({
-        where: { id: collectionId },
-        select: { name: true },
-      })
-      collectionName = collection?.name ?? null
+    if (collectionsRaw !== 'all' && collectionsRaw !== 'ats' && collectionsRaw !== 'preorder' && collectionsRaw !== 'specific') {
+      const ids = collectionsRaw.split(',').map(Number).filter(Number.isFinite)
+      if (ids.length === 1) {
+        // Single collection - get its name
+        const collection = await prisma.collection.findUnique({
+          where: { id: ids[0] },
+          select: { name: true },
+        })
+        collectionName = collection?.name ?? null
+      } else if (ids.length > 1) {
+        // Multiple collections
+        collectionName = `${ids.length} Collections`
+      }
     }
 
     // Calculate summary stats
@@ -186,14 +234,15 @@ export async function GET(request: NextRequest) {
       totalSkus,
       totalQuantity,
       collectionName,
-      tab,
+      collectionsMode: collectionsRaw,
       currency,
+      orientation,
     })
 
     // Generate PDF
     const pdfBuffer = await generatePdf(html, {
       format: 'Letter',
-      landscape: true,
+      landscape: orientation === 'landscape',
     })
 
     // Return file with currency suffix in filename
@@ -247,8 +296,9 @@ function generateProductsPdfHtml(
     totalSkus: number
     totalQuantity: number
     collectionName: string | null
-    tab: string
+    collectionsMode: string
     currency: CurrencyMode
+    orientation: 'landscape' | 'portrait'
   }
 ): string {
   const now = new Date()
@@ -262,45 +312,68 @@ function generateProductsPdfHtml(
     groupedByBaseSku.get(sku.baseSku)!.push(sku)
   }
 
+  const isPortrait = summary.orientation === 'portrait'
+
   // Generate table body groups - each product group in its own tbody for page-break control
   const tableBodyGroups = Array.from(groupedByBaseSku.entries())
     .map(([, groupSkus]) => {
       const rows = groupSkus.map((sku) => {
         const description = sku.OrderEntryDescription ?? sku.Description ?? ''
         const color = resolveColor(sku.SkuColor, sku.SkuID, description)
+        const material = sku.FabricContent ?? ''
         const priceCad = parsePrice(sku.PriceCAD)
         const priceUsd = parsePrice(sku.PriceUSD)
         const wholesalePrice = formatPrice(priceCad, priceUsd, summary.currency)
 
-        // Use Shopify CDN resizing to get small images (keeps PDF small)
-        // Append ?width=100 to get 100px wide version from Shopify CDN
-        const imageUrl = sku.ShopifyImageURL
-          ? `${sku.ShopifyImageURL}${sku.ShopifyImageURL.includes('?') ? '&' : '?'}width=100`
-          : null
+        // Get image URL - prefers local thumbnail, falls back to Shopify CDN
+        const imageUrl = getImageUrl(sku.ThumbnailPath, sku.ShopifyImageURL)
 
-        // Build row with firstRowOnly logic - skip image cell entirely if no image
+        // Build row with firstRowOnly logic
         const imageCell = sku.isFirstInGroup && imageUrl
           ? `<img src="${imageUrl}" alt="${sku.baseSku}" class="product-img" />`
           : ''
 
         const rowClass = sku.isLastInGroup ? 'group-last' : ''
 
-        return `
-          <tr class="${rowClass}">
-            <td class="image-cell">${imageCell}</td>
-            <td>${sku.isFirstInGroup ? sku.baseSku : ''}</td>
-            <td>${sku.SkuID}</td>
-            <td class="desc-cell">${sku.isFirstInGroup ? description.substring(0, 35) + (description.length > 35 ? '...' : '') : ''}</td>
-            <td>${sku.isFirstInGroup ? color : ''}</td>
-            <td>${sku.isFirstInGroup ? (sku.FabricContent ?? '').substring(0, 20) : ''}</td>
-            <td class="text-center">${sku.size || '—'}</td>
-            <td class="text-right">${(sku.Quantity ?? 0).toLocaleString()}</td>
-            <td>${sku.isFirstInGroup ? (sku.Collection?.name ?? '') : ''}</td>
-            <td class="text-center">${sku.isFirstInGroup ? (sku.ShowInPreOrder ? 'Pre-Order' : 'ATS') : ''}</td>
-            <td class="price-cell">${sku.isFirstInGroup ? wholesalePrice : ''}</td>
-            <td class="text-center qty-col"></td>
-          </tr>
-        `
+        if (isPortrait) {
+          // Portrait layout: consolidated Product column
+          // First row: Style (bold), Color • Material, Description
+          // Other rows: empty product cell
+          const productCell = sku.isFirstInGroup
+            ? `<div class="product-style">${sku.baseSku}</div>
+               <div class="product-details">${color}${color && material ? ' • ' : ''}${material.substring(0, 25)}</div>
+               <div class="product-details">${description.substring(0, 40)}${description.length > 40 ? '...' : ''}</div>`
+            : ''
+
+          return `
+            <tr class="${rowClass}">
+              <td class="image-cell">${imageCell}</td>
+              <td class="product-cell">${productCell}</td>
+              <td class="text-center">${sku.size || '—'}</td>
+              <td class="text-right">${(sku.Quantity ?? 0).toLocaleString()}</td>
+              <td class="price-cell">${sku.isFirstInGroup ? wholesalePrice : ''}</td>
+              <td class="text-center qty-col-portrait"></td>
+            </tr>
+          `
+        } else {
+          // Landscape layout: separate columns
+          return `
+            <tr class="${rowClass}">
+              <td class="image-cell">${imageCell}</td>
+              <td>${sku.isFirstInGroup ? sku.baseSku : ''}</td>
+              <td>${sku.SkuID}</td>
+              <td class="desc-cell">${sku.isFirstInGroup ? description.substring(0, 35) + (description.length > 35 ? '...' : '') : ''}</td>
+              <td>${sku.isFirstInGroup ? color : ''}</td>
+              <td>${sku.isFirstInGroup ? material.substring(0, 20) : ''}</td>
+              <td class="text-center">${sku.size || '—'}</td>
+              <td class="text-right">${(sku.Quantity ?? 0).toLocaleString()}</td>
+              <td>${sku.isFirstInGroup ? (sku.Collection?.name ?? '') : ''}</td>
+              <td class="text-center">${sku.isFirstInGroup ? (sku.ShowInPreOrder ? 'Pre-Order' : 'ATS') : ''}</td>
+              <td class="price-cell">${sku.isFirstInGroup ? wholesalePrice : ''}</td>
+              <td class="text-center qty-col"></td>
+            </tr>
+          `
+        }
       }).join('')
 
       return `<tbody class="product-group">${rows}</tbody>`
@@ -309,15 +382,40 @@ function generateProductsPdfHtml(
 
   const subtitle = summary.collectionName
     ? `Collection: ${summary.collectionName}`
-    : summary.tab === 'ats'
-      ? 'Available to Ship'
-      : summary.tab === 'preorder'
-        ? 'Pre-Order'
+    : summary.collectionsMode === 'ats'
+      ? 'ATS Collections'
+      : summary.collectionsMode === 'preorder'
+        ? 'Pre-Order Collections'
         : 'All Products'
 
   const currencyLabel = summary.currency === 'BOTH'
     ? 'CAD/USD'
     : summary.currency
+
+  // Table header based on orientation
+  const tableHeader = isPortrait
+    ? `<tr>
+          <th>Image</th>
+          <th>Product</th>
+          <th class="text-center">Size</th>
+          <th class="text-right">Avail</th>
+          <th>Price</th>
+          <th class="text-center qty-col-portrait">Order Qty</th>
+        </tr>`
+    : `<tr>
+          <th>Image</th>
+          <th>Style</th>
+          <th>SKU</th>
+          <th>Description</th>
+          <th>Color</th>
+          <th>Material</th>
+          <th class="text-center">Size</th>
+          <th class="text-right">Available</th>
+          <th>Collection</th>
+          <th class="text-center">Status</th>
+          <th>Wholesale</th>
+          <th class="text-center qty-col">Qty</th>
+        </tr>`
 
   const content = `
     <style>
@@ -397,6 +495,29 @@ function generateProductsPdfHtml(
         width: 50px;
         min-width: 50px;
       }
+
+      /* Portrait-specific styles */
+      .qty-col-portrait {
+        width: 100px;
+        min-width: 100px;
+      }
+
+      .product-cell {
+        vertical-align: top;
+        padding: 8px !important;
+      }
+
+      .product-style {
+        font-weight: 600;
+        font-size: 9pt;
+        margin-bottom: 2px;
+      }
+
+      .product-details {
+        font-size: 7pt;
+        color: #6b7280;
+        line-height: 1.3;
+      }
     </style>
 
     <div class="pdf-header">
@@ -427,20 +548,7 @@ function generateProductsPdfHtml(
 
     <table class="products-table">
       <thead>
-        <tr>
-          <th>Image</th>
-          <th>Style</th>
-          <th>SKU</th>
-          <th>Description</th>
-          <th>Color</th>
-          <th>Material</th>
-          <th class="text-center">Size</th>
-          <th class="text-right">Available</th>
-          <th>Collection</th>
-          <th class="text-center">Status</th>
-          <th>Wholesale</th>
-          <th class="text-center qty-col">Qty</th>
-        </tr>
+        ${tableHeader}
       </thead>
       ${tableBodyGroups}
     </table>

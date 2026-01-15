@@ -12,6 +12,7 @@ import type {
   ProductsSortColumn,
   SortDirection,
   CategoryForFilter,
+  CollectionFilterMode,
 } from '@/lib/types'
 
 // ============================================================================
@@ -31,6 +32,11 @@ function getString(value: unknown): string | undefined {
 
 /**
  * Parse Next.js searchParams into typed ProductsListInput.
+ * Supports new 'collections' param format:
+ * - collections=all → show all products
+ * - collections=ats → show products from ATS-type collections
+ * - collections=preorder → show products from PreOrder-type collections
+ * - collections=1,2,3 → show products from specific collection IDs
  */
 export function parseProductsListInput(
   searchParams: Record<string, string | string[] | undefined>
@@ -40,22 +46,36 @@ export function parseProductsListInput(
     return Array.isArray(val) ? val[0] : val
   }
 
-  const tabRaw = getString(getParam('tab')) ?? 'all'
-  const tab = tabRaw === 'ats' || tabRaw === 'preorder' ? tabRaw : 'all'
-
   const q = getString(getParam('q'))
-  const collectionIdStr = getString(getParam('collectionId'))
-  const collectionId = collectionIdStr ? parseInt(collectionIdStr, 10) : undefined
-
   const sort = (getString(getParam('sort')) as ProductsSortColumn | undefined) ?? 'dateModified'
   const dir = (getString(getParam('dir')) as SortDirection | undefined) ?? 'desc'
   const page = toInt(getParam('page'), 1)
   const pageSize = toInt(getParam('pageSize'), 50)
 
+  // Parse collections param
+  const collectionsRaw = getString(getParam('collections')) ?? 'all'
+  let collectionsMode: CollectionFilterMode = 'all'
+  let collectionIds: number[] | undefined
+
+  if (collectionsRaw === 'all' || collectionsRaw === 'ats' || collectionsRaw === 'preorder') {
+    collectionsMode = collectionsRaw
+  } else if (collectionsRaw === 'specific') {
+    // 'specific' mode with no IDs selected yet
+    collectionsMode = 'specific'
+    collectionIds = []
+  } else {
+    // Try to parse as comma-separated IDs
+    const ids = collectionsRaw.split(',').map(Number).filter(Number.isFinite)
+    if (ids.length > 0) {
+      collectionsMode = 'specific'
+      collectionIds = ids
+    }
+  }
+
   return {
-    tab,
+    collectionsMode,
+    collectionIds,
     q,
-    collectionId: Number.isFinite(collectionId) ? collectionId : undefined,
     sort,
     dir,
     page,
@@ -102,46 +122,43 @@ export async function getProducts(
   const input = parseProductsListInput(searchParams)
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const baseWhere: any = {}
+  const where: any = {}
 
-  // Search across multiple fields (BaseSku removed - it's derived from SkuID)
+  // Search across multiple fields
   if (input.q) {
-    baseWhere.OR = [
+    where.OR = [
       { SkuID: { contains: input.q, mode: 'insensitive' } },
       { Description: { contains: input.q, mode: 'insensitive' } },
       { OrderEntryDescription: { contains: input.q, mode: 'insensitive' } },
     ]
   }
 
-  // Collection filter
-  if (typeof input.collectionId === 'number') {
-    baseWhere.CollectionID = input.collectionId
+  // Collection filter based on mode
+  switch (input.collectionsMode) {
+    case 'ats':
+      // Filter to products from ATS-type collections
+      where.Collection = { type: 'ATS' }
+      break
+    case 'preorder':
+      // Filter to products from PreOrder-type collections
+      where.Collection = { type: 'PreOrder' }
+      break
+    case 'specific':
+      // Filter to specific collection IDs (if any selected)
+      if (input.collectionIds && input.collectionIds.length > 0) {
+        where.CollectionID = { in: input.collectionIds }
+      }
+      break
+    case 'all':
+    default:
+      // No collection filter
+      break
   }
 
-  // Tab-specific where clauses
-  // ATS = ShowInPreOrder is false OR null
-  // PreOrder = ShowInPreOrder is true
-  const atsCondition = { OR: [{ ShowInPreOrder: false }, { ShowInPreOrder: null }] }
-  const preorderCondition = { ShowInPreOrder: true }
-
-  // Build final where based on tab
-  let tabWhere: typeof baseWhere
-  if (input.tab === 'ats') {
-    tabWhere = { ...baseWhere, ...atsCondition }
-  } else if (input.tab === 'preorder') {
-    tabWhere = { ...baseWhere, ...preorderCondition }
-  } else {
-    tabWhere = baseWhere
-  }
-
-  // For tab counts, we need separate queries with baseWhere (not tab-filtered)
-  const atsCountWhere = { ...baseWhere, ...atsCondition }
-  const preorderCountWhere = { ...baseWhere, ...preorderCondition }
-
-  const [total, rows, atsCount, preorderCount] = await Promise.all([
-    prisma.sku.count({ where: tabWhere }),
+  const [total, rows] = await Promise.all([
+    prisma.sku.count({ where }),
     prisma.sku.findMany({
-      where: tabWhere,
+      where,
       orderBy: buildOrderBy(input.sort, input.dir),
       skip: (input.page - 1) * input.pageSize,
       take: input.pageSize,
@@ -168,17 +185,12 @@ export async function getProducts(
         },
       },
     }),
-    prisma.sku.count({ where: atsCountWhere }),
-    prisma.sku.count({ where: preorderCountWhere }),
   ])
 
   return {
     total,
-    tabCounts: {
-      all: atsCount + preorderCount,
-      ats: atsCount,
-      preorder: preorderCount,
-    },
+    // Tab counts no longer needed - keep empty for backward compatibility
+    tabCounts: { all: total, ats: 0, preorder: 0 },
     rows: rows.map((r) => {
       const skuId = r.SkuID
       const qty = r.Quantity ?? 0
@@ -235,7 +247,8 @@ export async function getCollectionsForFilter(): Promise<CategoryForFilter[]> {
 
   return collections.map((c) => ({
     id: c.id,
-    name: `${c.name} (${c.type})`,
+    name: c.name,
+    type: c.type as 'ATS' | 'PreOrder',
   }))
 }
 

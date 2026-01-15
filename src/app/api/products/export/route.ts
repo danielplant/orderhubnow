@@ -97,11 +97,11 @@ export async function GET(request: NextRequest) {
 
     // Parse query params
     const searchParams = Object.fromEntries(request.nextUrl.searchParams.entries())
-    const tab = getString(searchParams.tab) ?? 'all'
     const q = getString(searchParams.q)
-    const collectionIdStr = getString(searchParams.collectionId)
-    const collectionId = collectionIdStr ? parseInt(collectionIdStr, 10) : undefined
     const currency = parseCurrencyMode(getString(searchParams.currency))
+
+    // Parse collections param: 'all' | 'ats' | 'preorder' | '1,2,3'
+    const collectionsRaw = getString(searchParams.collections) ?? 'all'
 
     // Build where clause
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -109,25 +109,29 @@ export async function GET(request: NextRequest) {
 
     if (q) {
       where.OR = [
-        { SkuID: { contains: q } },
-        { Description: { contains: q } },
-        { OrderEntryDescription: { contains: q } },
+        { SkuID: { contains: q, mode: 'insensitive' } },
+        { Description: { contains: q, mode: 'insensitive' } },
+        { OrderEntryDescription: { contains: q, mode: 'insensitive' } },
       ]
     }
 
-    if (typeof collectionId === 'number' && Number.isFinite(collectionId)) {
-      where.CollectionID = collectionId
+    // Collections filter
+    if (collectionsRaw === 'ats') {
+      // Filter to products from ATS-type collections
+      where.Collection = { type: 'ATS' }
+    } else if (collectionsRaw === 'preorder') {
+      // Filter to products from PreOrder-type collections
+      where.Collection = { type: 'PreOrder' }
+    } else if (collectionsRaw !== 'all' && collectionsRaw !== 'specific') {
+      // Parse as comma-separated collection IDs
+      const ids = collectionsRaw.split(',').map(Number).filter(Number.isFinite)
+      if (ids.length > 0) {
+        where.CollectionID = { in: ids }
+      }
     }
 
-    // Tab filter
-    if (tab === 'ats') {
-      where.AND = [
-        { OR: [{ ShowInPreOrder: false }, { ShowInPreOrder: null }] },
-        { Quantity: { gte: 1 } }, // Only show SKUs with available inventory
-      ]
-    } else if (tab === 'preorder') {
-      where.ShowInPreOrder = true
-    }
+    // Determine if this is an ATS export (for hiding On Route column)
+    const isAtsExport = collectionsRaw === 'ats'
 
     // Fetch SKUs with all required fields including collection name
     const rawSkus = await prisma.sku.findMany({
@@ -196,7 +200,7 @@ export async function GET(request: NextRequest) {
     const sheet = workbook.addWorksheet('Products')
 
     // Filter columns - exclude 'onRoute' for ATS exports
-    const exportColumns = tab === 'ats'
+    const exportColumns = isAtsExport
       ? EXPORT_COLUMNS.filter((col) => col.key !== 'onRoute')
       : EXPORT_COLUMNS
 
@@ -262,7 +266,7 @@ export async function GET(request: NextRequest) {
       }
 
       // Only include onRoute for non-ATS exports
-      if (tab !== 'ats') {
+      if (!isAtsExport) {
         rowData.onRoute = sku.OnRoute ?? 0
       }
 

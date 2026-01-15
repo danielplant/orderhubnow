@@ -20,7 +20,7 @@ import type { CurrencyMode } from '@/lib/types/export'
 import { BulkActionsBar } from '@/components/admin/bulk-actions-bar'
 import { ProductDetailModal } from '@/components/admin/product-detail-modal'
 import { cn } from '@/lib/utils'
-import type { AdminSkuRow, InventoryTab, CategoryForFilter, ProductsListResult } from '@/lib/types'
+import type { AdminSkuRow, CategoryForFilter } from '@/lib/types'
 import {
   deleteSku,
   bulkDeleteSkus,
@@ -28,6 +28,7 @@ import {
   bulkSetPreOrderFlag,
 } from '@/lib/data/actions/products'
 import { UploadProductsModal } from '@/components/admin/upload-products-modal'
+import { CollectionSelector, type CollectionFilterMode } from '@/components/admin/collection-selector'
 import { MoreHorizontal, Download, Upload, ChevronDown, FileSpreadsheet, FileText } from 'lucide-react'
 
 // ============================================================================
@@ -37,19 +38,8 @@ import { MoreHorizontal, Download, Upload, ChevronDown, FileSpreadsheet, FileTex
 interface ProductsTableProps {
   initialRows: AdminSkuRow[]
   total: number
-  tabCounts: ProductsListResult['tabCounts']
   categories: CategoryForFilter[]
 }
-
-// ============================================================================
-// Constants
-// ============================================================================
-
-const INVENTORY_TABS: Array<{ label: string; value: InventoryTab }> = [
-  { label: 'All', value: 'all' },
-  { label: 'ATS', value: 'ats' },
-  { label: 'Pre-Order', value: 'preorder' },
-]
 
 // ============================================================================
 // Component
@@ -58,7 +48,6 @@ const INVENTORY_TABS: Array<{ label: string; value: InventoryTab }> = [
 export function ProductsTable({
   initialRows,
   total,
-  tabCounts,
   categories,
 }: ProductsTableProps) {
   const router = useRouter()
@@ -74,13 +63,25 @@ export function ProductsTable({
   const [exportCurrency, setExportCurrency] = React.useState<CurrencyMode>('BOTH')
 
   // Parse current filter state from URL
-  const tab = (searchParams.get('tab') || 'all') as InventoryTab
   const q = searchParams.get('q') || ''
-  const collectionId = searchParams.get('collectionId') || ''
   const page = Number(searchParams.get('page') || '1')
   const pageSize = Number(searchParams.get('pageSize') || '50')
   const sort = searchParams.get('sort') || 'dateModified'
   const dir = (searchParams.get('dir') || 'desc') as 'asc' | 'desc'
+
+  // Parse collections param: 'all' | 'ats' | 'preorder' | '1,2,3'
+  const collectionsParam = searchParams.get('collections') || 'all'
+  const { collectionMode, selectedCollectionIds } = React.useMemo(() => {
+    if (collectionsParam === 'all' || collectionsParam === 'ats' || collectionsParam === 'preorder') {
+      return { collectionMode: collectionsParam as CollectionFilterMode, selectedCollectionIds: [] }
+    }
+    // Parse comma-separated IDs
+    const ids = collectionsParam.split(',').map(Number).filter(Number.isFinite)
+    return {
+      collectionMode: 'specific' as CollectionFilterMode,
+      selectedCollectionIds: ids
+    }
+  }, [collectionsParam])
 
   // URL param helpers
   const setParam = React.useCallback(
@@ -114,6 +115,35 @@ export function ProductsTable({
       const params = new URLSearchParams(searchParams.toString())
       params.set('sort', newSort.columnId)
       params.set('dir', newSort.direction)
+      router.push(`?${params.toString()}`, { scroll: false })
+    },
+    [router, searchParams]
+  )
+
+  // Collection filter handlers
+  const handleCollectionModeChange = React.useCallback(
+    (mode: CollectionFilterMode) => {
+      const params = new URLSearchParams(searchParams.toString())
+      if (mode === 'all') {
+        params.delete('collections')
+      } else {
+        params.set('collections', mode)
+      }
+      params.delete('page') // Reset pagination
+      router.push(`?${params.toString()}`, { scroll: false })
+    },
+    [router, searchParams]
+  )
+
+  const handleCollectionSelectionChange = React.useCallback(
+    (ids: number[]) => {
+      const params = new URLSearchParams(searchParams.toString())
+      if (ids.length === 0) {
+        params.set('collections', 'specific')
+      } else {
+        params.set('collections', ids.join(','))
+      }
+      params.delete('page') // Reset pagination
       router.push(`?${params.toString()}`, { scroll: false })
     },
     [router, searchParams]
@@ -176,31 +206,17 @@ export function ProductsTable({
     [selectedIds, router]
   )
 
-  const doExport = React.useCallback((exportTab?: 'ats' | 'preorder' | 'all') => {
+  // Export using current filter (collections param already in URL)
+  const doExport = React.useCallback(() => {
     const params = new URLSearchParams(searchParams.toString())
     params.set('currency', exportCurrency)
-    // Override tab parameter if explicitly specified
-    if (exportTab) {
-      if (exportTab === 'all') {
-        params.delete('tab')
-      } else {
-        params.set('tab', exportTab)
-      }
-    }
     window.location.href = `/api/products/export?${params.toString()}`
   }, [searchParams, exportCurrency])
 
-  const doExportPdf = React.useCallback((exportTab?: 'ats' | 'preorder' | 'all') => {
+  const doExportPdf = React.useCallback((orientation: 'landscape' | 'portrait') => {
     const params = new URLSearchParams(searchParams.toString())
     params.set('currency', exportCurrency)
-    // Override tab parameter if explicitly specified
-    if (exportTab) {
-      if (exportTab === 'all') {
-        params.delete('tab')
-      } else {
-        params.set('tab', exportTab)
-      }
-    }
+    params.set('orientation', orientation)
     window.location.href = `/api/products/export-pdf?${params.toString()}`
   }, [searchParams, exportCurrency])
 
@@ -387,33 +403,20 @@ export function ProductsTable({
 
   return (
     <div className="space-y-4">
-      {/* Tabs + Filters Container */}
+      {/* Filters Container */}
       <div className="rounded-md border border-border bg-background">
-        {/* Inventory Type Tabs */}
-        <div className="flex gap-6 overflow-x-auto border-b border-border px-4">
-          {INVENTORY_TABS.map((t) => {
-            const active = tab === t.value
-            const count = tabCounts[t.value] ?? 0
-            return (
-              <button
-                key={t.value}
-                type="button"
-                onClick={() => setParam('tab', t.value === 'all' ? null : t.value)}
-                className={cn(
-                  'py-3 text-sm font-medium border-b-2 -mb-px whitespace-nowrap',
-                  active
-                    ? 'border-primary text-foreground'
-                    : 'border-transparent text-muted-foreground hover:text-foreground'
-                )}
-              >
-                {t.label}{' '}
-                <span className="text-muted-foreground font-normal">({count})</span>
-              </button>
-            )
-          })}
+        {/* Collection Selector */}
+        <div className="border-b border-border p-4">
+          <CollectionSelector
+            collections={categories}
+            mode={collectionMode}
+            selectedIds={selectedCollectionIds}
+            onModeChange={handleCollectionModeChange}
+            onSelectionChange={handleCollectionSelectionChange}
+          />
         </div>
 
-        {/* Filters Row */}
+        {/* Search + Actions Row */}
         <div className="flex flex-wrap gap-3 p-4">
           <input
             value={q}
@@ -421,19 +424,6 @@ export function ProductsTable({
             placeholder="Search SKU, description..."
             className="h-10 w-full max-w-md rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
-
-          <select
-            value={collectionId}
-            onChange={(e) => setParam('collectionId', e.target.value || null)}
-            className="h-10 rounded-md border border-input bg-background px-3 text-sm"
-          >
-            <option value="">All collections</option>
-            {categories.map((c) => (
-              <option key={c.id} value={String(c.id)}>
-                {c.name}
-              </option>
-            ))}
-          </select>
 
           <div className="ml-auto flex gap-2">
             <Button variant="outline" size="sm" onClick={() => setShowUploadModal(true)}>
@@ -459,32 +449,18 @@ export function ProductsTable({
                   <DropdownMenuRadioItem value="USD">USD Only</DropdownMenuRadioItem>
                 </DropdownMenuRadioGroup>
                 <DropdownMenuSeparator />
-                <DropdownMenuLabel>Excel Export</DropdownMenuLabel>
-                <DropdownMenuItem onClick={() => doExport('ats')}>
+                <DropdownMenuLabel>Download Format</DropdownMenuLabel>
+                <DropdownMenuItem onClick={() => doExport()}>
                   <FileSpreadsheet className="h-4 w-4 mr-2" />
-                  ATS Catalog
+                  Excel (XLSX)
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => doExport('preorder')}>
-                  <FileSpreadsheet className="h-4 w-4 mr-2" />
-                  Pre-Order Catalog
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => doExport('all')}>
-                  <FileSpreadsheet className="h-4 w-4 mr-2" />
-                  All Products
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuLabel>PDF Export</DropdownMenuLabel>
-                <DropdownMenuItem onClick={() => doExportPdf('ats')}>
+                <DropdownMenuItem onClick={() => doExportPdf('landscape')}>
                   <FileText className="h-4 w-4 mr-2" />
-                  ATS Catalog
+                  PDF - Landscape
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => doExportPdf('preorder')}>
+                <DropdownMenuItem onClick={() => doExportPdf('portrait')}>
                   <FileText className="h-4 w-4 mr-2" />
-                  Pre-Order Catalog
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => doExportPdf('all')}>
-                  <FileText className="h-4 w-4 mr-2" />
-                  All Products
+                  PDF - Portrait
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>

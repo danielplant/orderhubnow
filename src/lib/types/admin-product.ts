@@ -5,6 +5,8 @@
 
 export type InventoryTab = 'all' | 'ats' | 'preorder'
 
+export type CollectionFilterMode = 'all' | 'ats' | 'preorder' | 'specific'
+
 export type ProductsSortColumn =
   | 'skuId'
   | 'baseSku'
@@ -18,9 +20,10 @@ export type ProductsSortColumn =
 export type SortDirection = 'asc' | 'desc'
 
 export interface ProductsListInput {
-  tab: InventoryTab
+  // New collections-based filtering
+  collectionsMode: CollectionFilterMode
+  collectionIds?: number[]  // Only used when collectionsMode === 'specific'
   q?: string
-  collectionId?: number
   page: number
   pageSize: number
   sort: ProductsSortColumn
@@ -86,4 +89,5 @@ export interface UpdateSkuInput {
 export interface CategoryForFilter {
   id: number
   name: string
+  type: 'ATS' | 'PreOrder'
 }

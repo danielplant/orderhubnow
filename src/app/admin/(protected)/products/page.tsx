@@ -41,7 +41,6 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
       <ProductsTable
         initialRows={productsResult.rows}
         total={productsResult.total}
-        tabCounts={productsResult.tabCounts}
         categories={collections}
       />
     </main>
