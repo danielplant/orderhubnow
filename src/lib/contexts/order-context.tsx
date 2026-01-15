@@ -108,6 +108,7 @@ interface OrderContextValue {
   editOrderId: string | null;
   editOrderCurrency: Currency | null;
   isEditMode: boolean;
+  isValidatingEditState: boolean;
 
   // Edit mode methods
   loadOrderForEdit: (order: OrderForEditing) => void;
@@ -253,6 +254,10 @@ export function OrderProvider({ children, initialDraftId }: OrderProviderProps) 
   );
   const [editOrderCurrency, setEditOrderCurrency] = useState<Currency | null>(
     () => loadFromStorage().editOrderCurrency
+  );
+  // Track if we're validating edit state on mount (prevents flash of "Order Not Found")
+  const [isValidatingEditState, setIsValidatingEditState] = useState<boolean>(
+    () => !!loadFromStorage().editOrderId
   );
 
   // Refs for debounced auto-save
@@ -515,9 +520,75 @@ export function OrderProvider({ children, initialDraftId }: OrderProviderProps) 
     localStorage.removeItem(EDIT_STATE_KEY);
   }, []);
 
-  // Load initial draft from URL param or localStorage
+  /**
+   * Validate that the edit order still exists and is editable on the server.
+   * Clears stale edit state if order not found (404) or no longer editable.
+   * Returns true if valid, false if cleared.
+   */
+  const validateEditState = useCallback(async (orderId: string): Promise<boolean> => {
+    try {
+      const res = await fetch(`/api/orders/${orderId}/exists`);
+
+      if (!res.ok || res.status === 404) {
+        // Order not found - clear stale edit state
+        console.warn(`[OrderContext] Edit order ${orderId} not found, clearing stale state`);
+        setEditOrderId(null);
+        setEditOrderCurrency(null);
+        setOrders({});
+        setPriceMap(new Map());
+        setHistory([]);
+        localStorage.removeItem(EDIT_STATE_KEY);
+        return false;
+      }
+
+      const data = await res.json();
+
+      if (!data.editable) {
+        // Order exists but is no longer editable (status changed)
+        console.warn(`[OrderContext] Edit order ${orderId} is no longer editable, clearing state`);
+        setEditOrderId(null);
+        setEditOrderCurrency(null);
+        setOrders({});
+        setPriceMap(new Map());
+        setHistory([]);
+        localStorage.removeItem(EDIT_STATE_KEY);
+        return false;
+      }
+
+      return true;
+    } catch (err) {
+      console.error('[OrderContext] Failed to validate edit state:', err);
+      // On network error, keep state (user may be offline)
+      return true;
+    }
+  }, []);
+
+  // Load initial draft from URL param or localStorage, validate edit state
   useEffect(() => {
-    const loadInitialDraft = async () => {
+    const loadInitialState = async () => {
+      // First: Validate edit state if present in localStorage
+      const storedEditState = loadFromStorage();
+      if (storedEditState.editOrderId && !initialDraftId) {
+        // We have edit state from localStorage - validate it exists on server
+        const isValid = await validateEditState(storedEditState.editOrderId);
+        setIsValidatingEditState(false);
+
+        if (!isValid) {
+          // Edit state was cleared, check for draft instead
+          const storedDraftId = localStorage.getItem(DRAFT_ID_KEY);
+          if (storedDraftId) {
+            await loadDraft(storedDraftId);
+          }
+          return;
+        }
+        // Edit state is valid, keep using it
+        return;
+      }
+
+      // No edit state to validate
+      setIsValidatingEditState(false);
+
+      // Second: Load draft if present
       if (initialDraftId) {
         // URL has draft param - load from server (overrides localStorage)
         await loadDraft(initialDraftId);
@@ -530,8 +601,8 @@ export function OrderProvider({ children, initialDraftId }: OrderProviderProps) 
         }
       }
     };
-    
-    loadInitialDraft();
+
+    loadInitialState();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialDraftId]);
 
@@ -751,6 +822,7 @@ export function OrderProvider({ children, initialDraftId }: OrderProviderProps) 
         editOrderId,
         editOrderCurrency,
         isEditMode: !!editOrderId,
+        isValidatingEditState,
         // Edit mode methods
         loadOrderForEdit,
         setEditOrderCurrency: updateEditOrderCurrency,

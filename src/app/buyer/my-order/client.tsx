@@ -57,6 +57,7 @@ export function MyOrderClient({
     editOrderCurrency,
     setEditOrderCurrency,
     isEditMode: contextIsEditMode,
+    isValidatingEditState,
   } = useOrder()
   const { currency, setCurrency } = useCurrency()
   const hasLoadedOrderRef = useRef(false)
@@ -196,14 +197,30 @@ export function MyOrderClient({
     return null
   }
 
+  // Show loading state while validating edit state on mount
+  // This prevents flash of "Order Not Found" during validation
+  if (isValidatingEditState) {
+    return (
+      <div className="container mx-auto py-8 px-4">
+        <div className="text-center">
+          <div className="animate-pulse">
+            <div className="h-8 w-48 bg-muted rounded mx-auto mb-4"></div>
+            <div className="h-4 w-64 bg-muted rounded mx-auto"></div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   // In edit mode, show error if order not editable
   if (isEditMode && !existingOrder) {
     return (
       <div className="container mx-auto py-8 px-4">
         <div className="text-center">
-          <h1 className="text-2xl font-bold mb-4">Order Not Found</h1>
+          <h1 className="text-2xl font-bold mb-4">Order No Longer Available</h1>
           <p className="text-muted-foreground mb-4">
-            The order you&apos;re trying to edit was not found or is no longer editable.
+            This order may have been deleted or is no longer editable.
+            Your session has been cleared.
           </p>
           <Button onClick={() => router.push(returnTo)}>Go Back</Button>
         </div>
