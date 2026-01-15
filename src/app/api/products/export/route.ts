@@ -26,6 +26,7 @@ import {
   EXPORT_COLUMNS,
   EXPORT_LAYOUT,
   EXPORT_STYLING,
+  EXPORT_THUMBNAIL,
 } from '@/lib/config/export-config'
 import type { CurrencyMode } from '@/lib/types/export'
 
@@ -348,13 +349,10 @@ export async function GET(request: NextRequest) {
             extension: 'png',
           })
 
-          // Use two-cell anchor (tl + br) for Apple Numbers compatibility
-          /* eslint-disable @typescript-eslint/no-explicit-any */
           sheet.addImage(imageId, {
             tl: { col: 0, row: rowIndex - 1 },
-            br: { col: 1, row: rowIndex },
-          } as any)
-          /* eslint-enable @typescript-eslint/no-explicit-any */
+            ext: { width: EXPORT_THUMBNAIL.widthPx, height: EXPORT_THUMBNAIL.widthPx },
+          })
         }
       }
     }

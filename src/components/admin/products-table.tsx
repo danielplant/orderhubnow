@@ -176,15 +176,31 @@ export function ProductsTable({
     [selectedIds, router]
   )
 
-  const doExport = React.useCallback(() => {
+  const doExport = React.useCallback((exportTab?: 'ats' | 'preorder' | 'all') => {
     const params = new URLSearchParams(searchParams.toString())
     params.set('currency', exportCurrency)
+    // Override tab parameter if explicitly specified
+    if (exportTab) {
+      if (exportTab === 'all') {
+        params.delete('tab')
+      } else {
+        params.set('tab', exportTab)
+      }
+    }
     window.location.href = `/api/products/export?${params.toString()}`
   }, [searchParams, exportCurrency])
 
-  const doExportPdf = React.useCallback(() => {
+  const doExportPdf = React.useCallback((exportTab?: 'ats' | 'preorder' | 'all') => {
     const params = new URLSearchParams(searchParams.toString())
     params.set('currency', exportCurrency)
+    // Override tab parameter if explicitly specified
+    if (exportTab) {
+      if (exportTab === 'all') {
+        params.delete('tab')
+      } else {
+        params.set('tab', exportTab)
+      }
+    }
     window.location.href = `/api/products/export-pdf?${params.toString()}`
   }, [searchParams, exportCurrency])
 
@@ -432,7 +448,7 @@ export function ProductsTable({
                   <ChevronDown className="h-4 w-4 ml-2" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-48">
+              <DropdownMenuContent align="end" className="w-56">
                 <DropdownMenuLabel>Currency</DropdownMenuLabel>
                 <DropdownMenuRadioGroup
                   value={exportCurrency}
@@ -443,13 +459,32 @@ export function ProductsTable({
                   <DropdownMenuRadioItem value="USD">USD Only</DropdownMenuRadioItem>
                 </DropdownMenuRadioGroup>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={doExport}>
+                <DropdownMenuLabel>Excel Export</DropdownMenuLabel>
+                <DropdownMenuItem onClick={() => doExport('ats')}>
                   <FileSpreadsheet className="h-4 w-4 mr-2" />
-                  Download Excel
+                  ATS Catalog
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={doExportPdf}>
+                <DropdownMenuItem onClick={() => doExport('preorder')}>
+                  <FileSpreadsheet className="h-4 w-4 mr-2" />
+                  Pre-Order Catalog
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => doExport('all')}>
+                  <FileSpreadsheet className="h-4 w-4 mr-2" />
+                  All Products
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel>PDF Export</DropdownMenuLabel>
+                <DropdownMenuItem onClick={() => doExportPdf('ats')}>
                   <FileText className="h-4 w-4 mr-2" />
-                  Download PDF
+                  ATS Catalog
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => doExportPdf('preorder')}>
+                  <FileText className="h-4 w-4 mr-2" />
+                  Pre-Order Catalog
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => doExportPdf('all')}>
+                  <FileText className="h-4 w-4 mr-2" />
+                  All Products
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
