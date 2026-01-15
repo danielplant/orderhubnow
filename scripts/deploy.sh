@@ -15,7 +15,7 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo ""
 
 # Step 1: Check for uncommitted changes
-echo "[1/7] Checking git status..."
+echo "[1/8] Checking git status..."
 if [[ -n $(git status --porcelain) ]]; then
     echo ""
     echo "Uncommitted changes detected:"
@@ -37,25 +37,31 @@ fi
 
 # Step 2: Type check
 echo ""
-echo "[2/7] Running type check..."
+echo "[2/8] Running type check..."
 npm run type-check
 echo "✓ Type check passed"
 
 # Step 3: Lint
 echo ""
-echo "[3/7] Running lint..."
+echo "[3/8] Running lint..."
 npm run lint
 echo "✓ Lint passed"
 
-# Step 4: Build
+# Step 4: Hydration safety check
 echo ""
-echo "[4/7] Running build..."
+echo "[4/8] Checking for hydration risks..."
+npm run check:hydration
+echo "✓ Hydration check passed"
+
+# Step 5: Build
+echo ""
+echo "[5/8] Running build..."
 npm run build
 echo "✓ Build passed"
 
-# Step 5: Schema drift check
+# Step 6: Schema drift check
 echo ""
-echo "[5/7] Checking schema drift against production..."
+echo "[6/8] Checking schema drift against production..."
 DRIFT_OUTPUT=$(bash scripts/check-schema-drift.sh 2>&1) || true
 
 if echo "$DRIFT_OUTPUT" | grep -q "SCHEMA DRIFT DETECTED"; then
@@ -93,15 +99,15 @@ else
     echo "✓ No schema drift - production is aligned"
 fi
 
-# Step 6: Push to GitHub
+# Step 7: Push to GitHub
 echo ""
-echo "[6/7] Pushing to GitHub..."
+echo "[7/8] Pushing to GitHub..."
 git push origin main
 echo "✓ Pushed to GitHub"
 
-# Step 7: Deploy to EC2
+# Step 8: Deploy to EC2
 echo ""
-echo "[7/7] Deploying to EC2..."
+echo "[8/8] Deploying to EC2..."
 ssh -i "$EC2_KEY" "$EC2_HOST" "cd $EC2_APP_DIR && \
     git fetch origin main && \
     git reset --hard origin/main && \

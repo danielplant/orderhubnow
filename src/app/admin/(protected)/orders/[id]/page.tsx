@@ -3,6 +3,7 @@ import { notFound, redirect } from 'next/navigation'
 import { auth } from '@/lib/auth/providers'
 import { prisma } from '@/lib/prisma'
 import { formatCurrency } from '@/lib/utils'
+import { formatDateTime } from '@/lib/utils/format'
 import { Card, CardContent, CardHeader, CardTitle, Button, StatusBadge } from '@/components/ui'
 import type { OrderStatus } from '@/lib/types/order'
 import { getShipmentsForOrder, getOrderItemsWithFulfillment } from '@/lib/data/actions/shipments'
@@ -291,7 +292,7 @@ export default async function AdminOrderDetailsPage(props: { params: Promise<{ i
                 <div key={String(c.ID)} className="rounded-md border border-border bg-background p-3">
                   <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
                     <span>{c.AddedBy}</span>
-                    <span>{c.AddedDate.toLocaleString()}</span>
+                    <span>{formatDateTime(c.AddedDate)}</span>
                   </div>
                   <div className="text-sm whitespace-pre-wrap">{c.Comments}</div>
                 </div>

@@ -22,7 +22,7 @@ echo ""
 # -----------------------------------------------------------------------------
 # Step 1: Kill all servers
 # -----------------------------------------------------------------------------
-echo "[1/5] Killing all Node.js servers..."
+echo "[1/6] Killing all Node.js servers..."
 pkill -9 -f node 2>/dev/null || true
 pkill -9 -f next 2>/dev/null || true
 sleep 1
@@ -32,7 +32,7 @@ echo ""
 # -----------------------------------------------------------------------------
 # Step 2: Check schema drift
 # -----------------------------------------------------------------------------
-echo "[2/5] Checking database schema drift..."
+echo "[2/6] Checking database schema drift..."
 DRIFT=$(npx prisma migrate diff --from-schema-datasource prisma/schema.prisma --to-schema-datamodel prisma/schema.prisma 2>&1 || true)
 
 if echo "$DRIFT" | grep -q "No difference"; then
@@ -49,7 +49,7 @@ echo ""
 # Step 3: Fix constraints and push schema (if needed)
 # -----------------------------------------------------------------------------
 if [ "$NEEDS_PUSH" = true ]; then
-    echo "[3/5] Fixing database constraints and pushing schema..."
+    echo "[3/6] Fixing database constraints and pushing schema..."
 
     # Run inline SQL to drop blocking constraints
     node -e "
@@ -126,22 +126,45 @@ fixConstraints().catch(console.error);
         echo "      ✓ Schema pushed"
     fi
 else
-    echo "[3/5] Skipping schema push (no drift detected)"
+    echo "[3/6] Skipping schema push (no drift detected)"
 fi
 echo ""
 
 # -----------------------------------------------------------------------------
 # Step 4: Regenerate Prisma client
 # -----------------------------------------------------------------------------
-echo "[4/5] Regenerating Prisma client..."
+echo "[4/6] Regenerating Prisma client..."
 npx prisma generate 2>&1 | grep -E "✓|Generated" | sed 's/^/      /' || true
 echo "      ✓ Prisma client regenerated"
 echo ""
 
 # -----------------------------------------------------------------------------
-# Step 5: Start dev server
+# Step 5: Check for hydration risks
 # -----------------------------------------------------------------------------
-echo "[5/5] Starting dev server..."
+echo "[5/6] Checking for hydration risks..."
+HYDRATION_OUTPUT=$(npm run check:hydration 2>&1) || HYDRATION_EXIT=$?
+
+if [ "${HYDRATION_EXIT:-0}" -ne 0 ]; then
+    echo ""
+    echo "$HYDRATION_OUTPUT"
+    echo ""
+    echo "      ⚠ Hydration issues detected!"
+    echo "      Run 'npm run check:hydration:fix' to auto-fix where possible."
+    echo ""
+    read -p "      Continue anyway? (yes/no): " CONTINUE_CONFIRM
+    if [ "$CONTINUE_CONFIRM" != "yes" ]; then
+        echo "      Aborted."
+        exit 1
+    fi
+else
+    echo "      ✓ No hydration risks detected"
+fi
+echo ""
+
+# -----------------------------------------------------------------------------
+# Step 6: Start dev server
+# -----------------------------------------------------------------------------
+echo "[6/6] Starting dev server..."
 echo ""
 echo "=========================================="
 echo "  ✓ Environment synced - starting dev"
