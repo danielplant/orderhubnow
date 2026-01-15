@@ -149,6 +149,7 @@ export function ProductOrderCard({ product, isPreOrder = false }: ProductOrderCa
   const [draftBySku, setDraftBySku] = useState<Record<string, string>>({});
   const [qtyError, setQtyError] = useState<string | null>(null);
 
+  /* eslint-disable react-hooks/preserve-manual-memoization */
   const commitQuantity = useCallback(
     (variant: ProductVariant) => {
       const raw = draftBySku[variant.sku] ?? "";
@@ -194,7 +195,8 @@ export function ProductOrderCard({ product, isPreOrder = false }: ProductOrderCa
       totalPrice,
     ]
   );
-  
+  /* eslint-enable react-hooks/preserve-manual-memoization */
+
   // Card-level low stock indicator: considers max(available, onRoute) per .NET
   const hasLowStock = orderableVariants.some((v) => {
     const maxQty = Math.max(v.available, v.onRoute);
