@@ -1,14 +1,29 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { Compass, Bell, Search, HelpCircle, ShoppingCart } from "lucide-react";
+import { Compass, Bell, Search, HelpCircle, ShoppingCart, ChevronDown, Trash2, ExternalLink } from "lucide-react";
 import { Button, Divider, IndicatorDot, IconBox, Badge } from "@/components/ui";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { BRAND_NAME, APP_NAME } from "@/lib/constants/brand";
 import { CurrencyToggle } from "./currency-toggle";
 import { useOrder, useCurrency } from "@/lib/contexts";
 import { formatCurrency } from "@/lib/utils";
-import { buildRepQueryString } from "@/lib/utils/rep-context";
 
 interface BrandHeaderProps {
   userInitials?: string;
@@ -17,8 +32,24 @@ interface BrandHeaderProps {
 export function BrandHeader({ userInitials = "?" }: BrandHeaderProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const { totalItems, totalPrice } = useOrder();
+  const { totalItems, totalPrice, editOrderId, isEditMode, isValidatingEditState, clearAll, clearEditMode } = useOrder();
   const { currency } = useCurrency();
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+
+  // During edit state validation, suppress stale cart data to avoid misleading UI
+  // (e.g., showing "36 items | $1,408" when the order no longer exists)
+  const displayItems = (isValidatingEditState && isEditMode) ? 0 : totalItems;
+  const displayPrice = (isValidatingEditState && isEditMode) ? 0 : totalPrice;
+
+  // Handle clearing the cart (works for both edit mode and regular cart)
+  const handleClearCart = () => {
+    if (isEditMode) {
+      clearEditMode();
+    } else {
+      clearAll();
+    }
+    setShowClearConfirm(false);
+  };
 
   // Determine if we're in pre-order flow
   const isPreOrder = pathname.startsWith("/buyer/pre-order");
@@ -34,9 +65,13 @@ export function BrandHeader({ userInitials = "?" }: BrandHeaderProps) {
     if (repId) params.set("repId", repId);
     if (returnTo) params.set("returnTo", returnTo);
 
-    // Preserve edit order context
+    // Preserve edit order context - use URL param or fall back to context state
     const editOrder = searchParams.get("editOrder");
-    if (editOrder) params.set("editOrder", editOrder);
+    if (editOrder) {
+      params.set("editOrder", editOrder);
+    } else if (isEditMode && editOrderId) {
+      params.set("editOrder", editOrderId);
+    }
 
     const qs = params.toString();
     return `/buyer/my-order${qs ? `?${qs}` : ""}`;
@@ -61,25 +96,67 @@ export function BrandHeader({ userInitials = "?" }: BrandHeaderProps) {
 
       {/* Right: Actions */}
       <div className="flex items-center gap-4">
-        {/* Cart/Order Button */}
-        <Button
-          variant={totalItems > 0 ? "default" : "outline"}
-          size="sm"
-          asChild
-        >
-          <Link href={myOrderHref}>
-            <ShoppingCart className="h-4 w-4" />
-            {totalItems > 0 ? (
+        {/* Cart/Order Dropdown */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant={displayItems > 0 ? "default" : "outline"}
+              size="sm"
+            >
+              <ShoppingCart className="h-4 w-4" />
+              {displayItems > 0 ? (
+                <>
+                  <span>{displayItems}</span>
+                  <span className="mx-1 opacity-50">|</span>
+                  <span>{formatCurrency(displayPrice, currency)}</span>
+                </>
+              ) : (
+                <span>Review Order</span>
+              )}
+              <ChevronDown className="h-3 w-3 ml-1 opacity-50" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem asChild>
+              <Link href={myOrderHref} className="cursor-pointer">
+                <ExternalLink className="h-4 w-4" />
+                View Order
+              </Link>
+            </DropdownMenuItem>
+            {displayItems > 0 && (
               <>
-                <span>{totalItems}</span>
-                <span className="mx-1 opacity-50">|</span>
-                <span>{formatCurrency(totalPrice, currency)}</span>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  variant="destructive"
+                  onClick={() => setShowClearConfirm(true)}
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Clear Cart
+                </DropdownMenuItem>
               </>
-            ) : (
-              <span>Review Order</span>
             )}
-          </Link>
-        </Button>
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        {/* Clear Cart Confirmation Dialog */}
+        <Dialog open={showClearConfirm} onOpenChange={setShowClearConfirm}>
+          <DialogContent showCloseButton={false}>
+            <DialogHeader>
+              <DialogTitle>Clear your cart?</DialogTitle>
+              <DialogDescription>
+                This will remove all {displayItems} item{displayItems !== 1 ? 's' : ''} from your cart. This action cannot be undone.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowClearConfirm(false)}>
+                Cancel
+              </Button>
+              <Button variant="destructive" onClick={handleClearCart}>
+                Clear Cart
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         <Divider orientation="vertical" />
 

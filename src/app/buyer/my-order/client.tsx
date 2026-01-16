@@ -83,9 +83,13 @@ export function MyOrderClient({
   // Determine if we're in edit mode (from props or context)
   const isEditMode = !!existingOrder || contextIsEditMode
 
+  // Detect stale edit state: context thinks we're editing but server has no order
+  // This happens when an order was deleted or status changed while user was away
+  const shouldShowEditError = contextIsEditMode && !existingOrder && !isValidatingEditState
+
   // Track if initial currency sync has happened to avoid saving on mount
   const initialCurrencySyncRef = useRef(false)
-  const [isSavingCurrency, startCurrencyTransition] = useTransition()
+  const [, startCurrencyTransition] = useTransition()
 
   // Sync currency toggle to order's currency when entering edit mode
   // This ensures the toggle starts at the order's currency, not the user's localStorage preference
@@ -185,15 +189,25 @@ export function MyOrderClient({
   }
   const navigationQuery = buildNavigationQuery()
 
-  // Redirect to collections if cart is empty (only in non-edit mode)
+  // Clear stale edit state and notify user when order is no longer available
   useEffect(() => {
-    if (!isEditMode && totalItems === 0) {
+    if (shouldShowEditError) {
+      toast.info('Your previous edit session has expired')
+      clearEditMode()
+    }
+  }, [shouldShowEditError, clearEditMode])
+
+  // Redirect to collections if cart is empty (only in non-edit mode)
+  // Don't redirect while processing stale edit state
+  useEffect(() => {
+    if (!isEditMode && totalItems === 0 && !shouldShowEditError) {
       router.replace(`/buyer/select-journey${navigationQuery}`)
     }
-  }, [totalItems, router, isEditMode, navigationQuery])
+  }, [totalItems, router, isEditMode, navigationQuery, shouldShowEditError])
 
   // Don't render form until we've checked cart (only in non-edit mode)
-  if (!isEditMode && totalItems === 0) {
+  // Also don't return null while clearing stale edit state
+  if (!isEditMode && totalItems === 0 && !shouldShowEditError) {
     return null
   }
 
@@ -212,17 +226,16 @@ export function MyOrderClient({
     )
   }
 
-  // In edit mode, show error if order not editable
-  if (isEditMode && !existingOrder) {
+  // Show error when edit session is stale (state already cleared by effect above)
+  if (shouldShowEditError) {
     return (
       <div className="container mx-auto py-8 px-4">
         <div className="text-center">
-          <h1 className="text-2xl font-bold mb-4">Order No Longer Available</h1>
+          <h1 className="text-2xl font-bold mb-4">Session Expired</h1>
           <p className="text-muted-foreground mb-4">
-            This order may have been deleted or is no longer editable.
-            Your session has been cleared.
+            The order you were editing is no longer available.
           </p>
-          <Button onClick={() => router.push(returnTo)}>Go Back</Button>
+          <Button onClick={() => router.push(returnTo)}>Continue Shopping</Button>
         </div>
       </div>
     )

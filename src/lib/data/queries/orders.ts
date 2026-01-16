@@ -722,8 +722,13 @@ export interface OrderForEditing {
 export async function getOrderForEditing(
   orderId: string
 ): Promise<OrderForEditing | null> {
+  // Only return orders that are still editable (Draft or Pending)
+  // This matches the validation in /api/orders/[id]/exists
   const order = await prisma.customerOrders.findUnique({
-    where: { ID: BigInt(orderId) },
+    where: {
+      ID: BigInt(orderId),
+      OrderStatus: { in: ['Draft', 'Pending'] },
+    },
   });
 
   if (!order) {
