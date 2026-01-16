@@ -110,8 +110,10 @@ echo ""
 echo "[8/8] Deploying to EC2..."
 
 # Kill any stuck build processes from previous deploys
+# Note: We use a temp script approach because pkill -f 'pattern' would match
+# and kill its own parent bash shell (the pattern appears in bash -c "...")
 echo "  Cleaning up any stuck processes..."
-ssh -i "$EC2_KEY" "$EC2_HOST" "pkill -f 'tsc|next build' 2>/dev/null || true"
+ssh -i "$EC2_KEY" "$EC2_HOST" 'pids=$(pgrep -f "tsc|next build" 2>/dev/null | grep -v $$); [ -n "$pids" ] && kill $pids 2>/dev/null || true'
 
 # Sync source code
 echo "  Syncing source code..."
@@ -123,9 +125,10 @@ rsync -avz --delete -e "ssh -i $EC2_KEY" \
     .next/ "$EC2_HOST:$EC2_APP_DIR/.next/"
 
 # Install production dependencies only and restart
+# Note: --ignore-scripts skips the "prepare" hook which requires husky (a dev dependency)
 echo "  Installing dependencies and restarting..."
 ssh -i "$EC2_KEY" "$EC2_HOST" "cd $EC2_APP_DIR && \
-    npm ci --omit=dev && \
+    npm ci --omit=dev --ignore-scripts && \
     npx prisma generate && \
     pm2 restart orderhubnow"
 
