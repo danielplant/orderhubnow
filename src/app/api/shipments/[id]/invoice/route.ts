@@ -14,6 +14,7 @@ import { generatePdf } from '@/lib/pdf/generate'
 import { generateShippingInvoiceHtml } from '@/lib/pdf/shipping-invoice'
 import { extractSize } from '@/lib/utils/size-sort'
 import { getDocument, getDocumentMetadata } from '@/lib/storage/document-storage'
+import { getCompanySettings } from '@/lib/data/queries/settings'
 
 interface RouteContext {
   params: Promise<{ id: string }>
@@ -246,14 +247,22 @@ export async function GET(
       }
     }
 
+    // Fetch company settings for branding
+    const companySettings = await getCompanySettings()
+    const companyAddress = [
+      companySettings.AddressLine1,
+      companySettings.AddressLine2,
+    ].filter(Boolean).join(', ')
+
     // Generate HTML
     const html = generateShippingInvoiceHtml({
-      // Company info (should come from settings, hardcoded for now)
-      companyName: 'Limeapple',
-      companyAddress: '123 Fashion Blvd, Los Angeles, CA 90001',
-      companyPhone: '1-800-359-5171',
-      companyEmail: 'orders@limeapple.com',
-      companyWebsite: 'www.limeapple.com',
+      // Company info from database settings
+      companyName: companySettings.CompanyName,
+      companyAddress: companyAddress,
+      companyPhone: companySettings.Phone || '',
+      companyEmail: companySettings.Email || '',
+      companyWebsite: companySettings.Website || '',
+      companyLogoUrl: companySettings.LogoUrl || undefined,
 
       // Invoice info
       invoiceNumber,
