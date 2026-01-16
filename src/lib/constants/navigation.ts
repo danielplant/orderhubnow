@@ -29,6 +29,7 @@ export const adminNav: NavItem[] = [
 export const repNav: NavItem[] = [
   { name: 'Dashboard', path: '/rep' },
   { name: 'Orders', path: '/rep/orders' },
+  { name: 'Products', path: '/rep/products' },
 ]
 
 export const buyerNav: NavItem[] = [

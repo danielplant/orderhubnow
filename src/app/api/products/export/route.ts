@@ -99,9 +99,9 @@ async function fetchThumbnailForExport(
 
 export async function GET(request: NextRequest) {
   try {
-    // Auth check
+    // Auth check - allow both admin and rep roles
     const session = await auth()
-    if (!session?.user || session.user.role !== 'admin') {
+    if (!session?.user || (session.user.role !== 'admin' && session.user.role !== 'rep')) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 

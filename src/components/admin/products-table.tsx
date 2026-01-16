@@ -40,6 +40,7 @@ interface ProductsTableProps {
   initialRows: AdminSkuRow[]
   total: number
   categories: CategoryForFilter[]
+  readOnly?: boolean
 }
 
 // ============================================================================
@@ -50,6 +51,7 @@ export function ProductsTable({
   initialRows,
   total,
   categories,
+  readOnly = false,
 }: ProductsTableProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -372,10 +374,11 @@ export function ProductsTable({
           </span>
         ),
       },
-      {
+      // Only show actions column when not in readOnly mode
+      ...(!readOnly ? [{
         id: 'actions',
         header: '',
-        cell: (r) => (
+        cell: (r: AdminSkuRow) => (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
@@ -398,9 +401,9 @@ export function ProductsTable({
             </DropdownMenuContent>
           </DropdownMenu>
         ),
-      },
+      }] : []),
     ],
-    [handleDelete, handleTogglePreOrder, handleSkuClick]
+    [handleDelete, handleTogglePreOrder, handleSkuClick, readOnly]
   )
 
   // Bulk actions
@@ -451,10 +454,12 @@ export function ProductsTable({
           />
 
           <div className="ml-auto flex gap-2">
-            <Button variant="outline" size="sm" onClick={() => setShowUploadModal(true)}>
-              <Upload className="h-4 w-4 mr-2" />
-              Upload
-            </Button>
+            {!readOnly && (
+              <Button variant="outline" size="sm" onClick={() => setShowUploadModal(true)}>
+                <Upload className="h-4 w-4 mr-2" />
+                Upload
+              </Button>
+            )}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" size="sm">
@@ -493,8 +498,8 @@ export function ProductsTable({
         </div>
       </div>
 
-      {/* Bulk Actions Bar */}
-      {selectedIds.length > 0 && (
+      {/* Bulk Actions Bar - only show when not readOnly */}
+      {!readOnly && selectedIds.length > 0 && (
         <BulkActionsBar
           count={selectedIds.length}
           actions={bulkActions}
@@ -512,8 +517,8 @@ export function ProductsTable({
         data={initialRows}
         columns={columns}
         getRowId={(r) => r.id}
-        enableRowSelection
-        onSelectionChange={setSelectedIds}
+        enableRowSelection={!readOnly}
+        onSelectionChange={!readOnly ? setSelectedIds : undefined}
         pageSize={pageSize}
         // Manual/server-side pagination
         manualPagination
@@ -526,11 +531,13 @@ export function ProductsTable({
         onSortChange={setSortParam}
       />
 
-      {/* Upload Modal */}
-      <UploadProductsModal
-        open={showUploadModal}
-        onOpenChange={setShowUploadModal}
-      />
+      {/* Upload Modal - only render when not readOnly */}
+      {!readOnly && (
+        <UploadProductsModal
+          open={showUploadModal}
+          onOpenChange={setShowUploadModal}
+        />
+      )}
 
       {/* Product Detail Modal */}
       <ProductDetailModal

@@ -3,13 +3,14 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { cn } from '@/lib/utils'
-import { adminNav, type NavItem } from '@/lib/constants/navigation'
+import type { NavItem } from '@/lib/constants/navigation'
 
 const indentClasses = ['', 'pl-3', 'pl-6', 'pl-9'] as const
 
 function NavNode({ item, depth = 0 }: { item: NavItem; depth?: number }) {
   const pathname = usePathname()
-  const isActive = pathname === item.path || (item.path !== '/admin' && pathname.startsWith(item.path + '/'))
+  const basePath = item.path
+  const isActive = pathname === basePath || (basePath !== '/' && pathname.startsWith(basePath + '/'))
   const hasChildren = !!item.children?.length
 
   return (
@@ -37,12 +38,17 @@ function NavNode({ item, depth = 0 }: { item: NavItem; depth?: number }) {
   )
 }
 
-export default function AdminSidebar() {
+interface PortalSidebarProps {
+  title: string
+  nav: NavItem[]
+}
+
+export function PortalSidebar({ title, nav }: PortalSidebarProps) {
   return (
     <aside className="w-64 shrink-0 border-r bg-background p-4">
-      <div className="mb-4 text-sm font-semibold text-foreground">Admin</div>
+      <div className="mb-4 text-sm font-semibold text-foreground">{title}</div>
       <nav className="space-y-1">
-        {adminNav.map((item) => (
+        {nav.map((item) => (
           <NavNode key={item.path} item={item} />
         ))}
       </nav>
