@@ -10,6 +10,7 @@ import { generatePackingSlipHtml } from '@/lib/pdf/packing-slip'
 import { generateShippingInvoiceHtml } from '@/lib/pdf/shipping-invoice'
 import { storeDocument, type DocumentMetadata } from '@/lib/storage/document-storage'
 import { extractSize } from '@/lib/utils/size-sort'
+import { getCompanySettings } from '@/lib/data/queries/settings'
 
 interface GenerateDocumentsInput {
   shipmentId: string
@@ -34,6 +35,9 @@ export async function generateShipmentDocuments(
   input: GenerateDocumentsInput
 ): Promise<GenerateDocumentsResult> {
   const { shipmentId, generatedBy } = input
+
+  // Fetch company settings for PDF branding
+  const companySettings = await getCompanySettings()
 
   // Fetch shipment with all related data
   const shipment = await prisma.shipments.findUnique({
@@ -259,14 +263,21 @@ export async function generateShipmentDocuments(
   const invoiceNumber = `INV-${orderNumber}-${shipmentNumber}`
   const invoiceDate = shipment.ShipDate || new Date()
 
+  // Build company address from settings
+  const companyAddress = [
+    companySettings.AddressLine1,
+    companySettings.AddressLine2,
+  ].filter(Boolean).join(', ')
+
   // Generate and store invoice
   const invoiceHtml = generateShippingInvoiceHtml({
-    // Company info (should come from settings in production)
-    companyName: 'Limeapple',
-    companyAddress: '123 Fashion Blvd, Los Angeles, CA 90001',
-    companyPhone: '1-800-359-5171',
-    companyEmail: 'orders@limeapple.com',
-    companyWebsite: 'www.limeapple.com',
+    // Company info from database settings
+    companyName: companySettings.CompanyName,
+    companyAddress: companyAddress,
+    companyPhone: companySettings.Phone || '',
+    companyEmail: companySettings.Email || '',
+    companyWebsite: companySettings.Website || '',
+    companyLogoUrl: companySettings.LogoUrl || undefined,
 
     // Invoice info
     invoiceNumber,

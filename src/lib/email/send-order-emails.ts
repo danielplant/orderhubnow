@@ -9,7 +9,8 @@ import { transporter, EMAIL_FROM, EMAIL_CC, EMAIL_SALES } from './client'
 import { customerConfirmationHtml, salesNotificationHtml } from './templates'
 import { generatePdf } from '@/lib/pdf/generate'
 import { generateOrderConfirmationHtml } from '@/lib/pdf/order-confirmation'
-import { getEmailSettings } from '@/lib/data/queries/settings'
+import { getEmailSettings, getCompanySettings } from '@/lib/data/queries/settings'
+import { logEmailSent } from '@/lib/audit/activity-logger'
 import type { EmailSettingsRecord } from '@/lib/types/settings'
 
 interface OrderEmailData {
@@ -67,6 +68,12 @@ async function getEmailConfig(): Promise<EmailSettingsRecord> {
       NotifyOnOrderUpdate: false,
       SendCustomerConfirmation: true,
       UpdatedAt: new Date(),
+      // SMTP fallbacks from env
+      SmtpHost: process.env.SMTP_HOST || null,
+      SmtpPort: process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT, 10) : null,
+      SmtpUser: process.env.SMTP_USER || null,
+      SmtpPassword: process.env.SMTP_PASSWORD || null,
+      SmtpSecure: process.env.SMTP_SECURE === 'true',
     }
   }
 }
@@ -123,6 +130,9 @@ export async function sendOrderEmails(data: OrderEmailData, isUpdate = false): P
     // Calculate subtotal from items
     const subtotal = data.items.reduce((sum, item) => sum + item.lineTotal, 0)
 
+    // Fetch company settings for PDF branding
+    const companySettings = await getCompanySettings()
+
     const pdfHtml = generateOrderConfirmationHtml({
       order: {
         orderNumber: data.orderNumber,
@@ -154,6 +164,13 @@ export async function sendOrderEmails(data: OrderEmailData, isUpdate = false): P
         lineTotal: item.lineTotal,
         discount: 0,
       })),
+      company: {
+        companyName: companySettings.CompanyName,
+        logoUrl: companySettings.LogoUrl,
+        phone: companySettings.Phone,
+        email: companySettings.Email,
+        website: companySettings.Website,
+      },
     })
 
     const pdfUint8 = await generatePdf(pdfHtml, {
@@ -200,6 +217,16 @@ export async function sendOrderEmails(data: OrderEmailData, isUpdate = false): P
       })
 
       result.customerEmailSent = true
+
+      // Log the email send (non-blocking)
+      logEmailSent({
+        entityType: 'order',
+        entityId: data.orderId,
+        orderId: data.orderId,
+        orderNumber: data.orderNumber,
+        emailType: isUpdate ? 'order_update' : 'order_confirmation',
+        recipient: data.customerEmail,
+      }).catch((err) => console.error('Failed to log customer email:', err))
     } catch (error) {
       result.errors.push(`Customer email failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
     }
@@ -229,6 +256,16 @@ export async function sendOrderEmails(data: OrderEmailData, isUpdate = false): P
       })
 
       result.salesEmailSent = true
+
+      // Log the email send (non-blocking)
+      logEmailSent({
+        entityType: 'order',
+        entityId: data.orderId,
+        orderId: data.orderId,
+        orderNumber: data.orderNumber,
+        emailType: 'sales_notification',
+        recipient: salesEmails,
+      }).catch((err) => console.error('Failed to log sales email:', err))
     } catch (error) {
       result.errors.push(`Sales email failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
     }

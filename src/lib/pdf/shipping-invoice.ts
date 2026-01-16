@@ -45,6 +45,7 @@ interface ShippingInvoiceData {
   companyPhone: string
   companyEmail: string
   companyWebsite: string
+  companyLogoUrl?: string
   
   // Invoice info
   invoiceNumber: string
@@ -145,6 +146,7 @@ export function generateShippingInvoiceHtml(data: ShippingInvoiceData): string {
     companyPhone,
     companyEmail,
     companyWebsite,
+    companyLogoUrl,
     invoiceNumber,
     invoiceDate,
     dueDate,
@@ -213,7 +215,10 @@ export function generateShippingInvoiceHtml(data: ShippingInvoiceData): string {
       <!-- Header -->
       <header class="header">
         <div class="header-brand">
-          <div class="logo">${escapeHtml(companyName)}</div>
+          ${companyLogoUrl
+            ? `<img src="${companyLogoUrl}" alt="${escapeHtml(companyName)}" class="logo-image" />`
+            : `<div class="logo">${escapeHtml(companyName)}</div>`
+          }
           <div class="company-info">
             ${escapeHtml(companyAddress)}<br/>
             Tel: ${escapeHtml(companyPhone)}<br/>
@@ -450,6 +455,13 @@ export function generateShippingInvoiceHtml(data: ShippingInvoiceData): string {
         font-size: 22pt;
         font-weight: 700;
         color: #171717;
+        margin-bottom: 8px;
+      }
+
+      .logo-image {
+        max-height: 50px;
+        max-width: 180px;
+        object-fit: contain;
         margin-bottom: 8px;
       }
 

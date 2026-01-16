@@ -15,6 +15,7 @@ import { generatePdf } from '@/lib/pdf/generate'
 import { generateOrderConfirmationHtml } from '@/lib/pdf/order-confirmation'
 import { parsePrice, resolveColor } from '@/lib/utils'
 import { extractSize } from '@/lib/utils/size-sort'
+import { getCompanySettings } from '@/lib/data/queries/settings'
 
 interface RouteContext {
   params: Promise<{ id: string }>
@@ -38,6 +39,9 @@ export async function GET(
   }
 
   try {
+    // Fetch company settings for PDF branding
+    const companySettings = await getCompanySettings()
+
     // Fetch order with new fields
     const order = await prisma.customerOrders.findUnique({
       where: { ID: BigInt(orderId) },
@@ -268,6 +272,13 @@ export async function GET(
     const html = generateOrderConfirmationHtml({
       order: orderData,
       items,
+      company: {
+        companyName: companySettings.CompanyName,
+        logoUrl: companySettings.LogoUrl,
+        phone: companySettings.Phone,
+        email: companySettings.Email,
+        website: companySettings.Website,
+      },
     })
 
     // DEBUG MODE: Return raw HTML instead of PDF

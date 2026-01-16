@@ -70,9 +70,18 @@ interface LineItem {
   unitPrice?: number | null // Price per individual unit
 }
 
+interface CompanySettings {
+  companyName: string
+  logoUrl?: string | null
+  phone?: string | null
+  email?: string | null
+  website?: string | null
+}
+
 interface OrderConfirmationInput {
   order: OrderData
   items: LineItem[]
+  company?: CompanySettings
 }
 
 // ============================================================================
@@ -138,7 +147,14 @@ function getStyleFromSku(sku: string): string {
 // ============================================================================
 
 export function generateOrderConfirmationHtml(input: OrderConfirmationInput): string {
-  const { order, items } = input
+  const { order, items, company } = input
+
+  // Company branding (with fallbacks for backward compatibility)
+  const companyName = company?.companyName || 'OrderHub'
+  const companyLogo = company?.logoUrl || null
+  const companyPhone = company?.phone || '1-800-359-5171'
+  const companyEmail = company?.email || 'orders@limeapple.com'
+  const companyWebsite = company?.website || 'www.limeapple.com'
 
   // Calculate totals
   const totalUnits = items.reduce((sum, item) => sum + item.quantity, 0)
@@ -247,12 +263,15 @@ export function generateOrderConfirmationHtml(input: OrderConfirmationInput): st
       <!-- Header -->
       <header class="header">
         <div class="header-brand">
-          <div class="logo">OrderHub</div>
+          ${companyLogo
+            ? `<img src="${companyLogo}" alt="${escapeHtml(companyName)}" class="logo-image" />`
+            : `<div class="logo">${escapeHtml(companyName)}</div>`
+          }
         </div>
         <div class="header-contact">
-          <div>www.limeapple.com</div>
-          <div>TEL: 1-800-359-5171</div>
-          <div>EMAIL: orders@limeapple.com</div>
+          <div>${escapeHtml(companyWebsite)}</div>
+          <div>TEL: ${escapeHtml(companyPhone)}</div>
+          <div>EMAIL: ${escapeHtml(companyEmail)}</div>
         </div>
       </header>
 
@@ -478,6 +497,12 @@ export function generateOrderConfirmationHtml(input: OrderConfirmationInput): st
         font-weight: 700;
         color: #171717;
         letter-spacing: -0.5px;
+      }
+
+      .logo-image {
+        max-height: 50px;
+        max-width: 200px;
+        object-fit: contain;
       }
 
       .header-contact {

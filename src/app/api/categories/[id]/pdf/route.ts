@@ -16,6 +16,7 @@ import { prisma } from '@/lib/prisma'
 import { generatePdf, wrapHtml, formatDate } from '@/lib/pdf/generate'
 import { getEffectiveQuantity, parsePrice, parseSkuId, resolveColor } from '@/lib/utils'
 import { extractSize } from '@/lib/utils/size-sort'
+import { getCompanySettings } from '@/lib/data/queries/settings'
 
 // ============================================================================
 // Types
@@ -116,8 +117,11 @@ export async function GET(
 
     const products = Array.from(productMap.values())
 
+    // Fetch company settings for branding
+    const companySettings = await getCompanySettings()
+
     // Generate HTML
-    const html = generateLineSheetHtml(products, category.Name)
+    const html = generateLineSheetHtml(products, category.Name, companySettings)
 
     // Generate PDF (portrait for line sheet)
     const pdfBuffer = await generatePdf(html, {
@@ -155,9 +159,15 @@ export async function GET(
 // HTML Template
 // ============================================================================
 
+interface CompanySettingsForPdf {
+  CompanyName: string
+  LogoUrl: string | null
+}
+
 function generateLineSheetHtml(
   products: ProductForLineSheet[],
-  categoryName: string
+  categoryName: string,
+  company: CompanySettingsForPdf
 ): string {
   const now = new Date()
 
@@ -216,10 +226,29 @@ function generateLineSheetHtml(
     })
     .join('')
 
+  // Escape HTML for safety
+  function escapeHtml(str: string): string {
+    return str
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+  }
+
   const content = `
+    <style>
+      .pdf-logo-image {
+        max-height: 40px;
+        max-width: 160px;
+        object-fit: contain;
+      }
+    </style>
     <div class="pdf-header">
       <div class="pdf-header-left">
-        <div class="pdf-logo">OrderHub</div>
+        ${company.LogoUrl
+          ? `<img src="${company.LogoUrl}" alt="${escapeHtml(company.CompanyName)}" class="pdf-logo-image" />`
+          : `<div class="pdf-logo">${escapeHtml(company.CompanyName)}</div>`
+        }
       </div>
       <div class="pdf-header-right">
         <div class="pdf-title">CATEGORY: ${categoryName}</div>
