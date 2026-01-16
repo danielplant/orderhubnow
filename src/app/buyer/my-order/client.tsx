@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { useOrder } from '@/lib/contexts/order-context'
 import { useCurrency } from '@/lib/contexts/currency-context'
+import { BrandHeader } from '@/components/buyer/brand-header'
 import { OrderForm } from '@/components/buyer/order-form'
 import { DraftToolbar } from '@/components/buyer/draft-toolbar'
 import { DraftRecoveryBanner } from '@/components/buyer/draft-recovery-banner'
@@ -242,13 +243,15 @@ export function MyOrderClient({
   }
 
   return (
-    <div className="container mx-auto py-8 px-4">
-      {/* Draft recovery banner - only show when not in edit mode */}
-      {!isEditMode && <DraftRecoveryBanner className="mb-4" />}
+    <>
+      <BrandHeader />
+      <div className="container mx-auto py-8 px-4">
+        {/* Draft recovery banner - only show when not in edit mode */}
+        {!isEditMode && <DraftRecoveryBanner className="mb-4" />}
 
-      <h1 className="text-2xl font-bold mb-4">
-        {isEditMode ? `Edit Order ${existingOrder?.orderNumber}` : 'Review Your Order'}
-      </h1>
+        <h1 className="text-2xl font-bold mb-4">
+          {isEditMode ? `Edit Order ${existingOrder?.orderNumber}` : 'Review Your Order'}
+        </h1>
 
       {/* Draft toolbar - only show when not in edit mode */}
       {!isEditMode && <DraftToolbar className="mb-6" />}
@@ -364,6 +367,7 @@ export function MyOrderClient({
           />
         </div>
       </div>
-    </div>
+      </div>
+    </>
   )
 }

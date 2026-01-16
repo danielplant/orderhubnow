@@ -49,6 +49,7 @@ export {
 export { Toaster } from "./sonner";
 
 // Custom components (our design system)
+export { Breadcrumb, type BreadcrumbItem, type BreadcrumbProps } from "./breadcrumb";
 export { Divider } from "./divider";
 export { Badge } from "./badge";
 export { IndicatorDot } from "./indicator-dot";

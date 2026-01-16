@@ -1,8 +1,7 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Calendar } from "lucide-react";
+import { Calendar } from "lucide-react";
 import { BrandHeader } from "@/components/buyer/brand-header";
-import { Divider } from "@/components/ui";
+import { Breadcrumb, Divider } from "@/components/ui";
 import { CollectionProductsGrid } from "@/components/buyer/collection-products-grid";
 import {
   getPreOrderCollectionById,
@@ -72,13 +71,11 @@ export default async function PreOrderCollectionPage({ params, searchParams }: P
       <main className="px-6 py-8 md:px-12 lg:px-16 max-w-[1800px] mx-auto">
         {/* Header */}
         <div className="mb-8 space-y-4">
-          <Link
-            href={`/buyer/pre-order${repQuery}`}
-            className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Back to Pre-Order Collections
-          </Link>
+          <Breadcrumb items={[
+            { label: 'Order Portal', href: `/buyer/select-journey${repQuery}` },
+            { label: 'Pre-Order', href: `/buyer/pre-order${repQuery}` },
+            { label: collection.name },
+          ]} />
 
           <div>
             <h1 className="text-3xl md:text-4xl font-medium tracking-tight text-foreground">

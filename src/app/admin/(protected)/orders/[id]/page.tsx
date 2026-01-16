@@ -9,7 +9,8 @@ import type { OrderStatus } from '@/lib/types/order'
 import { getShipmentsForOrder, getOrderItemsWithFulfillment } from '@/lib/data/actions/shipments'
 import { LineItemsSection, ShipmentHistory, PDFSettingsCard, ShopifyStatusCard } from '@/components/admin/order-detail-client'
 import { ActivityLogPanel } from '@/components/admin/activity-log-panel'
-import { getOrderActivityLog } from '@/lib/audit/activity-logger'
+import { OrderEmailPanel } from '@/components/admin/order-email-panel'
+import { getOrderActivityLog, getOrderEmailLogs } from '@/lib/audit/activity-logger'
 
 function getStatusBadgeStatus(status: OrderStatus) {
   switch (status) {
@@ -79,17 +80,18 @@ export default async function AdminOrderDetailsPage(props: { params: Promise<{ i
   const currency: 'USD' | 'CAD' = order.Country?.toUpperCase().includes('CAD') ? 'CAD' : 'USD'
   const status = order.OrderStatus as OrderStatus
 
-  // Get rep email if there's a sales rep
+  // Get rep details if there's a sales rep (ID for edit link, email for notifications)
   const rep = order.SalesRep
     ? await prisma.reps.findFirst({
         where: { Name: order.SalesRep },
-        select: { Email1: true, Email2: true, Name: true },
+        select: { ID: true, Email1: true, Email2: true, Name: true },
       })
     : null
+  const repId = rep?.ID
   const repEmail = rep?.Email1 || rep?.Email2 || undefined
   const repName = rep?.Name || undefined
 
-  const [itemsWithFulfillment, comments, shipments, activityLogs] = await Promise.all([
+  const [itemsWithFulfillment, comments, shipments, activityLogs, emailLogs] = await Promise.all([
     getOrderItemsWithFulfillment(id),
     prisma.customerOrdersComments.findMany({
       where: { OrderID: BigInt(orderId) },
@@ -103,6 +105,7 @@ export default async function AdminOrderDetailsPage(props: { params: Promise<{ i
     }),
     getShipmentsForOrder(id),
     getOrderActivityLog(id),
+    getOrderEmailLogs(id),
   ])
 
   // Transform items for client component
@@ -145,6 +148,11 @@ export default async function AdminOrderDetailsPage(props: { params: Promise<{ i
         </div>
 
         <div className="flex gap-2">
+          <Button variant="outline" asChild>
+            <Link href={`/buyer/my-order?editOrder=${order.ID.toString()}&returnTo=/admin/orders/${order.ID.toString()}${repId ? `&repId=${repId}` : ''}`}>
+              Edit Order
+            </Link>
+          </Button>
           <Button variant="outline" asChild>
             <a href={`/api/orders/${order.ID.toString()}/pdf`} target="_blank" rel="noreferrer">
               PDF
@@ -229,6 +237,14 @@ export default async function AdminOrderDetailsPage(props: { params: Promise<{ i
           paymentTerms={order.PaymentTerms || ''}
           approvalDate={order.ApprovalDate?.toISOString().slice(0, 10) || ''}
           brandNotes={order.BrandNotes || ''}
+        />
+
+        <OrderEmailPanel
+          orderId={id}
+          orderNumber={order.OrderNumber}
+          customerEmail={order.CustomerEmail}
+          repEmail={repEmail || null}
+          emailLogs={emailLogs}
         />
 
         {order.IsTransferredToShopify && order.ShopifyOrderID && (

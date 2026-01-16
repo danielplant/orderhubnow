@@ -1,3 +1,5 @@
+import Link from "next/link";
+import { ArrowLeft } from "lucide-react";
 import { BrandHeader } from "@/components/buyer/brand-header";
 import { CollectionCard } from "@/components/buyer/collection-card";
 import { Divider } from "@/components/ui";
@@ -26,6 +28,13 @@ export default async function ATSPage({ searchParams }: Props) {
       <main className="px-6 py-8 md:px-12 lg:px-16 max-w-[1800px] mx-auto">
         {/* Header */}
         <div className="mb-10 space-y-4">
+          <Link
+            href={`/buyer/select-journey${repQuery}`}
+            className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back to Order Portal
+          </Link>
           <div className="flex items-baseline justify-between gap-4">
             <h1 className="text-3xl md:text-4xl font-medium tracking-tight text-foreground">
               Available to Ship

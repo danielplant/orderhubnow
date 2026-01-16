@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, Calendar } from "lucide-react";
+import { ArrowLeft, ArrowRight, Calendar } from "lucide-react";
 import { BrandHeader } from "@/components/buyer/brand-header";
 import { Divider } from "@/components/ui";
 import { getPreOrderCollectionsForBuyer } from "@/lib/data/queries/collections";
@@ -111,6 +111,13 @@ export default async function PreOrderPage({ searchParams }: Props) {
       <main className="px-6 py-8 md:px-12 lg:px-16 max-w-[1800px] mx-auto">
         {/* Header */}
         <div className="mb-10 space-y-4">
+          <Link
+            href={`/buyer/select-journey${repQuery}`}
+            className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back to Order Portal
+          </Link>
           <div className="flex items-baseline justify-between gap-4">
             <h1 className="text-3xl md:text-4xl font-medium tracking-tight text-foreground">
               Pre-Order Collections

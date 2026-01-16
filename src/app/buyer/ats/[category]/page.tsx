@@ -1,8 +1,6 @@
-import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
 import { BrandHeader } from "@/components/buyer/brand-header";
 import { CollectionProductsGrid } from "@/components/buyer/collection-products-grid";
-import { Divider } from "@/components/ui";
+import { Breadcrumb, Divider } from "@/components/ui";
 import { getSkusByCollection, getCollectionName } from "@/lib/data/queries/collections";
 import { buildRepQueryStringFromObject } from "@/lib/utils/rep-context";
 
@@ -35,13 +33,11 @@ export default async function CollectionPage({ params, searchParams }: PageProps
       <main className="px-6 py-8 md:px-12 lg:px-16 max-w-[1800px] mx-auto">
         {/* Header */}
         <div className="mb-8 space-y-4">
-          <Link
-            href={`/buyer/ats${repQuery}`}
-            className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Back to Collections
-          </Link>
+          <Breadcrumb items={[
+            { label: 'Order Portal', href: `/buyer/select-journey${repQuery}` },
+            { label: 'Available to Ship', href: `/buyer/ats${repQuery}` },
+            { label: displayName },
+          ]} />
 
           <h1 className="text-3xl md:text-4xl font-medium tracking-tight text-foreground">
             {displayName}
