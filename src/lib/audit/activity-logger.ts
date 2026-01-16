@@ -346,6 +346,17 @@ export async function logDocumentGenerated(params: {
 }
 
 /**
+ * Email types that can be logged.
+ */
+export type EmailType =
+  | 'shipment_confirmation'
+  | 'tracking_update'
+  | 'rep_notification'
+  | 'order_confirmation'
+  | 'order_update'
+  | 'sales_notification'
+
+/**
  * Log email sent
  */
 export async function logEmailSent(params: {
@@ -353,7 +364,7 @@ export async function logEmailSent(params: {
   entityId: string
   orderId: string
   orderNumber: string
-  emailType: 'shipment_confirmation' | 'tracking_update' | 'rep_notification'
+  emailType: EmailType
   recipient: string
   performedBy?: string
 }): Promise<void> {
@@ -369,5 +380,55 @@ export async function logEmailSent(params: {
     performedBy: params.performedBy,
     orderNumber: params.orderNumber,
     orderId: params.orderId,
+  })
+}
+
+/**
+ * Email log entry with parsed values.
+ */
+export interface OrderEmailLogEntry {
+  id: string
+  emailType: EmailType
+  recipient: string
+  timestamp: Date
+  performedBy: string | null
+}
+
+/**
+ * Get email logs for a specific order.
+ */
+export async function getOrderEmailLogs(orderId: string): Promise<OrderEmailLogEntry[]> {
+  const logs = await prisma.activityLogs.findMany({
+    where: {
+      OrderId: BigInt(orderId),
+      Action: 'email_sent',
+    },
+    orderBy: {
+      DateAdded: 'desc',
+    },
+    take: 50,
+  })
+
+  return logs.map((log) => {
+    let emailType: EmailType = 'order_confirmation'
+    let recipient = ''
+
+    if (log.NewValues) {
+      try {
+        const parsed = JSON.parse(log.NewValues)
+        emailType = parsed.emailType || 'order_confirmation'
+        recipient = parsed.recipient || ''
+      } catch {
+        // Ignore parse errors
+      }
+    }
+
+    return {
+      id: log.ID.toString(),
+      emailType,
+      recipient,
+      timestamp: log.DateAdded,
+      performedBy: log.PerformedBy,
+    }
   })
 }

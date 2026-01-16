@@ -60,12 +60,20 @@ export type EmailSettingsRecord = {
   NotifyOnOrderUpdate: boolean
   SendCustomerConfirmation: boolean
   UpdatedAt: Date
+
+  // SMTP Configuration - falls back to .env if not set in DB
+  SmtpHost: string | null
+  SmtpPort: number | null
+  SmtpUser: string | null
+  SmtpPassword: string | null
+  SmtpSecure: boolean
 }
 
 /**
- * Editable fields for email settings.
+ * Editable fields for email settings (notification preferences only).
+ * SMTP settings are edited separately via updateSmtpSettings.
  */
-export type EmailSettingsEditableFields = Omit<EmailSettingsRecord, 'ID' | 'UpdatedAt'>
+export type EmailSettingsEditableFields = Omit<EmailSettingsRecord, 'ID' | 'UpdatedAt' | 'SmtpHost' | 'SmtpPort' | 'SmtpUser' | 'SmtpPassword' | 'SmtpSecure'>
 
 /**
  * Standard action result for server actions.

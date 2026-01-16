@@ -200,6 +200,13 @@ model EmailSettings {
   NotifyOnOrderUpdate      Boolean  @default(false)
   SendCustomerConfirmation Boolean  @default(true)
   UpdatedAt                DateTime @default(now()) @updatedAt
+
+  // SMTP Configuration - falls back to .env if not set
+  SmtpHost                 String?  @db.NVarChar(200)
+  SmtpPort                 Int?
+  SmtpUser                 String?  @db.NVarChar(200)
+  SmtpPassword             String?  @db.NVarChar(500)
+  SmtpSecure               Boolean  @default(false)
 }
 
 model MissingShopifySkus {

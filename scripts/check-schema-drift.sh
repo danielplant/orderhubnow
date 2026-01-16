@@ -67,10 +67,10 @@ else
     echo "" >> "$MIGRATION_FILE"
     echo "$MIGRATION_SQL" >> "$MIGRATION_FILE"
     echo "" >> "$MIGRATION_FILE"
+    # Register migration (no GO - Prisma db execute doesn't support batch separators)
     echo "-- Register this migration" >> "$MIGRATION_FILE"
     echo "IF NOT EXISTS (SELECT 1 FROM SchemaMigrations WHERE Name = '${TIMESTAMP}-auto-migration')" >> "$MIGRATION_FILE"
     echo "    INSERT INTO SchemaMigrations (Name) VALUES ('${TIMESTAMP}-auto-migration');" >> "$MIGRATION_FILE"
-    echo "GO" >> "$MIGRATION_FILE"
     
     echo "Migration saved to: $MIGRATION_FILE"
     echo ""

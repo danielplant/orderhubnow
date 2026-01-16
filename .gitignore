@@ -52,3 +52,6 @@ docker-compose.yml
 
 # Generated thumbnails
 /public/thumbnails/
+
+# Auto-generated SQL migrations (applied and discarded)
+sql-migrations/*-auto-migration.sql

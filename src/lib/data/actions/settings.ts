@@ -209,3 +209,73 @@ export async function updateEmailSettings(
     return { success: false, error: 'Sorry, there was an error, please try again.' }
   }
 }
+
+/**
+ * SMTP settings input type.
+ */
+export interface SmtpSettingsInput {
+  SmtpHost: string | null
+  SmtpPort: number | null
+  SmtpUser: string | null
+  SmtpPassword: string | null
+  SmtpSecure: boolean
+}
+
+/**
+ * Update SMTP configuration settings.
+ * These can also be set via .env for backward compatibility.
+ */
+export async function updateSmtpSettings(
+  input: SmtpSettingsInput
+): Promise<ActionResult> {
+  try {
+    // Validate SMTP host if provided
+    if (input.SmtpHost && input.SmtpHost.trim().length === 0) {
+      return { success: false, error: 'SMTP host cannot be empty if provided' }
+    }
+
+    // Validate port range
+    if (input.SmtpPort !== null && (input.SmtpPort < 1 || input.SmtpPort > 65535)) {
+      return { success: false, error: 'SMTP port must be between 1 and 65535' }
+    }
+
+    // Validate user email format if provided
+    if (input.SmtpUser && input.SmtpUser.trim() && !isValidEmail(input.SmtpUser.trim())) {
+      return { success: false, error: 'Invalid SMTP user email format' }
+    }
+
+    const existing = await prisma.emailSettings.findFirst()
+
+    const data = {
+      SmtpHost: input.SmtpHost?.trim() || null,
+      SmtpPort: input.SmtpPort,
+      SmtpUser: input.SmtpUser?.trim() || null,
+      SmtpPassword: input.SmtpPassword || null,
+      SmtpSecure: input.SmtpSecure,
+    }
+
+    if (existing) {
+      await prisma.emailSettings.update({
+        where: { ID: existing.ID },
+        data,
+      })
+    } else {
+      // Create new record with SMTP settings and defaults for other fields
+      await prisma.emailSettings.create({
+        data: {
+          FromEmail: process.env.EMAIL_FROM || 'orders@example.com',
+          NotifyOnNewOrder: true,
+          NotifyOnOrderUpdate: false,
+          SendCustomerConfirmation: true,
+          ...data,
+        },
+      })
+    }
+
+    // Clear cached transporter so next email uses new settings
+    revalidatePath('/admin/settings')
+    return { success: true, message: 'SMTP settings have been updated successfully.' }
+  } catch {
+    return { success: false, error: 'Sorry, there was an error, please try again.' }
+  }
+}

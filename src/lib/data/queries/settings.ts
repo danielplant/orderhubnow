@@ -121,11 +121,18 @@ const DEFAULT_EMAIL_SETTINGS: EmailSettingsRecord = {
   NotifyOnOrderUpdate: false,
   SendCustomerConfirmation: true,
   UpdatedAt: new Date(),
+  // SMTP defaults from environment
+  SmtpHost: process.env.SMTP_HOST || null,
+  SmtpPort: process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT, 10) : null,
+  SmtpUser: process.env.SMTP_USER || null,
+  SmtpPassword: process.env.SMTP_PASSWORD || null,
+  SmtpSecure: process.env.SMTP_SECURE === 'true',
 }
 
 /**
  * Fetch email notification settings.
  * Returns defaults (from env vars) if no record exists.
+ * SMTP fields fall back to .env if not set in database.
  */
 export async function getEmailSettings(): Promise<EmailSettingsRecord> {
   const row = await prisma.emailSettings.findFirst()
@@ -144,5 +151,11 @@ export async function getEmailSettings(): Promise<EmailSettingsRecord> {
     NotifyOnOrderUpdate: row.NotifyOnOrderUpdate,
     SendCustomerConfirmation: row.SendCustomerConfirmation,
     UpdatedAt: row.UpdatedAt,
+    // SMTP with env fallback for backward compatibility
+    SmtpHost: row.SmtpHost || process.env.SMTP_HOST || null,
+    SmtpPort: row.SmtpPort || (process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT, 10) : null),
+    SmtpUser: row.SmtpUser || process.env.SMTP_USER || null,
+    SmtpPassword: row.SmtpPassword || process.env.SMTP_PASSWORD || null,
+    SmtpSecure: row.SmtpSecure ?? (process.env.SMTP_SECURE === 'true'),
   }
 }

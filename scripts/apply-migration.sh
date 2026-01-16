@@ -47,7 +47,8 @@ echo "[1/3] Copying migration to EC2..."
 scp -i "$EC2_KEY" -q "$MIGRATION_FILE" "$EC2_HOST:/tmp/migration-to-apply.sql"
 
 echo "[2/3] Applying migration to production database..."
-ssh -i "$EC2_KEY" "$EC2_HOST" "cd $EC2_APP_DIR && npx tsx scripts/run-migration.ts /tmp/migration-to-apply.sql"
+# Use Prisma db execute instead of mssql (Prisma is already installed in production)
+ssh -i "$EC2_KEY" "$EC2_HOST" "cd $EC2_APP_DIR && npx prisma db execute --file /tmp/migration-to-apply.sql --schema prisma/schema.prisma"
 
 echo "[3/3] Verifying..."
 echo ""
