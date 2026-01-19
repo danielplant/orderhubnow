@@ -6,14 +6,21 @@
  * Interactive UI for configuring Shopify sync:
  * - Entity selector (Product, ProductVariant, etc.)
  * - Status filter configuration with checkboxes
- * - Filter impact preview
- * - Save/discard controls
+ * - Field configuration with toggles
+ * - Access probe testing
+ * - Metafield discovery
+ * - Sample data preview
  */
 
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
+import { RefreshCw, Loader2 } from 'lucide-react'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { FieldConfigPanel, FieldConfig, FieldCategory } from './field-config-panel'
+import { MetafieldsPanel, EnabledMetafield } from './metafields-panel'
+import { SampleDataViewer } from './sample-data-viewer'
+import { AccessStatus } from './field-toggle-row'
 
 // ============================================================================
 // Types
@@ -34,6 +41,24 @@ interface Entity {
   name: string
   displayName: string
   hasMetafields: boolean
+}
+
+interface SyncConfigResponse {
+  success: boolean
+  entityType: string
+  fields: FieldConfig[]
+  filters: Array<{
+    fieldPath: string
+    operator: string
+    value: string
+    enabled: boolean
+  }>
+  protectedFields: string[]
+  schemaInfo?: {
+    apiVersion: string
+    fetchedAt: string
+  }
+  error?: string
 }
 
 // ============================================================================
@@ -205,17 +230,50 @@ function EntitySelector({
 // ============================================================================
 
 export function DeveloperToolsClient() {
+  // Entity state
   const [entities, setEntities] = useState<Entity[]>([])
   const [selectedEntity, setSelectedEntity] = useState('Product')
+
+  // Status filter state
   const [distribution, setDistribution] = useState<FilterDistribution | null>(null)
   const [selectedStatuses, setSelectedStatuses] = useState<string[]>(['ACTIVE'])
   const [originalStatuses, setOriginalStatuses] = useState<string[]>(['ACTIVE'])
+
+  // Field configuration state
+  const [fieldConfig, setFieldConfig] = useState<FieldConfig[]>([])
+  const [originalFieldConfig, setOriginalFieldConfig] = useState<FieldConfig[]>([])
+  const [schemaInfo, setSchemaInfo] = useState<{ apiVersion: string; fetchedAt: string } | null>(null)
+
+  // Metafield state
+  const [enabledMetafields, setEnabledMetafields] = useState<EnabledMetafield[]>([])
+  const [originalMetafields, setOriginalMetafields] = useState<EnabledMetafield[]>([])
+
+  // Probe state
+  const [isProbing, setIsProbing] = useState(false)
+  const [probeProgress, setProbeProgress] = useState<{ current: number; total: number } | null>(null)
+
+  // UI state
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [refreshingSchema, setRefreshingSchema] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
+  const [sampleRefreshTrigger, setSampleRefreshTrigger] = useState(0)
 
-  const hasChanges = JSON.stringify(selectedStatuses.sort()) !== JSON.stringify(originalStatuses.sort())
+  // Calculate if there are unsaved changes
+  const hasStatusChanges =
+    JSON.stringify(selectedStatuses.sort()) !== JSON.stringify(originalStatuses.sort())
+
+  const hasFieldChanges =
+    JSON.stringify(fieldConfig.map((f) => ({ path: f.fieldPath, enabled: f.enabled })).sort()) !==
+    JSON.stringify(
+      originalFieldConfig.map((f) => ({ path: f.fieldPath, enabled: f.enabled })).sort()
+    )
+
+  const hasMetafieldChanges =
+    JSON.stringify(enabledMetafields.sort()) !== JSON.stringify(originalMetafields.sort())
+
+  const hasUnsavedChanges = hasStatusChanges || hasFieldChanges || hasMetafieldChanges
 
   // Fetch entities
   useEffect(() => {
@@ -233,52 +291,78 @@ export function DeveloperToolsClient() {
     fetchEntities()
   }, [])
 
-  // Fetch distribution and config when entity changes
-  const fetchData = useCallback(async () => {
-    setLoading(true)
-    setError(null)
+  // Fetch all configuration when entity changes
+  const fetchData = useCallback(
+    async (refresh = false) => {
+      setLoading(true)
+      setError(null)
 
-    try {
-      const [distRes, configRes] = await Promise.all([
-        fetch(`/api/admin/shopify/filter-preview/${selectedEntity}`),
-        fetch(`/api/admin/shopify/sync-config/${selectedEntity}`),
-      ])
+      try {
+        const [distRes, configRes] = await Promise.all([
+          fetch(`/api/admin/shopify/filter-preview/${selectedEntity}`),
+          fetch(`/api/admin/shopify/sync-config/${selectedEntity}${refresh ? '?refresh=true' : ''}`),
+        ])
 
-      const distData = await distRes.json()
-      const configData = await configRes.json()
+        const distData = await distRes.json()
+        const configData: SyncConfigResponse = await configRes.json()
 
-      if (distData.success) {
-        setDistribution(distData)
-      }
+        if (distData.success) {
+          setDistribution(distData)
+        }
 
-      if (configData.success) {
-        // Parse current status filter
-        const statusFilter = configData.filters.find(
-          (f: { fieldPath: string }) => f.fieldPath === 'status'
-        )
-        if (statusFilter) {
-          try {
-            const parsed = JSON.parse(statusFilter.value)
-            const statuses = Array.isArray(parsed) ? parsed : [parsed]
-            setSelectedStatuses(statuses)
-            setOriginalStatuses(statuses)
-          } catch {
-            setSelectedStatuses([statusFilter.value])
-            setOriginalStatuses([statusFilter.value])
+        if (configData.success) {
+          // Parse status filter
+          const statusFilter = configData.filters.find((f) => f.fieldPath === 'status')
+          if (statusFilter) {
+            try {
+              const parsed = JSON.parse(statusFilter.value)
+              const statuses = Array.isArray(parsed) ? parsed : [parsed]
+              setSelectedStatuses(statuses)
+              setOriginalStatuses(statuses)
+            } catch {
+              setSelectedStatuses([statusFilter.value])
+              setOriginalStatuses([statusFilter.value])
+            }
+          } else {
+            setSelectedStatuses(['ACTIVE', 'DRAFT', 'ARCHIVED'])
+            setOriginalStatuses(['ACTIVE', 'DRAFT', 'ARCHIVED'])
+          }
+
+          // Set field configuration
+          const fields = configData.fields.map((f) => ({
+            ...f,
+            category: (f.category || 'scalar') as FieldCategory,
+            accessStatus: (f.accessStatus || 'untested') as AccessStatus,
+          }))
+          setFieldConfig(fields)
+          setOriginalFieldConfig(JSON.parse(JSON.stringify(fields)))
+
+          // Extract enabled metafields
+          const metafields = fields
+            .filter((f) => f.isMetafield && f.enabled)
+            .map((f) => {
+              const [, namespace, key] = f.fieldPath.split('.')
+              return { namespace, key, enabled: true }
+            })
+          setEnabledMetafields(metafields)
+          setOriginalMetafields(JSON.parse(JSON.stringify(metafields)))
+
+          // Set schema info
+          if (configData.schemaInfo) {
+            setSchemaInfo(configData.schemaInfo)
           }
         } else {
-          // No filter configured - default to all
-          setSelectedStatuses(['ACTIVE', 'DRAFT', 'ARCHIVED'])
-          setOriginalStatuses(['ACTIVE', 'DRAFT', 'ARCHIVED'])
+          setError(configData.error || 'Failed to load configuration')
         }
+      } catch (err) {
+        setError('Failed to load configuration')
+        console.error(err)
+      } finally {
+        setLoading(false)
       }
-    } catch (err) {
-      setError('Failed to load configuration')
-      console.error(err)
-    } finally {
-      setLoading(false)
-    }
-  }, [selectedEntity])
+    },
+    [selectedEntity]
+  )
 
   useEffect(() => {
     fetchData()
@@ -290,13 +374,112 @@ export function DeveloperToolsClient() {
       if (checked) {
         return [...prev, status]
       } else {
-        // Prevent deselecting all
-        if (prev.length === 1) {
-          return prev
-        }
+        if (prev.length === 1) return prev
         return prev.filter((s) => s !== status)
       }
     })
+  }
+
+  // Handle field toggle change
+  const handleFieldChange = (fieldPath: string, enabled: boolean) => {
+    setFieldConfig((prev) =>
+      prev.map((f) => (f.fieldPath === fieldPath ? { ...f, enabled } : f))
+    )
+  }
+
+  // Handle bulk actions
+  const handleBulkAction = async (action: 'enable-scalars' | 'disable-non-protected' | 'reset') => {
+    try {
+      const res = await fetch(`/api/admin/shopify/sync-config/${selectedEntity}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bulkAction: action }),
+      })
+
+      const data = await res.json()
+
+      if (data.success) {
+        setSuccessMessage(data.message)
+        setTimeout(() => setSuccessMessage(null), 5000)
+        // Refresh to get updated state
+        await fetchData()
+      } else {
+        setError(data.error || 'Failed to apply bulk action')
+      }
+    } catch (err) {
+      setError('Failed to apply bulk action')
+      console.error(err)
+    }
+  }
+
+  // Handle probe fields
+  const handleProbeFields = async () => {
+    setIsProbing(true)
+    setProbeProgress({ current: 0, total: fieldConfig.length })
+
+    try {
+      const res = await fetch(`/api/admin/shopify/probe/${selectedEntity}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ batchSize: 10 }),
+      })
+
+      const data = await res.json()
+
+      if (data.success) {
+        // Update field config with probe results
+        setFieldConfig((prev) =>
+          prev.map((f) => {
+            const result = data.results.find(
+              (r: { fieldPath: string }) => r.fieldPath === f.fieldPath
+            )
+            if (result) {
+              return { ...f, accessStatus: result.accessStatus as AccessStatus }
+            }
+            return f
+          })
+        )
+        setSuccessMessage(data.message)
+        setTimeout(() => setSuccessMessage(null), 5000)
+      } else {
+        setError(data.error || 'Failed to probe fields')
+      }
+    } catch (err) {
+      setError('Failed to probe fields')
+      console.error(err)
+    } finally {
+      setIsProbing(false)
+      setProbeProgress(null)
+    }
+  }
+
+  // Handle metafield change
+  const handleMetafieldChange = (namespace: string, key: string, enabled: boolean) => {
+    setEnabledMetafields((prev) => {
+      const existing = prev.find((m) => m.namespace === namespace && m.key === key)
+      if (existing) {
+        return prev.map((m) =>
+          m.namespace === namespace && m.key === key ? { ...m, enabled } : m
+        )
+      } else {
+        return [...prev, { namespace, key, enabled }]
+      }
+    })
+  }
+
+  // Handle schema refresh
+  const handleRefreshSchema = async () => {
+    setRefreshingSchema(true)
+    try {
+      await fetchData(true)
+      setSuccessMessage('Schema refreshed successfully')
+      setTimeout(() => setSuccessMessage(null), 5000)
+    } catch (err) {
+      setError('Failed to refresh schema')
+      console.error(err)
+    } finally {
+      setRefreshingSchema(false)
+    }
   }
 
   // Save configuration
@@ -306,18 +489,29 @@ export function DeveloperToolsClient() {
     setSuccessMessage(null)
 
     try {
-      const res = await fetch(`/api/admin/shopify/sync-config/${selectedEntity}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          filters: [
+      // Build field updates
+      const fieldUpdates = fieldConfig
+        .filter((f, i) => f.enabled !== originalFieldConfig[i]?.enabled)
+        .map((f) => ({ fieldPath: f.fieldPath, enabled: f.enabled }))
+
+      // Build filter updates
+      const filterUpdates = hasStatusChanges
+        ? [
             {
               fieldPath: 'status',
               operator: 'in',
               value: JSON.stringify(selectedStatuses),
               enabled: true,
             },
-          ],
+          ]
+        : []
+
+      const res = await fetch(`/api/admin/shopify/sync-config/${selectedEntity}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fields: fieldUpdates.length > 0 ? fieldUpdates : undefined,
+          filters: filterUpdates.length > 0 ? filterUpdates : undefined,
         }),
       })
 
@@ -325,8 +519,12 @@ export function DeveloperToolsClient() {
 
       if (data.success) {
         setOriginalStatuses([...selectedStatuses])
+        setOriginalFieldConfig(JSON.parse(JSON.stringify(fieldConfig)))
+        setOriginalMetafields(JSON.parse(JSON.stringify(enabledMetafields)))
         setSuccessMessage('Configuration saved. Changes will apply on next sync.')
         setTimeout(() => setSuccessMessage(null), 5000)
+        // Trigger sample data refresh
+        setSampleRefreshTrigger((prev) => prev + 1)
       } else {
         setError(data.error || 'Failed to save configuration')
       }
@@ -341,11 +539,16 @@ export function DeveloperToolsClient() {
   // Discard changes
   const handleDiscard = () => {
     setSelectedStatuses([...originalStatuses])
+    setFieldConfig(JSON.parse(JSON.stringify(originalFieldConfig)))
+    setEnabledMetafields(JSON.parse(JSON.stringify(originalMetafields)))
   }
+
+  const currentEntity = entities.find((e) => e.name === selectedEntity)
 
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12 text-muted-foreground">
+        <Loader2 className="h-5 w-5 animate-spin mr-2" />
         Loading configuration...
       </div>
     )
@@ -353,19 +556,39 @@ export function DeveloperToolsClient() {
 
   return (
     <div className="space-y-6">
-      {/* Entity Selector */}
-      <EntitySelector
-        entities={entities}
-        selectedEntity={selectedEntity}
-        onSelect={setSelectedEntity}
-      />
+      {/* Entity Selector with Schema Info */}
+      <div className="flex items-center justify-between gap-4">
+        <EntitySelector
+          entities={entities}
+          selectedEntity={selectedEntity}
+          onSelect={setSelectedEntity}
+        />
+        <div className="flex items-center gap-2">
+          {schemaInfo && (
+            <span className="text-xs text-muted-foreground">
+              Schema: {schemaInfo.apiVersion} ({new Date(schemaInfo.fetchedAt).toLocaleDateString()})
+            </span>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRefreshSchema}
+            disabled={refreshingSchema}
+          >
+            {refreshingSchema ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="h-4 w-4" />
+            )}
+            <span className="ml-1.5">Refresh Schema</span>
+          </Button>
+        </div>
+      </div>
 
-      {/* Error Message */}
+      {/* Messages */}
       {error && (
         <div className="p-4 rounded-lg bg-red-50 border border-red-200 text-red-700">{error}</div>
       )}
-
-      {/* Success Message */}
       {successMessage && (
         <div className="p-4 rounded-lg bg-green-50 border border-green-200 text-green-700">
           {successMessage}
@@ -378,47 +601,53 @@ export function DeveloperToolsClient() {
           distribution={distribution}
           selectedStatuses={selectedStatuses}
           onStatusChange={handleStatusChange}
-          hasChanges={hasChanges}
+          hasChanges={hasStatusChanges}
         />
       )}
 
-      {/* Other entities placeholder */}
-      {selectedEntity !== 'Product' && selectedEntity !== 'ProductVariant' && (
-        <Card>
-          <CardHeader>
-            <CardTitle>{selectedEntity} Configuration</CardTitle>
-            <CardDescription>
-              Sync configuration for {selectedEntity} entities is coming soon.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <p className="text-muted-foreground">
-              Currently, only Product and ProductVariant status filtering is implemented.
-            </p>
-          </CardContent>
-        </Card>
+      {/* Field Configuration Panel */}
+      <FieldConfigPanel
+        entityType={selectedEntity}
+        fields={fieldConfig}
+        onFieldChange={handleFieldChange}
+        onBulkAction={handleBulkAction}
+        onProbeFields={handleProbeFields}
+        isProbing={isProbing}
+        probeProgress={probeProgress ?? undefined}
+        hasUnsavedChanges={hasFieldChanges}
+      />
+
+      {/* Metafields Panel (if entity supports metafields) */}
+      {currentEntity?.hasMetafields && (
+        <MetafieldsPanel
+          entityType={selectedEntity}
+          enabledMetafields={enabledMetafields}
+          onMetafieldChange={handleMetafieldChange}
+          hasUnsavedChanges={hasMetafieldChanges}
+        />
       )}
 
+      {/* Sample Data Viewer */}
+      <SampleDataViewer entityType={selectedEntity} refreshTrigger={sampleRefreshTrigger} />
+
       {/* Action Bar */}
-      {(selectedEntity === 'Product' || selectedEntity === 'ProductVariant') && (
-        <div className="flex items-center justify-between p-4 rounded-lg bg-muted/50 border border-border">
-          <div className="text-sm text-muted-foreground">
-            {hasChanges ? (
-              <span className="text-amber-600 font-medium">You have unsaved changes</span>
-            ) : (
-              'Configuration is up to date'
-            )}
-          </div>
-          <div className="flex gap-3">
-            <Button variant="outline" onClick={handleDiscard} disabled={!hasChanges || saving}>
-              Discard
-            </Button>
-            <Button onClick={handleSave} disabled={!hasChanges || saving}>
-              {saving ? 'Saving...' : 'Save Configuration'}
-            </Button>
-          </div>
+      <div className="flex items-center justify-between p-4 rounded-lg bg-muted/50 border border-border">
+        <div className="text-sm text-muted-foreground">
+          {hasUnsavedChanges ? (
+            <span className="text-amber-600 font-medium">You have unsaved changes</span>
+          ) : (
+            'Configuration is up to date'
+          )}
         </div>
-      )}
+        <div className="flex gap-3">
+          <Button variant="outline" onClick={handleDiscard} disabled={!hasUnsavedChanges || saving}>
+            Discard
+          </Button>
+          <Button onClick={handleSave} disabled={!hasUnsavedChanges || saving}>
+            {saving ? 'Saving...' : 'Save Configuration'}
+          </Button>
+        </div>
+      </div>
 
       {/* Info Card */}
       <Card>
@@ -427,16 +656,20 @@ export function DeveloperToolsClient() {
         </CardHeader>
         <CardContent className="text-sm text-muted-foreground space-y-2">
           <p>
-            <strong>1. Select statuses:</strong> Choose which product statuses (ACTIVE, DRAFT,
-            ARCHIVED) should be included in the sync.
+            <strong>1. Configure fields:</strong> Toggle which fields to include in the sync.
+            Protected fields (with lock icons) cannot be disabled.
           </p>
           <p>
-            <strong>2. Save configuration:</strong> Click &quot;Save Configuration&quot; to store your
-            settings. Changes are saved to the database.
+            <strong>2. Test access:</strong> Click &quot;Probe All Fields&quot; to verify your API
+            token can access each field.
           </p>
           <p>
-            <strong>3. Next sync:</strong> When the next Shopify sync runs, only products matching
-            your selected statuses will be included in the Sku table.
+            <strong>3. Preview data:</strong> The Sample Data Viewer shows what data will be synced
+            with your current configuration.
+          </p>
+          <p>
+            <strong>4. Save configuration:</strong> Click &quot;Save Configuration&quot; to store
+            your settings. Changes are saved to the database.
           </p>
           <p className="pt-2 border-t border-border mt-4">
             <strong>Note:</strong> The sync runs automatically on a schedule and can also be

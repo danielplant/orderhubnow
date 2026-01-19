@@ -2,6 +2,7 @@
  * GET/PUT /api/admin/shopify/sync-config/[type]
  *
  * GET: Returns current sync configuration for an entity type
+ *      Initializes fields from introspection if none exist
  * PUT: Updates sync configuration (fields and filters)
  *
  * Protected fields cannot be disabled.
@@ -10,10 +11,62 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/lib/auth/providers'
 import { prisma } from '@/lib/prisma'
-import { getKnownEntities, isProtectedField, PROTECTED_FIELDS } from '@/lib/shopify/introspect'
+import {
+  getKnownEntities,
+  isProtectedField,
+  PROTECTED_FIELDS,
+  introspectEntityType,
+  CATEGORY_DEFAULTS,
+  type FieldCategory,
+} from '@/lib/shopify/introspect'
 
 interface RouteParams {
   params: Promise<{ type: string }>
+}
+
+/**
+ * Initialize field configurations from introspection
+ */
+async function initializeFieldsFromIntrospection(entityType: string): Promise<void> {
+  try {
+    const introspection = await introspectEntityType(entityType)
+
+    const fieldConfigs = introspection.fields.map((field, index) => ({
+      entityType,
+      fieldPath: field.name,
+      fieldType: field.baseType,
+      category: field.category,
+      description: field.description || field.reason,
+      enabled: CATEGORY_DEFAULTS[field.category as FieldCategory] ?? false,
+      isProtected: isProtectedField(entityType, field.name),
+      isMetafield: field.category === 'metafield',
+      displayOrder: index,
+    }))
+
+    // Upsert all fields
+    for (const config of fieldConfigs) {
+      await prisma.syncFieldConfig.upsert({
+        where: {
+          entityType_fieldPath: {
+            entityType: config.entityType,
+            fieldPath: config.fieldPath,
+          },
+        },
+        update: {
+          fieldType: config.fieldType,
+          category: config.category,
+          description: config.description,
+          isProtected: config.isProtected,
+          isMetafield: config.isMetafield,
+          displayOrder: config.displayOrder,
+        },
+        create: config,
+      })
+    }
+  } catch (error) {
+    console.error(`Failed to initialize fields from introspection for ${entityType}:`, error)
+    throw error
+  }
 }
 
 export async function GET(request: NextRequest, { params }: RouteParams) {
@@ -23,6 +76,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
   }
 
   const { type } = await params
+  const { searchParams } = new URL(request.url)
+  const refresh = searchParams.get('refresh') === 'true'
 
   // Validate entity type
   const knownEntities = getKnownEntities()
@@ -31,16 +86,30 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
   }
 
   try {
-    // Get field configurations
-    const fields = await prisma.syncFieldConfig.findMany({
+    // Check if fields exist
+    let fields = await prisma.syncFieldConfig.findMany({
       where: { entityType: type },
       orderBy: [{ displayOrder: 'asc' }, { fieldPath: 'asc' }],
     })
+
+    // Initialize from introspection if no fields exist or refresh requested
+    if (fields.length === 0 || refresh) {
+      await initializeFieldsFromIntrospection(type)
+      fields = await prisma.syncFieldConfig.findMany({
+        where: { entityType: type },
+        orderBy: [{ displayOrder: 'asc' }, { fieldPath: 'asc' }],
+      })
+    }
 
     // Get filter configurations
     const filters = await prisma.syncFilterConfig.findMany({
       where: { entityType: type },
       orderBy: { fieldPath: 'asc' },
+    })
+
+    // Get schema cache info
+    const schemaCache = await prisma.shopifySchemaCache.findUnique({
+      where: { entityType: type },
     })
 
     return NextResponse.json({
@@ -64,6 +133,12 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         enabled: f.enabled,
       })),
       protectedFields: PROTECTED_FIELDS[type] || [],
+      schemaInfo: schemaCache
+        ? {
+            apiVersion: schemaCache.apiVersion,
+            fetchedAt: schemaCache.fetchedAt.toISOString(),
+          }
+        : null,
     })
   } catch (error) {
     console.error(`Error fetching sync config for ${type}:`, error)
@@ -84,9 +159,12 @@ interface FilterUpdate {
   enabled: boolean
 }
 
+type BulkAction = 'enable-scalars' | 'disable-non-protected' | 'reset'
+
 interface SyncConfigUpdateBody {
   fields?: FieldUpdate[]
   filters?: FilterUpdate[]
+  bulkAction?: BulkAction
 }
 
 export async function PUT(request: NextRequest, { params }: RouteParams) {
@@ -121,6 +199,89 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       newValue: string | null
       changedBy: string
     }> = []
+
+    // Handle bulk actions
+    if (body.bulkAction) {
+      const allFields = await prisma.syncFieldConfig.findMany({
+        where: { entityType: type },
+      })
+
+      let fieldsToUpdate: { fieldPath: string; enabled: boolean }[] = []
+
+      switch (body.bulkAction) {
+        case 'enable-scalars': {
+          // Enable all scalar, enum, timestamp, count fields
+          const scalarCategories = ['scalar', 'enum', 'timestamp', 'count']
+          fieldsToUpdate = allFields
+            .filter(
+              (f) =>
+                scalarCategories.includes(f.category || '') && !f.isProtected && !f.enabled
+            )
+            .map((f) => ({ fieldPath: f.fieldPath, enabled: true }))
+          break
+        }
+        case 'disable-non-protected': {
+          // Disable all non-protected fields
+          fieldsToUpdate = allFields
+            .filter((f) => !f.isProtected && f.enabled)
+            .map((f) => ({ fieldPath: f.fieldPath, enabled: false }))
+          break
+        }
+        case 'reset': {
+          // Reset to category defaults
+          for (const field of allFields) {
+            const defaultEnabled =
+              CATEGORY_DEFAULTS[field.category as FieldCategory] ?? false
+            const shouldBeEnabled = field.isProtected ? true : defaultEnabled
+            if (field.enabled !== shouldBeEnabled) {
+              fieldsToUpdate.push({ fieldPath: field.fieldPath, enabled: shouldBeEnabled })
+            }
+          }
+          break
+        }
+      }
+
+      // Apply bulk updates
+      for (const update of fieldsToUpdate) {
+        const current = allFields.find((f) => f.fieldPath === update.fieldPath)
+
+        await prisma.syncFieldConfig.update({
+          where: {
+            entityType_fieldPath: {
+              entityType: type,
+              fieldPath: update.fieldPath,
+            },
+          },
+          data: {
+            enabled: update.enabled,
+            updatedAt: new Date(),
+          },
+        })
+
+        auditEntries.push({
+          configType: 'field',
+          entityType: type,
+          fieldPath: update.fieldPath,
+          action: `bulk:${body.bulkAction}`,
+          previousValue: current?.enabled?.toString() ?? null,
+          newValue: update.enabled.toString(),
+          changedBy,
+        })
+      }
+
+      // Write audit entries for bulk action
+      if (auditEntries.length > 0) {
+        await prisma.syncConfigAudit.createMany({
+          data: auditEntries,
+        })
+      }
+
+      return NextResponse.json({
+        success: true,
+        message: `Bulk action '${body.bulkAction}' applied to ${fieldsToUpdate.length} fields.`,
+        changesCount: fieldsToUpdate.length,
+      })
+    }
 
     // Process field updates
     if (body.fields && Array.isArray(body.fields)) {
