@@ -23,6 +23,7 @@ export const adminNav: NavItem[] = [
   { name: 'Reps', path: '/admin/reps' },
   { name: 'Prepacks', path: '/admin/prepacks' },
   { name: 'Shopify', path: '/admin/shopify' },
+  { name: 'Developer', path: '/admin/developer' },
   { name: 'Settings', path: '/admin/settings' },
 ]
 

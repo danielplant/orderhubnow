@@ -951,7 +951,43 @@ export async function transformToSkuTable(options?: { skipBackup?: boolean }): P
       collectionTypeMap.set(c.id, c.type)
     }
 
-    // 3. Get raw SKUs with required fields
+    // 3. Read sync filters from database
+    const syncFilters = await prisma.syncFilterConfig.findMany({
+      where: { entityType: 'Product', enabled: true },
+    })
+
+    // Build ProductStatus filter clause if configured
+    // SECURITY: Only allow known valid status values to prevent SQL injection
+    const VALID_STATUSES = ['ACTIVE', 'DRAFT', 'ARCHIVED']
+    let statusFilterClause = ''
+
+    const statusFilter = syncFilters.find((f) => f.fieldPath === 'status')
+    if (statusFilter) {
+      let allowedStatuses: string[] = []
+      try {
+        const parsed = JSON.parse(statusFilter.value)
+        allowedStatuses = Array.isArray(parsed) ? parsed : [parsed]
+      } catch {
+        allowedStatuses = [statusFilter.value]
+      }
+
+      // Validate all status values against whitelist
+      const validatedStatuses = allowedStatuses.filter((s) => VALID_STATUSES.includes(s))
+
+      if (validatedStatuses.length > 0) {
+        if (statusFilter.operator === 'equals' || statusFilter.operator === 'in') {
+          const quotedStatuses = validatedStatuses.map((s) => `'${s}'`).join(', ')
+          statusFilterClause = `AND r.ProductStatus IN (${quotedStatuses})`
+          console.log(`Applying ProductStatus filter: IN (${quotedStatuses})`)
+        } else if (statusFilter.operator === 'not_in') {
+          const quotedStatuses = validatedStatuses.map((s) => `'${s}'`).join(', ')
+          statusFilterClause = `AND r.ProductStatus NOT IN (${quotedStatuses})`
+          console.log(`Applying ProductStatus filter: NOT IN (${quotedStatuses})`)
+        }
+      }
+    }
+
+    // 4. Get raw SKUs with required fields
     const rawSkus = await prisma.$queryRawUnsafe<Array<{
       SkuID: string
       ShopifyId: bigint | null
@@ -988,6 +1024,7 @@ export async function transformToSkuTable(options?: { skipBackup?: boolean }): P
         AND ISNULL(r.metafield_usd_ws_price, '') <> ''
         AND ISNULL(r.metafield_msrp_cad, '') <> ''
         AND ISNULL(r.metafield_msrp_us, '') <> ''
+        ${statusFilterClause}
     `)
     console.log(`Found ${rawSkus.length} raw SKUs to process`)
 
@@ -1110,7 +1147,20 @@ export async function transformToSkuTable(options?: { skipBackup?: boolean }): P
       console.log(`Created ${newUnmapped} new unmapped entries`)
     }
 
-    // 7. Truncate and bulk insert
+    // 7. Preserve ThumbnailPath before truncating (for cache continuity)
+    const existingThumbnails = await prisma.sku.findMany({
+      where: { ThumbnailPath: { not: null } },
+      select: { SkuID: true, ThumbnailPath: true },
+    })
+    const thumbnailMap = new Map<string, string>()
+    for (const sku of existingThumbnails) {
+      if (sku.ThumbnailPath) {
+        thumbnailMap.set(sku.SkuID, sku.ThumbnailPath)
+      }
+    }
+    console.log(`Preserved ${thumbnailMap.size} thumbnail cache keys`)
+
+    // 8. Truncate and bulk insert
     await prisma.$executeRawUnsafe('TRUNCATE TABLE Sku')
 
     // Insert in batches
@@ -1120,7 +1170,18 @@ export async function transformToSkuTable(options?: { skipBackup?: boolean }): P
       await prisma.sku.createMany({ data: batch })
     }
 
-    // 8. Remove duplicates (keep first by ID)
+    // 9. Restore ThumbnailPath from preserved map
+    let restoredCount = 0
+    for (const [skuId, thumbnailPath] of thumbnailMap) {
+      const updated = await prisma.sku.updateMany({
+        where: { SkuID: skuId },
+        data: { ThumbnailPath: thumbnailPath },
+      })
+      if (updated.count > 0) restoredCount++
+    }
+    console.log(`Restored ${restoredCount} thumbnail cache keys`)
+
+    // 10. Remove duplicates (keep first by ID)
     await prisma.$executeRawUnsafe(`
       WITH CTE AS (
         SELECT *, ROW_NUMBER() OVER (PARTITION BY SkuID, CollectionID ORDER BY ID DESC) AS rn FROM Sku

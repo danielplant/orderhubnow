@@ -919,3 +919,77 @@ model BackupRow {
 
   @@index([backupSetId])
 }
+
+// ============================================================================
+// Shopify Sync Configuration (Developer Tools)
+// ============================================================================
+// These tables power the Developer Tools UI for configuring Shopify sync:
+// - Which fields to sync from each entity type
+// - Filters to apply (e.g., only ACTIVE products)
+// - Cached schema introspection results
+// - Audit trail of all configuration changes
+// ============================================================================
+
+/// Configuration for which Shopify fields to sync per entity type
+model SyncFieldConfig {
+  id           Int       @id @default(autoincrement())
+  entityType   String    @db.NVarChar(50)   // Product, ProductVariant, Collection
+  fieldPath    String    @db.NVarChar(200)  // status, metafield_custom_season
+  fieldType    String    @db.NVarChar(50)   // SCALAR, OBJECT, CONNECTION, ENUM
+  category     String?   @db.NVarChar(50)   // system, scalar, enum, connection, metafield
+  description  String?   @db.NVarChar(500)  // From schema introspection
+  displayOrder Int       @default(0)        // For UI sorting
+  enabled      Boolean   @default(false)
+  isProtected  Boolean   @default(false)    // Cannot be disabled (id, sku, price, etc.)
+  isMetafield  Boolean   @default(false)
+  accessStatus String?   @db.NVarChar(20)   // accessible, restricted, untested
+  lastProbedAt DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@unique([entityType, fieldPath])
+  @@index([entityType])
+  @@index([isProtected])
+}
+
+/// Filter rules for sync (e.g., only sync ACTIVE products)
+/// Multiple filters on same entity are AND'd together
+model SyncFilterConfig {
+  id          Int      @id @default(autoincrement())
+  entityType  String   @db.NVarChar(50)   // Product
+  fieldPath   String   @db.NVarChar(200)  // status
+  operator    String   @db.NVarChar(20)   // equals, in, not_in
+  value       String   @db.NVarChar(500)  // ACTIVE or ["ACTIVE","DRAFT"] (JSON)
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([entityType, fieldPath])
+  @@index([entityType, enabled])
+}
+
+/// Cached Shopify GraphQL schema introspection results
+model ShopifySchemaCache {
+  id          Int       @id @default(autoincrement())
+  entityType  String    @unique @db.NVarChar(50)  // Product, ProductVariant, etc.
+  apiVersion  String    @db.NVarChar(20)          // e.g., "2024-01"
+  schemaJson  String    @db.NVarChar(Max)         // Full introspection result
+  fetchedAt   DateTime  @default(now())
+  expiresAt   DateTime?                           // Optional TTL
+}
+
+/// Audit trail for all sync configuration changes
+model SyncConfigAudit {
+  id            Int      @id @default(autoincrement())
+  configType    String   @db.NVarChar(50)   // 'field' or 'filter'
+  entityType    String   @db.NVarChar(50)
+  fieldPath     String   @db.NVarChar(200)
+  action        String   @db.NVarChar(20)   // 'enabled', 'disabled', 'created', 'updated', 'deleted'
+  previousValue String?  @db.NVarChar(500)
+  newValue      String?  @db.NVarChar(500)
+  changedBy     String   @db.NVarChar(255)
+  changedAt     DateTime @default(now())
+
+  @@index([entityType, changedAt])
+  @@index([changedBy])
+}
