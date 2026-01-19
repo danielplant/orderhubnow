@@ -392,6 +392,7 @@ export interface ShopifyVariantData {
   productTitle?: string
   productGid?: string
   productType?: string
+  productStatus?: string // ACTIVE, ARCHIVED, DRAFT
   imageUrl?: string
   variantImageUrl?: string
   size?: string
@@ -445,6 +446,7 @@ export async function upsertShopifyVariant(data: ShopifyVariantData): Promise<vo
     ShopifyProductImageURL: imageUrl,
     productId: data.productGid ?? null,
     ProductType: data.productType ?? null,
+    ProductStatus: data.productStatus ?? null,
     // Metafields
     metafield_order_entry_collection: data.metafield_order_entry_collection ?? null,
     metafield_order_entry_description: data.metafield_order_entry_description ?? null,
@@ -462,6 +464,10 @@ export async function upsertShopifyVariant(data: ShopifyVariantData): Promise<vo
     // Inventory item ID for linking to incoming quantities (OnRoute)
     InventoryItemId: data.inventoryItemGid ? parseShopifyGid(data.inventoryItemGid)?.toString() : null,
   }
+
+  // #region agent log
+  fetch('http://127.0.0.1:7243/ingest/a5fde547-ac60-4379-a83d-f48710b84ace',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'pre-fix',hypothesisId:'D',location:'shopify/sync.ts:upsertShopifyVariant',message:'Upserting raw Shopify SKU',data:{gid:data.gid,sku:data.sku,inventoryQuantity:data.inventoryQuantity,productType:data.productType},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion agent log
 
   if (existing) {
     await prisma.rawSkusFromShopify.update({
@@ -561,6 +567,16 @@ async function processJsonlItem(item: Record<string, unknown>): Promise<boolean>
     const product = item.product as ProductData | undefined
     const inventoryItem = item.inventoryItem as InventoryItemData | undefined
     const variantImage = item.image as { url?: string } | undefined
+    const productStatus = product?.status ?? null
+    const isActiveProduct = productStatus === 'ACTIVE'
+
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/a5fde547-ac60-4379-a83d-f48710b84ace',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'pre-fix',hypothesisId:'A',location:'shopify/sync.ts:processJsonlItem:variant',message:'Variant item status observed',data:{gid:itemId,sku:(item.sku as string) || '',productStatus,inventoryQuantity:(item.inventoryQuantity as number) ?? null},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion agent log
+
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/a5fde547-ac60-4379-a83d-f48710b84ace',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'pre-fix',hypothesisId:'B',location:'shopify/sync.ts:processJsonlItem:variant',message:'Variant upsert decision',data:{gid:itemId,sku:(item.sku as string) || '',isActiveProduct,willUpsert:true},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion agent log
 
     // Extract metafield values safely
     const metafields = {
@@ -582,6 +598,10 @@ async function processJsonlItem(item: Record<string, unknown>): Promise<boolean>
     const sizeOption = selectedOptions?.find(opt => opt.name.toLowerCase() === 'size')
     const size = sizeOption?.value || (item.title as string) || ''
 
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/a5fde547-ac60-4379-a83d-f48710b84ace',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'pre-fix',hypothesisId:'C',location:'shopify/sync.ts:processJsonlItem:variant',message:'Variant size and title resolved',data:{gid:itemId,sku:(item.sku as string) || '',size,sizeSource:sizeOption ? 'selectedOption' : 'titleFallback'},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion agent log
+
     await upsertShopifyVariant({
       gid: itemId,
       sku: (item.sku as string) || '',
@@ -592,6 +612,7 @@ async function processJsonlItem(item: Record<string, unknown>): Promise<boolean>
       productTitle: product?.title,
       productGid: product?.id,
       productType: product?.productType,
+      productStatus: productStatus ?? undefined,
       imageUrl: product?.featuredMedia?.preview?.image?.url,
       variantImageUrl: variantImage?.url,
       // Inventory item ID for linking to incoming quantities (OnRoute)
@@ -746,22 +767,135 @@ export async function processJsonlLines(
 
 /**
  * Create a backup of the Sku table before transformation.
- * Creates a timestamped backup table for rollback if needed.
+ * Stores backup data in BackupSet/BackupRow tables (normalized model).
+ *
+ * @returns BackupSet ID if successful, null if failed
  */
-export async function backupSkuTable(): Promise<string | null> {
-  const timestamp = new Date().toISOString().replace(/[-:T.]/g, '_').slice(0, 15)
-  const backupTableName = `Sku_backup_${timestamp}`
+export async function backupSkuTable(): Promise<number | null> {
+  try {
+    // Get current row count
+    const skuCount = await prisma.sku.count()
+
+    if (skuCount === 0) {
+      console.log('No SKUs to backup, skipping.')
+      return null
+    }
+
+    // Create the BackupSet record
+    const backupSet = await prisma.backupSet.create({
+      data: {
+        backupType: 'Sku',
+        description: 'Pre-sync backup',
+        rowCount: skuCount,
+        createdBy: 'system',
+        status: 'active',
+      },
+    })
+
+    console.log(`Created BackupSet id=${backupSet.id} for ${skuCount} SKUs`)
+
+    // Fetch all SKU rows
+    const skus = await prisma.sku.findMany()
+
+    // Insert rows in batches
+    const batchSize = 500
+    let inserted = 0
+
+    for (let i = 0; i < skus.length; i += batchSize) {
+      const batch = skus.slice(i, i + batchSize)
+
+      await prisma.backupRow.createMany({
+        data: batch.map((sku) => ({
+          backupSetId: backupSet.id,
+          rowData: JSON.stringify(sku, (key, value) => {
+            // Handle BigInt serialization
+            if (typeof value === 'bigint') {
+              return value.toString()
+            }
+            // Handle Date serialization
+            if (value instanceof Date) {
+              return value.toISOString()
+            }
+            // Handle Decimal serialization
+            if (value && typeof value === 'object' && 'toNumber' in value) {
+              return (value as { toNumber: () => number }).toNumber()
+            }
+            return value
+          }),
+        })),
+      })
+
+      inserted += batch.length
+    }
+
+    // Update size estimate (rough: average 500 bytes per row)
+    await prisma.backupSet.update({
+      where: { id: backupSet.id },
+      data: { sizeBytes: skus.length * 500 },
+    })
+
+    console.log(`Backup complete: ${inserted} rows saved to BackupSet id=${backupSet.id}`)
+    return backupSet.id
+  } catch (err) {
+    console.error('Failed to create backup:', err)
+    return null
+  }
+}
+
+/**
+ * Clean up old backups based on retention period.
+ * Deletes BackupSet records (and cascades to BackupRows) older than retention.
+ *
+ * @param retentionDays - Number of days to keep backups (default: 7)
+ * @returns Object with counts of deleted and kept backups
+ */
+export async function cleanupOldBackups(retentionDays = 7): Promise<{
+  deletedCount: number
+  keptCount: number
+  deletedIds: number[]
+  errors: string[]
+}> {
+  const deletedIds: number[] = []
+  const errors: string[] = []
 
   try {
-    // Create backup table with current data
-    await prisma.$executeRawUnsafe(
-      `SELECT * INTO ${backupTableName} FROM Sku`
-    )
-    console.log(`Created backup table: ${backupTableName}`)
-    return backupTableName
+    const cutoffDate = new Date()
+    cutoffDate.setDate(cutoffDate.getDate() - retentionDays)
+
+    // Find backups older than retention period
+    const oldBackups = await prisma.backupSet.findMany({
+      where: {
+        createdAt: { lt: cutoffDate },
+        status: 'active',
+      },
+      select: { id: true, backupType: true, createdAt: true, rowCount: true },
+    })
+
+    // Delete each old backup (cascade will delete rows)
+    for (const backup of oldBackups) {
+      try {
+        await prisma.backupSet.delete({
+          where: { id: backup.id },
+        })
+        deletedIds.push(backup.id)
+        console.log(`Deleted old backup: id=${backup.id} (${backup.backupType}, ${backup.rowCount} rows, created ${backup.createdAt.toISOString()})`)
+      } catch (deleteErr) {
+        const errMsg = deleteErr instanceof Error ? deleteErr.message : 'Unknown error'
+        errors.push(`BackupSet id=${backup.id}: ${errMsg}`)
+        console.error(`Error deleting backup id=${backup.id}:`, deleteErr)
+      }
+    }
+
+    // Count remaining backups
+    const keptCount = await prisma.backupSet.count({
+      where: { status: 'active' },
+    })
+
+    console.log(`Backup cleanup: ${deletedIds.length} deleted, ${keptCount} kept, ${errors.length} errors`)
+    return { deletedCount: deletedIds.length, keptCount, deletedIds, errors }
   } catch (err) {
-    console.error('Failed to create backup table:', err)
-    return null
+    console.error('Failed to cleanup old backups:', err)
+    return { deletedCount: 0, keptCount: 0, deletedIds, errors: [err instanceof Error ? err.message : 'Unknown error'] }
   }
 }
 
@@ -779,19 +913,19 @@ export async function transformToSkuTable(options?: { skipBackup?: boolean }): P
   errors: number
   skipped: number
   unmappedValues: number
-  backupTable?: string
+  backupSetId?: number
 }> {
   console.log('Starting transform: RawSkusFromShopify → Sku table (using Collections)')
 
-  let backupTable: string | undefined
+  let backupSetId: number | undefined
 
   // 0. Create backup before transformation (unless skipped)
   if (!options?.skipBackup) {
     const backup = await backupSkuTable()
     if (backup) {
-      backupTable = backup
+      backupSetId = backup
     } else {
-      console.warn('Backup failed, proceeding anyway...')
+      console.warn('Backup failed or no data to backup, proceeding anyway...')
     }
   }
 
@@ -1007,7 +1141,7 @@ export async function transformToSkuTable(options?: { skipBackup?: boolean }): P
       errors: 0,
       skipped: rawSkus.length - inserts.length,
       unmappedValues: unmappedCount,
-      backupTable,
+      backupSetId,
     }
   } catch (err) {
     console.error('Transform failed:', err)
@@ -1251,6 +1385,18 @@ export async function runFullSync(options?: {
 
     // Mark sync as complete
     await completeSyncRun(operationId, 'completed', transformResult.processed)
+
+    // Cleanup old backups (older than 7 days)
+    // This runs after successful sync to avoid accumulating backup data
+    try {
+      const cleanupResult = await cleanupOldBackups(7)
+      if (cleanupResult.deletedCount > 0) {
+        onProgress('Cleanup', `Removed ${cleanupResult.deletedCount} old backups`)
+      }
+    } catch (cleanupErr) {
+      // Don't fail the sync if cleanup fails - just log it
+      console.warn('Backup cleanup failed (non-fatal):', cleanupErr)
+    }
 
     return {
       success: true,

@@ -68,6 +68,12 @@ model CustomerOrders {
   PaymentTerms               String?                  @db.NVarChar(200)
   ApprovalDate               DateTime?                @db.DateTime
   BrandNotes                 String?                  @db.NVarChar(Max)
+  // Email preference tracking for order confirmation popup
+  EmailSentCustomer          Boolean?                 @default(false)
+  EmailSentRep               Boolean?                 @default(false)
+  EmailSentAdmin             Boolean?                 @default(false)
+  EmailAdditionalTo          String?                  @db.NVarChar(Max) // JSON array of additional recipients
+  EmailSentAt                DateTime?                @db.DateTime
   CustomerOrdersComments     CustomerOrdersComments[]
   CustomerOrdersItems        CustomerOrdersItems[]
   Shipments                  Shipments[]
@@ -306,6 +312,7 @@ model RawSkusFromShopify {
   metafield_msrp_cad                String? @db.NVarChar(Max)
   ShopifyProductImageURL            String? @db.NVarChar(500)
   InventoryItemId                   String? @db.NVarChar(100)
+  ProductStatus                     String? @db.NVarChar(20) // ACTIVE, ARCHIVED, DRAFT
 }
 
 model RawSkusInventoryLevelFromShopify {
@@ -327,20 +334,22 @@ model RawSkusVariantFromShopify {
 }
 
 model Reps {
-  ID         Int          @id(map: "PK_Reps") @default(autoincrement())
-  Name       String       @db.NVarChar(500)
-  Code       String       @db.NVarChar(100)
-  Address    String       @db.NVarChar(Max)
-  Phone      String       @db.NVarChar(50)
-  Fax        String       @db.NVarChar(50)
-  Cell       String       @db.NVarChar(50)
-  Email1     String       @db.NVarChar(250)
-  Email2     String       @db.NVarChar(250)
-  Email3     String       @db.NVarChar(250)
-  Country    String       @db.NVarChar(50)
-  Territory  String?      @db.NVarChar(100)
-  RepTargets RepTargets[]
-  Users      Users[]
+  ID                    Int          @id(map: "PK_Reps") @default(autoincrement())
+  Name                  String       @db.NVarChar(500)
+  Code                  String       @db.NVarChar(100)
+  Address               String       @db.NVarChar(Max)
+  Phone                 String       @db.NVarChar(50)
+  Fax                   String       @db.NVarChar(50)
+  Cell                  String       @db.NVarChar(50)
+  Email1                String       @db.NVarChar(250)
+  Email2                String       @db.NVarChar(250)
+  Email3                String       @db.NVarChar(250)
+  Country               String       @db.NVarChar(50)
+  Territory             String?      @db.NVarChar(100)
+  // Default email preference for order confirmation popup
+  DefaultSendOrderEmail Boolean?     @default(true)
+  RepTargets            RepTargets[]
+  Users                 Users[]
 }
 
 model ShopifySyncLog {
@@ -868,4 +877,45 @@ model AuthTokens_Orphaned_Backup {
   Token     String   @db.NVarChar(500)
   ExpiresAt DateTime @db.DateTime
   CreatedAt DateTime @db.DateTime
+}
+
+// ============================================================================
+// Backup System (Normalized Data Model)
+// ============================================================================
+// Backups are stored as proper data, not dynamic tables. This allows:
+// - Full Prisma management (no schema conflicts)
+// - Admin UI visibility and controls
+// - Configurable retention policies
+// - Easy querying and restoration
+//
+// Created by: backupSkuTable() in sync.ts
+// Cleaned up by: cleanupOldBackups() based on retention settings
+// ============================================================================
+
+/// A set of backup rows created at a specific point in time
+model BackupSet {
+  id            Int       @id @default(autoincrement())
+  backupType    String    @db.NVarChar(50)   // 'Sku', 'Order', 'Customer', etc.
+  description   String?   @db.NVarChar(255)  // 'Pre-sync backup', 'Manual backup', etc.
+  rowCount      Int                          // Number of rows in this backup
+  sizeBytes     Int?                         // Approximate size for UI display
+  createdAt     DateTime  @default(now())
+  createdBy     String?   @db.NVarChar(100)  // 'system' or user email
+  status        String    @default("active") @db.NVarChar(20) // active, restored, deleted
+
+  rows          BackupRow[]
+
+  @@index([backupType, createdAt])
+  @@index([status])
+}
+
+/// Individual rows within a backup set, stored as JSON
+model BackupRow {
+  id          BigInt    @id @default(autoincrement())
+  backupSetId Int
+  rowData     String    @db.NVarChar(Max)   // JSON serialization of the original row
+
+  backupSet   BackupSet @relation(fields: [backupSetId], references: [id], onDelete: Cascade)
+
+  @@index([backupSetId])
 }
