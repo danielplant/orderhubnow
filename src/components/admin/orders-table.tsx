@@ -63,6 +63,7 @@ const COLUMN_LABELS: Record<string, string> = {
   storeName: 'Store',
   salesRep: 'Rep',
   collection: 'Collection',
+  season: 'Season',
   shipStartDate: 'Ship Window',
   orderDate: 'Order Date',
   orderAmount: 'Total',
@@ -82,6 +83,7 @@ const DEFAULT_COLUMN_WIDTHS: Record<string, number> = {
   storeName: 140,
   salesRep: 80,
   collection: 100,
+  season: 70,
   shipStartDate: 140,
   orderDate: 95,
   orderAmount: 85,
@@ -494,6 +496,16 @@ export function OrdersTable({ initialOrders, total, statusCounts, reps }: Orders
         cell: (o) => (
           <span className="text-sm text-muted-foreground truncate">
             {o.collection || '—'}
+          </span>
+        ),
+      },
+      {
+        id: 'season',
+        header: 'Season',
+        minWidth: 60,
+        cell: (o) => (
+          <span className="text-sm text-muted-foreground">
+            {o.season || '—'}
           </span>
         ),
       },

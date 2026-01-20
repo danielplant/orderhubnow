@@ -222,9 +222,13 @@ export async function getOrders(
     }
   }
 
-  // Get shipment summaries for these orders
+  // Get shipment summaries and collections for these orders
   const orderIds = orders.map((o) => String(o.ID));
-  const shipmentSummaries = await getShipmentSummariesForOrders(orderIds);
+  const orderNumbers = orders.map((o) => o.OrderNumber);
+  const [shipmentSummaries, collectionMap] = await Promise.all([
+    getShipmentSummariesForOrders(orderIds),
+    getOrderCollections(orderNumbers),
+  ]);
 
   // Map to frontend shape
   return {
@@ -274,7 +278,8 @@ export async function getOrders(
         trackingCount: summary?.trackingCount ?? 0,
         trackingNumbers: summary?.trackingNumbers ?? [],
         // Enhanced fields for Orders Dashboard
-        collection: null,  // TODO: Derive from order items if needed
+        collection: collectionMap.get(o.OrderNumber) ?? null,
+        season: deriveSeasonFromShipDate(o.ShipStartDate),
         notes: o.BrandNotes ?? null,
         syncError: null,   // TODO: Add SyncError field to schema if needed
       };
@@ -407,6 +412,7 @@ export async function getOrderById(orderId: string): Promise<AdminOrderRow | nul
     trackingNumbers: summary?.trackingNumbers ?? [],
     // Enhanced fields
     collection: null,
+    season: deriveSeasonFromShipDate(order.ShipStartDate),
     notes: (order as { BrandNotes?: string | null }).BrandNotes ?? null,
     syncError: null,
   };
@@ -501,6 +507,83 @@ async function getOrderCategories(
   }
 
   return result;
+}
+
+/**
+ * Get collection names for a batch of orders.
+ * Returns single collection name if all items are from same collection, "Mixed" if multiple.
+ */
+async function getOrderCollections(
+  orderNumbers: string[]
+): Promise<Map<string, string>> {
+  if (orderNumbers.length === 0) {
+    return new Map();
+  }
+
+  // Get all items for these orders
+  const items = await prisma.customerOrdersItems.findMany({
+    where: { OrderNumber: { in: orderNumbers } },
+    select: { OrderNumber: true, SKU: true },
+  });
+
+  if (items.length === 0) {
+    return new Map();
+  }
+
+  // Get unique SKUs
+  const skuIds = [...new Set(items.map((i) => i.SKU).filter(Boolean))];
+
+  // Look up SKUs with their Collection relation
+  const skus = await prisma.sku.findMany({
+    where: { SkuID: { in: skuIds } },
+    select: {
+      SkuID: true,
+      Collection: { select: { name: true } },
+    },
+  });
+
+  // Build SKU -> collection name map
+  const skuToCollection = new Map<string, string>();
+  for (const sku of skus) {
+    if (sku.Collection?.name) {
+      skuToCollection.set(sku.SkuID, sku.Collection.name);
+    }
+  }
+
+  // Build orderNumber -> collections set map
+  const orderCollections = new Map<string, Set<string>>();
+  for (const item of items) {
+    const collection = skuToCollection.get(item.SKU);
+    if (collection) {
+      if (!orderCollections.has(item.OrderNumber)) {
+        orderCollections.set(item.OrderNumber, new Set());
+      }
+      orderCollections.get(item.OrderNumber)!.add(collection);
+    }
+  }
+
+  // Convert to single collection or "Mixed"
+  const result = new Map<string, string>();
+  for (const [orderNumber, collections] of orderCollections) {
+    if (collections.size === 1) {
+      result.set(orderNumber, [...collections][0]);
+    } else if (collections.size > 1) {
+      result.set(orderNumber, 'Mixed');
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Derive season code from ship start date.
+ * SS = Spring/Summer (Jan-Jun), FW = Fall/Winter (Jul-Dec)
+ */
+function deriveSeasonFromShipDate(shipStartDate: Date | null): string | null {
+  if (!shipStartDate) return null;
+  const month = shipStartDate.getMonth() + 1; // 1-12
+  const year = shipStartDate.getFullYear().toString().slice(-2); // "26"
+  return month >= 1 && month <= 6 ? `SS${year}` : `FW${year}`;
 }
 
 /**
@@ -619,13 +702,14 @@ export async function getOrdersByRep(
     }
   }
 
-  // 6. Get categories for these orders
+  // 6. Get categories, collections, and shipment summaries for these orders
   const orderNumbers = orders.map((o) => o.OrderNumber);
-  const categoryMap = await getOrderCategories(orderNumbers);
-
-  // 7. Get shipment summaries for these orders
   const orderIds = orders.map((o) => String(o.ID));
-  const shipmentSummaries = await getShipmentSummariesForOrders(orderIds);
+  const [categoryMap, collectionMap, shipmentSummaries] = await Promise.all([
+    getOrderCategories(orderNumbers),
+    getOrderCollections(orderNumbers),
+    getShipmentSummariesForOrders(orderIds),
+  ]);
 
   // 8. Map to frontend shape
   return {
@@ -680,7 +764,8 @@ export async function getOrdersByRep(
         trackingCount: summary?.trackingCount ?? 0,
         trackingNumbers: summary?.trackingNumbers ?? [],
         // Enhanced fields
-        collection: null,
+        collection: collectionMap.get(o.OrderNumber) ?? null,
+        season: deriveSeasonFromShipDate(o.ShipStartDate),
         notes: o.BrandNotes ?? null,
         syncError: null,
       };
