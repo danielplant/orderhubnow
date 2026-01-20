@@ -23,6 +23,8 @@ export interface ColumnVisibilityToggleProps {
   columns: ColumnConfig[]
   onChange: (columnId: string, visible: boolean) => void
   onReset: () => void
+  /** Only show hidden count badge after hydration to prevent SSR mismatch */
+  isHydrated?: boolean
 }
 
 /**
@@ -33,6 +35,7 @@ export function ColumnVisibilityToggle({
   columns,
   onChange,
   onReset,
+  isHydrated = true,
 }: ColumnVisibilityToggleProps) {
   const hiddenCount = columns.filter((c) => !c.visible && !c.required).length
 
@@ -42,14 +45,14 @@ export function ColumnVisibilityToggle({
         <Button variant="outline" size="sm" className="gap-2">
           <Settings2 className="h-4 w-4" />
           Columns
-          {hiddenCount > 0 && (
+          {isHydrated && hiddenCount > 0 && (
             <span className="ml-1 rounded-full bg-muted px-1.5 py-0.5 text-xs">
               {hiddenCount} hidden
             </span>
           )}
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-52">
+      <DropdownMenuContent align="end" className="w-52" avoidCollisions={false}>
         <DropdownMenuLabel>Toggle columns</DropdownMenuLabel>
         <DropdownMenuSeparator />
         <div className="max-h-64 overflow-y-auto">
