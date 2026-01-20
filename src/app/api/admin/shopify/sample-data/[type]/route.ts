@@ -124,6 +124,11 @@ function buildFieldSelection(field: FieldConfig): string | null {
     return null
   }
 
+  // Handle count category - these are Count objects, not scalars
+  if (category === 'count') {
+    return `${fieldPath} { count }`
+  }
+
   // For object types, we need subfield selection
   if (category === 'object') {
     // Handle common object types with known subfields

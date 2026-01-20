@@ -116,7 +116,7 @@ function StatusFilterPanel({
         {/* Status Distribution */}
         <div className="mb-6">
           <div className="text-sm font-medium mb-3">Current Distribution</div>
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             {STATUSES.map((status) => {
               const count = distribution.distribution[status] || 0
               const percentage = total > 0 ? ((count / total) * 100).toFixed(1) : '0'
@@ -207,7 +207,7 @@ function EntitySelector({
   onSelect: (entity: string) => void
 }) {
   return (
-    <div className="flex gap-2 mb-6">
+    <div className="flex flex-wrap gap-2 mb-6">
       {entities.map((entity) => (
         <button
           key={entity.name}
@@ -557,7 +557,7 @@ export function DeveloperToolsClient() {
   return (
     <div className="space-y-6">
       {/* Entity Selector with Schema Info */}
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <EntitySelector
           entities={entities}
           selectedEntity={selectedEntity}

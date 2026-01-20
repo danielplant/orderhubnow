@@ -298,7 +298,7 @@ export function FieldConfigPanel({
       <CardContent className="space-y-4">
         {/* Bulk Actions */}
         <div className="flex flex-wrap items-center gap-2 p-3 rounded-lg bg-muted/30 border border-border">
-          <span className="text-sm text-muted-foreground mr-2">Bulk Actions:</span>
+          <span className="text-sm text-muted-foreground mr-2 w-full sm:w-auto">Bulk Actions:</span>
           <Button
             variant="outline"
             size="sm"
@@ -326,7 +326,7 @@ export function FieldConfigPanel({
             <RotateCcw className="h-4 w-4 mr-1.5" />
             Reset to Defaults
           </Button>
-          <div className="flex-1" />
+          <div className="hidden sm:block flex-1" />
           <Button
             variant="outline"
             size="sm"

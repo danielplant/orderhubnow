@@ -138,7 +138,7 @@ export function SampleDataViewer({ entityType, refreshTrigger = 0 }: SampleDataV
             Loading sample data...
           </div>
         ) : error && samples.length === 0 ? (
-          <div className="p-4 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 text-sm">
+          <div className="p-4 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 text-sm break-words overflow-hidden">
             {error}
           </div>
         ) : samples.length === 0 ? (
