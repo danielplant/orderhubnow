@@ -12,12 +12,14 @@ type SortDirection = 'asc' | 'desc'
  * - `header`: Column header content
  * - `cell`: Render function for cell content
  * - `sortValue`: Optional function to extract sortable value (enables sorting)
+ * - `minWidth`: Optional minimum width in pixels (default: 50)
  */
 export type DataTableColumn<T> = {
   id: string
   header: React.ReactNode
   cell: (row: T) => React.ReactNode
   sortValue?: (row: T) => string | number | null | undefined
+  minWidth?: number
 }
 
 const dataTableVariants = cva('w-full border-collapse', {
@@ -51,7 +53,7 @@ export interface DataTableProps<T>
    * to prevent unnecessary re-renders.
    */
   onSelectionChange?: (selectedIds: string[]) => void
-  
+
   // --- Manual/controlled pagination ---
   /** When true, pagination is controlled externally (server-side). Data is assumed pre-paged. */
   manualPagination?: boolean
@@ -61,7 +63,7 @@ export interface DataTableProps<T>
   totalCount?: number
   /** Callback when page changes. Used when manualPagination is true. */
   onPageChange?: (page: number) => void
-  
+
   // --- Manual/controlled sorting ---
   /** When true, sorting is controlled externally (server-side). Data is assumed pre-sorted. */
   manualSorting?: boolean
@@ -69,6 +71,20 @@ export interface DataTableProps<T>
   sort?: { columnId: string; direction: SortDirection } | null
   /** Callback when sort changes. Used when manualSorting is true. */
   onSortChange?: (sort: { columnId: string; direction: SortDirection }) => void
+
+  // --- Column resizing ---
+  /** Enable column resizing via drag handles */
+  enableColumnResizing?: boolean
+  /** Controlled column widths (columnId -> width in px). Falls back to auto if not specified. */
+  columnWidths?: Record<string, number>
+  /** Callback when a column width changes */
+  onColumnWidthChange?: (columnId: string, width: number) => void
+
+  // --- Sticky header ---
+  /** Enable sticky header that stays visible when scrolling. Requires maxHeight to be effective. */
+  stickyHeader?: boolean
+  /** Max height of the table body (e.g., "calc(100vh - 300px)" or "600px"). Enables vertical scrolling. */
+  maxHeight?: string
 }
 
 export function DataTable<T>({
@@ -87,6 +103,13 @@ export function DataTable<T>({
   manualSorting = false,
   sort: controlledSort,
   onSortChange,
+  // Column resizing props
+  enableColumnResizing = false,
+  columnWidths,
+  onColumnWidthChange,
+  // Sticky header props
+  stickyHeader = false,
+  maxHeight,
   size,
   variant,
   className,
@@ -95,6 +118,13 @@ export function DataTable<T>({
   const [selectedIds, setSelectedIds] = React.useState<string[]>([])
   const [internalSort, setInternalSort] = React.useState<{ columnId: string; direction: SortDirection } | null>(null)
   const [internalPage, setInternalPage] = React.useState(1)
+
+  // Resizing state
+  const [resizing, setResizing] = React.useState<{
+    columnId: string
+    startX: number
+    startWidth: number
+  } | null>(null)
 
   // Use controlled or internal state
   const sort = manualSorting ? controlledSort ?? null : internalSort
@@ -111,6 +141,37 @@ export function DataTable<T>({
       setInternalPage(1)
     }
   }, [data, pageSize, internalSort, manualPagination])
+
+  // Handle column resize mouse events
+  React.useEffect(() => {
+    if (!resizing) return
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const delta = e.clientX - resizing.startX
+      const col = columns.find((c) => c.id === resizing.columnId)
+      const minWidth = col?.minWidth ?? 50
+      const newWidth = Math.max(minWidth, resizing.startWidth + delta)
+      onColumnWidthChange?.(resizing.columnId, newWidth)
+    }
+
+    const handleMouseUp = () => {
+      setResizing(null)
+    }
+
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+
+    // Add cursor style to body during resize
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+  }, [resizing, columns, onColumnWidthChange])
 
   // Sort data (only for client-side sorting)
   const sorted = React.useMemo(() => {
@@ -185,17 +246,35 @@ export function DataTable<T>({
     }
   }
 
+  const handleResizeStart = (e: React.MouseEvent, columnId: string) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const currentWidth = columnWidths?.[columnId] ?? 100
+    setResizing({ columnId, startX: e.clientX, startWidth: currentWidth })
+  }
+
   return (
     <div className="w-full">
-      <div className="w-full overflow-x-auto rounded-md border border-border bg-background">
+      <div
+        className={cn(
+          'w-full overflow-x-auto rounded-md border border-border bg-background',
+          maxHeight && 'overflow-y-auto'
+        )}
+        style={maxHeight ? { maxHeight } : undefined}
+      >
         <table
-          className={cn(dataTableVariants({ size, variant }), className)}
+          className={cn(dataTableVariants({ size, variant }), 'relative', className)}
           {...props}
         >
-          <thead className="bg-muted/30">
+          <thead
+            className={cn(
+              'bg-muted/30',
+              stickyHeader && 'sticky top-0 z-10 shadow-[0_1px_3px_rgba(0,0,0,0.05)]'
+            )}
+          >
             <tr className="border-b border-border">
               {enableRowSelection ? (
-                <th className="w-10 p-3 px-4 text-left">
+                <th className="w-10 p-3 px-4 text-left bg-muted/30">
                   <input
                     type="checkbox"
                     checked={allVisibleSelected}
@@ -211,23 +290,47 @@ export function DataTable<T>({
                 const caret = isSorted ? (sort!.direction === 'desc' ? '▼' : '▲') : null
                 // Column is sortable if: has sortValue (client-side) OR manualSorting is enabled
                 const isSortable = col.sortValue || manualSorting
+                const width = columnWidths?.[col.id]
 
                 return (
-                  <th key={col.id} className="p-3 px-4 text-left text-sm font-semibold text-muted-foreground">
-                    {isSortable ? (
-                      <button
-                        type="button"
-                        onClick={() => onHeaderClick(col.id)}
-                        className={cn(
-                          'inline-flex items-center gap-2 cursor-pointer select-none bg-transparent border-none hover:text-foreground',
-                          focusRing
-                        )}
-                      >
+                  <th
+                    key={col.id}
+                    className={cn(
+                      'relative p-3 px-4 text-left text-sm font-semibold text-muted-foreground bg-muted/30',
+                      enableColumnResizing && 'pr-2'
+                    )}
+                    style={width ? { width, minWidth: col.minWidth ?? 50 } : undefined}
+                  >
+                    <div className="flex items-center">
+                      {isSortable ? (
+                        <button
+                          type="button"
+                          onClick={() => onHeaderClick(col.id)}
+                          className={cn(
+                            'inline-flex items-center gap-2 cursor-pointer select-none bg-transparent border-none hover:text-foreground',
+                            focusRing
+                          )}
+                        >
+                          <span>{col.header}</span>
+                          {caret ? <span className="text-xs">{caret}</span> : null}
+                        </button>
+                      ) : (
                         <span>{col.header}</span>
-                        {caret ? <span className="text-xs">{caret}</span> : null}
-                      </button>
-                    ) : (
-                      <span>{col.header}</span>
+                      )}
+                    </div>
+
+                    {/* Resize handle */}
+                    {enableColumnResizing && (
+                      <div
+                        className={cn(
+                          'absolute right-0 top-0 h-full w-1.5 cursor-col-resize group',
+                          'hover:bg-primary/30 active:bg-primary/50',
+                          resizing?.columnId === col.id && 'bg-primary/50'
+                        )}
+                        onMouseDown={(e) => handleResizeStart(e, col.id)}
+                      >
+                        <div className="absolute right-0 top-0 h-full w-[1px] bg-border group-hover:bg-primary/50" />
+                      </div>
                     )}
                   </th>
                 )
@@ -241,7 +344,7 @@ export function DataTable<T>({
               const checked = enableRowSelection && selectedIds.includes(id)
 
               return (
-                <tr key={id} className="border-b border-border/50">
+                <tr key={id} className="border-b border-border/50 hover:bg-muted/20">
                   {enableRowSelection ? (
                     <td className="p-4">
                       <input
@@ -254,67 +357,74 @@ export function DataTable<T>({
                     </td>
                   ) : null}
 
-                  {columns.map((col) => (
-                    <td key={col.id} className="p-4 px-4 align-middle">
-                      {col.cell(row)}
-                    </td>
-                  ))}
+                  {columns.map((col) => {
+                    const width = columnWidths?.[col.id]
+                    return (
+                      <td
+                        key={col.id}
+                        className="p-4 px-4 align-middle"
+                        style={width ? { width, minWidth: col.minWidth ?? 50 } : undefined}
+                      >
+                        {col.cell(row)}
+                      </td>
+                    )
+                  })}
                 </tr>
               )
             })}
           </tbody>
         </table>
+      </div>
 
-        {/* Pagination */}
-        <div className="flex items-center justify-between gap-3 border-t border-border p-3 text-sm text-muted-foreground">
-          <div>
-            Showing <span className="text-foreground">{totalItems === 0 ? 0 : start + 1}</span>–
-            <span className="text-foreground">{Math.min(start + pageSize, totalItems)}</span> of{' '}
-            <span className="text-foreground">{totalItems}</span>
-          </div>
+      {/* Pagination */}
+      <div className="flex items-center justify-between gap-3 border border-t-0 border-border rounded-b-md bg-background p-3 text-sm text-muted-foreground -mt-[1px]">
+        <div>
+          Showing <span className="text-foreground">{totalItems === 0 ? 0 : start + 1}</span>–
+          <span className="text-foreground">{Math.min(start + pageSize, totalItems)}</span> of{' '}
+          <span className="text-foreground">{totalItems}</span>
+        </div>
 
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              className={cn(
-                'rounded-md border border-border bg-background px-3 py-1.5 text-sm hover:bg-muted/50 disabled:opacity-50 disabled:cursor-not-allowed',
-                focusRing
-              )}
-              onClick={() => {
-                const newPage = Math.max(1, safePage - 1)
-                if (manualPagination) {
-                  onPageChange?.(newPage)
-                } else {
-                  setInternalPage(newPage)
-                }
-              }}
-              disabled={safePage <= 1}
-            >
-              Previous
-            </button>
-            <span>
-              Page <span className="text-foreground">{safePage}</span> /{' '}
-              <span className="text-foreground">{totalPages}</span>
-            </span>
-            <button
-              type="button"
-              className={cn(
-                'rounded-md border border-border bg-background px-3 py-1.5 text-sm hover:bg-muted/50 disabled:opacity-50 disabled:cursor-not-allowed',
-                focusRing
-              )}
-              onClick={() => {
-                const newPage = Math.min(totalPages, safePage + 1)
-                if (manualPagination) {
-                  onPageChange?.(newPage)
-                } else {
-                  setInternalPage(newPage)
-                }
-              }}
-              disabled={safePage >= totalPages}
-            >
-              Next
-            </button>
-          </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            className={cn(
+              'rounded-md border border-border bg-background px-3 py-1.5 text-sm hover:bg-muted/50 disabled:opacity-50 disabled:cursor-not-allowed',
+              focusRing
+            )}
+            onClick={() => {
+              const newPage = Math.max(1, safePage - 1)
+              if (manualPagination) {
+                onPageChange?.(newPage)
+              } else {
+                setInternalPage(newPage)
+              }
+            }}
+            disabled={safePage <= 1}
+          >
+            Previous
+          </button>
+          <span>
+            Page <span className="text-foreground">{safePage}</span> /{' '}
+            <span className="text-foreground">{totalPages}</span>
+          </span>
+          <button
+            type="button"
+            className={cn(
+              'rounded-md border border-border bg-background px-3 py-1.5 text-sm hover:bg-muted/50 disabled:opacity-50 disabled:cursor-not-allowed',
+              focusRing
+            )}
+            onClick={() => {
+              const newPage = Math.min(totalPages, safePage + 1)
+              if (manualPagination) {
+                onPageChange?.(newPage)
+              } else {
+                setInternalPage(newPage)
+              }
+            }}
+            disabled={safePage >= totalPages}
+          >
+            Next
+          </button>
         </div>
       </div>
     </div>

@@ -73,6 +73,10 @@ export interface AdminOrderRow {
   varianceFormatted: string | null;
   trackingCount: number;
   trackingNumbers: string[];
+  // Enhanced fields for Orders Dashboard
+  collection: string | null;        // Derived collection/season from order items
+  notes: string | null;             // Shipping notes / variance explanation (BrandNotes field)
+  syncError: string | null;         // Error message if Shopify sync failed
 }
 
 /**

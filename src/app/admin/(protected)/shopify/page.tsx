@@ -1,11 +1,10 @@
 import { Suspense } from 'react'
-import { getSyncStatus, getSyncHistory, getMissingSkus, getOrdersPendingTransfer } from '@/lib/data/queries/shopify'
+import Link from 'next/link'
+import { getSyncStatus, getSyncHistory, getMissingSkus } from '@/lib/data/queries/shopify'
 import { prisma } from '@/lib/prisma'
 import { ShopifyStatusCard } from '@/components/admin/shopify-status-card'
 import { SyncHistoryList } from '@/components/admin/sync-history-list'
 import { MissingSkusTable } from '@/components/admin/missing-skus-table'
-import { OrdersPendingTransferTableClient } from '@/components/admin/orders-pending-transfer-client'
-import { cn } from '@/lib/utils'
 
 export const dynamic = 'force-dynamic'
 
@@ -15,7 +14,6 @@ export const dynamic = 'force-dynamic'
 
 interface ShopifyPageProps {
   searchParams: Promise<{
-    tab?: string
     status?: string
     q?: string
     page?: string
@@ -23,7 +21,7 @@ interface ShopifyPageProps {
 }
 
 // ============================================================================
-// Tab Content Components
+// Content Components
 // ============================================================================
 
 async function MissingSkusTab({
@@ -53,78 +51,6 @@ async function MissingSkusTab({
   )
 }
 
-async function OrdersPendingTab({ page }: { page: number }) {
-  const result = await getOrdersPendingTransfer(page, 50)
-
-  // Serialize dates for client component
-  const serializedOrders = result.orders.map((o) => ({
-    ...o,
-    orderDate: o.orderDate.toISOString(),
-  }))
-
-  return (
-    <OrdersPendingTransferTableClient
-      orders={serializedOrders}
-      total={result.total}
-      page={page}
-    />
-  )
-}
-
-// ============================================================================
-// Tab Navigation
-// ============================================================================
-
-type TabValue = 'missing' | 'transfer'
-
-const TABS: Array<{ value: TabValue; label: string }> = [
-  { value: 'missing', label: 'Missing SKUs' },
-  { value: 'transfer', label: 'Orders Pending Transfer' },
-]
-
-function TabNavigation({
-  activeTab,
-  pendingCount,
-  ordersCount,
-}: {
-  activeTab: TabValue
-  pendingCount: number
-  ordersCount: number
-}) {
-  return (
-    <div className="flex gap-6 overflow-x-auto border-b border-border px-4 bg-background rounded-t-md">
-      {TABS.map((tab) => {
-        const active = activeTab === tab.value
-        const count = tab.value === 'missing' ? pendingCount : ordersCount
-
-        return (
-          <a
-            key={tab.value}
-            href={`?tab=${tab.value}`}
-            className={cn(
-              'py-3 text-sm font-medium border-b-2 -mb-px whitespace-nowrap',
-              active
-                ? 'border-primary text-foreground'
-                : 'border-transparent text-muted-foreground hover:text-foreground'
-            )}
-          >
-            {tab.label}{' '}
-            {count > 0 && (
-              <span
-                className={cn(
-                  'font-normal',
-                  active ? 'text-foreground' : 'text-muted-foreground'
-                )}
-              >
-                ({count})
-              </span>
-            )}
-          </a>
-        )
-      })}
-    </div>
-  )
-}
 
 // ============================================================================
 // Main Page
@@ -132,17 +58,15 @@ function TabNavigation({
 
 export default async function ShopifyPage({ searchParams }: ShopifyPageProps) {
   const params = await searchParams
-  const tab = (params.tab || 'missing') as TabValue
   const status = (params.status || 'pending') as 'all' | 'pending' | 'reviewed'
   const search = params.q || ''
   const page = Number(params.page || '1')
 
-  // Get sync status, history, and counts
-  const [syncStatus, syncHistory, missingResult, ordersResult] = await Promise.all([
+  // Get sync status, history, and missing SKUs count
+  const [syncStatus, syncHistory, missingResult] = await Promise.all([
     getSyncStatus(),
     getSyncHistory(5),
     getMissingSkus({ status: 'pending' }, 1, 1), // Just for count
-    getOrdersPendingTransfer(1, 1), // Just for count
   ])
 
   return (
@@ -165,27 +89,35 @@ export default async function ShopifyPage({ searchParams }: ShopifyPageProps) {
         </div>
       )}
 
-      {/* Tab Navigation */}
-      <TabNavigation
-        activeTab={tab}
-        pendingCount={missingResult.statusCounts.pending}
-        ordersCount={ordersResult.total}
-      />
-
-      {/* Tab Content */}
-      <div className="rounded-b-md border border-t-0 border-border bg-background p-6">
-        <Suspense
-          fallback={
-            <div className="flex items-center justify-center py-12 text-muted-foreground">
-              Loading...
-            </div>
-          }
-        >
-          {tab === 'missing' && (
+      {/* Missing SKUs Section */}
+      <div className="rounded-lg border border-border bg-card">
+        <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+          <h3 className="font-medium">
+            Missing SKUs{' '}
+            {missingResult.statusCounts.pending > 0 && (
+              <span className="text-muted-foreground font-normal">
+                ({missingResult.statusCounts.pending} pending)
+              </span>
+            )}
+          </h3>
+          <p className="text-sm text-muted-foreground">
+            Order transfers now available on the{' '}
+            <Link href="/admin/orders" className="text-primary hover:underline">
+              Orders page
+            </Link>
+          </p>
+        </div>
+        <div className="p-6">
+          <Suspense
+            fallback={
+              <div className="flex items-center justify-center py-12 text-muted-foreground">
+                Loading...
+              </div>
+            }
+          >
             <MissingSkusTab status={status} search={search} page={page} />
-          )}
-          {tab === 'transfer' && <OrdersPendingTab page={page} />}
-        </Suspense>
+          </Suspense>
+        </div>
       </div>
     </main>
   )

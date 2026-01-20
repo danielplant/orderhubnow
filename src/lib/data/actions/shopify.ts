@@ -355,10 +355,34 @@ export async function transferOrderToShopify(
       note += ` | Customer PO #s: ${order.CustomerPO.trim()}`
     }
 
-    // Build tags: "ATS" or "Pre Order" + ", Wholesale, osc-ignore, {SalesRep}"
-    const baseTags = `, Wholesale, osc-ignore, ${order.SalesRep}`
-    const orderTag = order.OrderNumber.startsWith('A') ? 'ATS' : 'Pre Order'
-    const tags = `${orderTag}${baseTags}`
+    // Build tags array: ATS/Pre Order, Wholesale, osc-ignore, SalesRep, SHIPWINDOW, SEASON
+    const tagParts: string[] = []
+
+    // Order type tag
+    tagParts.push(order.OrderNumber.startsWith('A') ? 'ATS' : 'Pre Order')
+
+    // Standard tags
+    tagParts.push('Wholesale')
+    tagParts.push('osc-ignore')
+
+    // Sales rep tag
+    if (order.SalesRep?.trim()) {
+      tagParts.push(order.SalesRep.trim())
+    }
+
+    // Ship window tag for filtering in Shopify
+    const shipWindowTag = formatShipWindowTag(order.ShipStartDate, order.ShipEndDate)
+    if (shipWindowTag) {
+      tagParts.push(shipWindowTag)
+    }
+
+    // Season tag derived from ship window
+    const seasonTag = deriveSeasonFromShipWindow(order.ShipStartDate)
+    if (seasonTag) {
+      tagParts.push(`SEASON_${seasonTag}`)
+    }
+
+    const tags = tagParts.join(', ')
 
     // Note attributes
     const noteAttributes = [
@@ -562,6 +586,9 @@ export async function validateOrderForShopify(
         OrderAmount: true,
         CustomerEmail: true,
         IsTransferredToShopify: true,
+        ShipStartDate: true,
+        ShipEndDate: true,
+        SalesRep: true,
       },
     })
 
@@ -577,6 +604,10 @@ export async function validateOrderForShopify(
         customerEmail: null,
         customerExists: false,
         inventoryStatus: [],
+        shipWindow: null,
+        shipWindowTag: null,
+        collection: null,
+        salesRep: null,
       }
     }
 
@@ -637,6 +668,9 @@ export async function validateOrderForShopify(
       })
     }
 
+    // Derive season/collection from ship window
+    const collection = deriveSeasonFromShipWindow(order.ShipStartDate)
+
     return {
       valid: missingSkus.length === 0,
       orderId,
@@ -648,6 +682,10 @@ export async function validateOrderForShopify(
       customerEmail: order.CustomerEmail,
       customerExists,
       inventoryStatus,
+      shipWindow: formatShipWindowDisplay(order.ShipStartDate, order.ShipEndDate),
+      shipWindowTag: formatShipWindowTag(order.ShipStartDate, order.ShipEndDate),
+      collection,
+      salesRep: order.SalesRep ?? null,
     }
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Failed to validate order'
@@ -663,6 +701,10 @@ export async function validateOrderForShopify(
       customerEmail: null,
       customerExists: false,
       inventoryStatus: [],
+      shipWindow: null,
+      shipWindowTag: null,
+      collection: null,
+      salesRep: null,
     }
   }
 }
@@ -941,4 +983,48 @@ function formatDate(date: Date): string {
   const day = String(date.getDate()).padStart(2, '0')
   const year = date.getFullYear()
   return `${month}/${day}/${year}`
+}
+
+/**
+ * Format ship window dates as a Shopify tag: SHIPWINDOW_YYYY-MM-DD_YYYY-MM-DD
+ */
+function formatShipWindowTag(startDate: Date | null, endDate: Date | null): string | null {
+  if (!startDate || !endDate) return null
+  const formatISO = (d: Date) => d.toISOString().slice(0, 10)
+  return `SHIPWINDOW_${formatISO(startDate)}_${formatISO(endDate)}`
+}
+
+/**
+ * Format ship window dates as user-friendly display: "Jan 15 – Jan 22, 2026"
+ */
+function formatShipWindowDisplay(startDate: Date | null, endDate: Date | null): string | null {
+  if (!startDate || !endDate) return null
+  const formatDate = (d: Date, includeYear: boolean) => {
+    const month = d.toLocaleDateString('en-US', { month: 'short' })
+    const day = d.getDate()
+    if (includeYear) {
+      const year = d.getFullYear()
+      return `${month} ${day}, ${year}`
+    }
+    return `${month} ${day}`
+  }
+  // Always show year on end date for clarity
+  return `${formatDate(startDate, false)} – ${formatDate(endDate, true)}`
+}
+
+/**
+ * Derive season from ship window dates.
+ * Spring/Summer (SS): Jan-Jun ship dates
+ * Fall/Winter (FW): Jul-Dec ship dates
+ * Returns e.g., "SS26" or "FW26"
+ */
+function deriveSeasonFromShipWindow(startDate: Date | null): string | null {
+  if (!startDate) return null
+  const month = startDate.getMonth() + 1 // 1-12
+  const year = startDate.getFullYear().toString().slice(-2) // "26"
+  if (month >= 1 && month <= 6) {
+    return `SS${year}` // Spring/Summer
+  } else {
+    return `FW${year}` // Fall/Winter
+  }
 }

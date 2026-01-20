@@ -151,6 +151,30 @@ export async function updateOrderDetails(input: {
   }
 }
 
+/**
+ * Update order notes (for variance explanations, shipping notes, etc.).
+ * Uses the BrandNotes field in the database.
+ */
+export async function updateOrderNotes(input: {
+  orderId: string
+  notes: string
+}): Promise<{ success: boolean; error?: string }> {
+  try {
+    await requireAdmin()
+
+    await prisma.customerOrders.update({
+      where: { ID: BigInt(input.orderId) },
+      data: { BrandNotes: input.notes.trim() || null },
+    })
+
+    revalidatePath('/admin/orders')
+    return { success: true }
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'Failed to update notes'
+    return { success: false, error: message }
+  }
+}
+
 // ============================================================================
 // Rep Assignment
 // ============================================================================
@@ -399,33 +423,35 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
       return { order: newOrder, salesRepName }
     })
 
-    // Send order confirmation emails (non-blocking)
-    // Matches .NET behavior: emails sent after order creation, errors don't fail order
-    sendOrderEmails({
-      orderId: result.order.ID.toString(),
-      orderNumber: orderNumber,
-      storeName: data.storeName,
-      buyerName: data.buyerName,
-      customerEmail: data.customerEmail,
-      customerPhone: data.customerPhone,
-      salesRep: result.salesRepName,
-      orderAmount: orderAmount,
-      currency: data.currency,
-      shipStartDate: new Date(data.shipStartDate),
-      shipEndDate: new Date(data.shipEndDate),
-      orderDate: new Date(),
-      orderNotes: data.orderNotes,
-      customerPO: data.customerPO,
-      items: data.items.map((item) => ({
-        sku: item.sku,
-        quantity: item.quantity,
-        price: item.price,
-        lineTotal: item.price * item.quantity,
-      })),
-    }).catch((err) => {
-      // Log email errors but don't fail the order
-      console.error('Order email error:', err)
-    })
+    // Send order confirmation emails (non-blocking) unless skipEmail is set
+    // When skipEmail is true, emails are sent via the confirmation popup instead
+    if (!data.skipEmail) {
+      sendOrderEmails({
+        orderId: result.order.ID.toString(),
+        orderNumber: orderNumber,
+        storeName: data.storeName,
+        buyerName: data.buyerName,
+        customerEmail: data.customerEmail,
+        customerPhone: data.customerPhone,
+        salesRep: result.salesRepName,
+        orderAmount: orderAmount,
+        currency: data.currency,
+        shipStartDate: new Date(data.shipStartDate),
+        shipEndDate: new Date(data.shipEndDate),
+        orderDate: new Date(),
+        orderNotes: data.orderNotes,
+        customerPO: data.customerPO,
+        items: data.items.map((item) => ({
+          sku: item.sku,
+          quantity: item.quantity,
+          price: item.price,
+          lineTotal: item.price * item.quantity,
+        })),
+      }).catch((err) => {
+        // Log email errors but don't fail the order
+        console.error('Order email error:', err)
+      })
+    }
 
     revalidatePath('/admin/orders')
 
@@ -713,9 +739,10 @@ export async function updateOrderCurrency(input: {
  * - Copies all line items
  * - Generates new order number (A or P prefix based on isATS)
  */
-export async function duplicateOrder(_: {
-  orderId: string
-}): Promise<{ success: boolean; newOrderId?: string; error?: string }> {
+export async function duplicateOrder(
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _input: { orderId: string }
+): Promise<{ success: boolean; newOrderId?: string; error?: string }> {
   return { 
     success: false, 
     error: 'Not implemented. Requires .NET port (CreateDuplicateOrder).' 

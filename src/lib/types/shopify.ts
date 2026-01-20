@@ -116,6 +116,11 @@ export interface ShopifyValidationResult {
   customerEmail: string | null
   customerExists: boolean
   inventoryStatus: InventoryStatusItem[]
+  // Enhanced fields for Transfer Preview modal
+  shipWindow: string | null          // Formatted "Jan 15 – Jan 22, 2026"
+  shipWindowTag: string | null       // For Shopify tag: "2026-01-15_2026-01-22"
+  collection: string | null          // Derived collection/season
+  salesRep: string | null            // Sales rep name
 }
 
 // ============================================================================

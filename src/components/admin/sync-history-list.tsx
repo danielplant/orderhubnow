@@ -3,12 +3,15 @@
 import * as React from 'react'
 import { cn } from '@/lib/utils'
 import type { ShopifySyncHistoryEntry } from '@/lib/types/shopify'
-import { Check, AlertTriangle, X } from 'lucide-react'
+import { AlertTriangle, X } from 'lucide-react'
 
 interface SyncHistoryListProps {
   history: ShopifySyncHistoryEntry[]
 }
 
+/**
+ * Format a date for display - only call on client side to avoid hydration issues.
+ */
 function formatSyncTime(date: Date): string {
   return new Date(date).toLocaleString('en-US', {
     month: 'short',
@@ -17,6 +20,24 @@ function formatSyncTime(date: Date): string {
     minute: '2-digit',
     hour12: true,
   })
+}
+
+/**
+ * Client-only time display to avoid hydration mismatches.
+ */
+function SyncTimeDisplay({ date }: { date: Date }) {
+  const [formatted, setFormatted] = React.useState<string | null>(null)
+
+  React.useEffect(() => {
+    setFormatted(formatSyncTime(date))
+  }, [date])
+
+  // Render placeholder during SSR, actual time after hydration
+  if (formatted === null) {
+    return <span className="text-muted-foreground">--</span>
+  }
+
+  return <span className="text-muted-foreground">{formatted}</span>
 }
 
 function getStatusIcon(status: ShopifySyncHistoryEntry['status']) {
@@ -63,9 +84,7 @@ export function SyncHistoryList({ history }: SyncHistoryListProps) {
         >
           <div className="flex items-center gap-3">
             {getStatusIcon(entry.status)}
-            <span className="text-muted-foreground">
-              {formatSyncTime(entry.syncTime)}
-            </span>
+            <SyncTimeDisplay date={entry.syncTime} />
           </div>
           <div className="flex items-center gap-4">
             <span
@@ -79,7 +98,7 @@ export function SyncHistoryList({ history }: SyncHistoryListProps) {
               {getStatusLabel(entry.status)}
             </span>
             <span className="text-muted-foreground">
-              {entry.itemCount.toLocaleString()} items
+              {entry.itemCount} items
             </span>
           </div>
         </div>

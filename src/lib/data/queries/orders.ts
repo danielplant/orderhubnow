@@ -191,6 +191,7 @@ export async function getOrders(
         IsTransferredToShopify: true,
         ShopifyFulfillmentStatus: true,
         ShopifyFinancialStatus: true,
+        BrandNotes: true,  // Used for shipping notes / variance explanations
       },
     }),
     
@@ -272,6 +273,10 @@ export async function getOrders(
         varianceFormatted,
         trackingCount: summary?.trackingCount ?? 0,
         trackingNumbers: summary?.trackingNumbers ?? [],
+        // Enhanced fields for Orders Dashboard
+        collection: null,  // TODO: Derive from order items if needed
+        notes: o.BrandNotes ?? null,
+        syncError: null,   // TODO: Add SyncError field to schema if needed
       };
     }),
   };
@@ -400,6 +405,10 @@ export async function getOrderById(orderId: string): Promise<AdminOrderRow | nul
     varianceFormatted,
     trackingCount: summary?.trackingCount ?? 0,
     trackingNumbers: summary?.trackingNumbers ?? [],
+    // Enhanced fields
+    collection: null,
+    notes: (order as { BrandNotes?: string | null }).BrandNotes ?? null,
+    syncError: null,
   };
 }
 
@@ -581,6 +590,7 @@ export async function getOrdersByRep(
         IsTransferredToShopify: true,
         ShopifyFulfillmentStatus: true,
         ShopifyFinancialStatus: true,
+        BrandNotes: true,
       },
     }),
     prisma.customerOrders.groupBy({
@@ -669,6 +679,10 @@ export async function getOrdersByRep(
         varianceFormatted,
         trackingCount: summary?.trackingCount ?? 0,
         trackingNumbers: summary?.trackingNumbers ?? [],
+        // Enhanced fields
+        collection: null,
+        notes: o.BrandNotes ?? null,
+        syncError: null,
       };
     }),
   };
