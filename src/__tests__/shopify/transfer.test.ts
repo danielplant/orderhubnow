@@ -71,12 +71,13 @@ vi.mock('@/lib/data/queries/shopify', () => ({
   findCachedShopifyCustomer: vi.fn(),
 }))
 
-// Mock runtime flags
+// Mock status cascade config
 vi.mock('@/lib/data/queries/sync-config', () => ({
-  getSyncRuntimeFlags: vi.fn(() =>
+  getStatusCascadeConfig: vi.fn(() =>
     Promise.resolve({
-      ingestionActiveOnly: false,
-      transferActiveOnly: false,
+      ingestionAllowed: ['ACTIVE', 'DRAFT', 'ARCHIVED'],
+      skuAllowed: ['ACTIVE'],
+      transferAllowed: ['ACTIVE'],
     })
   ),
 }))
