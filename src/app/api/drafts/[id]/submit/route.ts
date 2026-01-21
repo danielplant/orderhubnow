@@ -44,7 +44,7 @@ async function getNextOrderNumber(isPreOrder: boolean): Promise<string> {
 
 /**
  * Derive order type (ATS vs Pre-Order) from SKU data.
- * Master source: SkuCategories.IsPreOrder
+ * Master source: Collection.type
  */
 async function deriveIsPreOrderFromSkus(
   skuVariantIds: bigint[]
@@ -57,15 +57,17 @@ async function deriveIsPreOrderFromSkus(
     where: { ID: { in: skuVariantIds } },
     select: {
       ID: true,
-      SkuCategories: {
-        select: { IsPreOrder: true },
+      CollectionID: true,
+      Collection: {
+        select: { type: true },
       },
     },
   })
 
   const result = new Map<string, boolean>()
   for (const sku of skus) {
-    const isPreOrder = sku.SkuCategories?.IsPreOrder ?? false
+    // Use Collection.type to determine pre-order status
+    const isPreOrder = sku.Collection?.type === 'PreOrder'
     result.set(String(sku.ID), isPreOrder)
   }
 
@@ -73,14 +75,15 @@ async function deriveIsPreOrderFromSkus(
 }
 
 /**
- * Get order grouping key that includes both ship window AND order type.
+ * Get order grouping key that includes both Collection AND order type.
  * This ensures ATS and Pre-Order items are split into separate orders.
+ * 
+ * Grouping: CollectionID → default
+ * (No CategoryID fallback - Collection is the source of truth)
  */
 function getOrderGroupKey(
   item: {
-    categoryId?: number | null
-    shipWindowStart?: string | null
-    shipWindowEnd?: string | null
+    collectionId?: number | null
     skuVariantId: bigint
   },
   skuPreOrderMap: Map<string, boolean>
@@ -88,11 +91,9 @@ function getOrderGroupKey(
   const isPreOrder = skuPreOrderMap.get(String(item.skuVariantId)) ?? false
   const typePrefix = isPreOrder ? 'preorder' : 'ats'
   
-  if (item.categoryId) {
-    return `${typePrefix}-cat-${item.categoryId}`
-  }
-  if (item.shipWindowStart || item.shipWindowEnd) {
-    return `${typePrefix}-window-${item.shipWindowStart || 'none'}-${item.shipWindowEnd || 'none'}`
+  // Group by order type first, then by collection
+  if (item.collectionId) {
+    return `${typePrefix}-collection-${item.collectionId}`
   }
   return `${typePrefix}-default`
 }
@@ -208,42 +209,42 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       }
     }
 
-    // Build items for database with category/ship window metadata
+    // Build items for database with Collection ship window metadata
     const items: Array<{
       sku: string
       skuVariantId: bigint
       quantity: number
       price: number
-      categoryId: number | null
-      categoryName: string | null
+      collectionId: number | null
+      collectionName: string | null
       shipWindowStart: string | null
       shipWindowEnd: string | null
     }> = []
 
-    // Look up SKU data including category, ship window, and IsPreOrder
+    // Look up SKU data including Collection (source of truth)
     const allSkus = Object.values(state.orders).flatMap(skuQtys => Object.keys(skuQtys))
     const skuRecords = await prisma.sku.findMany({
       where: { SkuID: { in: allSkus } },
       select: {
         ID: true,
         SkuID: true,
-        CategoryID: true,
-        SkuCategories: {
+        CollectionID: true,
+        Collection: {
           select: {
-            Name: true,
-            IsPreOrder: true,
-            OnRouteAvailableDate: true,
-            OnRouteAvailableDateEnd: true,
+            name: true,
+            type: true,
+            shipWindowStart: true,
+            shipWindowEnd: true,
           },
         },
       },
     })
     const skuDataMap = new Map(skuRecords.map(s => [s.SkuID, s]))
     
-    // Build pre-order map from SKU category data
+    // Build pre-order map from Collection.type
     const skuPreOrderMap = new Map<string, boolean>()
     for (const sku of skuRecords) {
-      skuPreOrderMap.set(String(sku.ID), sku.SkuCategories?.IsPreOrder ?? false)
+      skuPreOrderMap.set(String(sku.ID), sku.Collection?.type === 'PreOrder')
     }
 
     for (const [, skuQtys] of Object.entries(state.orders)) {
@@ -255,10 +256,10 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
             skuVariantId: BigInt(skuData?.ID || 0),
             quantity: qty,
             price: state.prices[sku] || 0,
-            categoryId: skuData?.CategoryID ?? null,
-            categoryName: skuData?.SkuCategories?.Name ?? null,
-            shipWindowStart: skuData?.SkuCategories?.OnRouteAvailableDate?.toISOString() ?? null,
-            shipWindowEnd: skuData?.SkuCategories?.OnRouteAvailableDateEnd?.toISOString() ?? null,
+            collectionId: skuData?.CollectionID ?? null,
+            collectionName: skuData?.Collection?.name ?? null,
+            shipWindowStart: skuData?.Collection?.shipWindowStart?.toISOString() ?? null,
+            shipWindowEnd: skuData?.Collection?.shipWindowEnd?.toISOString() ?? null,
           })
         }
       }
@@ -280,7 +281,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const createdOrders: Array<{
       orderId: string
       orderNumber: string
-      categoryName: string | null
+      collectionName: string | null
       shipWindowStart: string | null
       shipWindowEnd: string | null
       orderAmount: number
@@ -356,7 +357,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         createdOrders.push({
           orderId: String(newOrder.ID),
           orderNumber: groupOrderNumber,
-          categoryName: firstItem.categoryName,
+          collectionName: firstItem.collectionName,
           shipWindowStart: firstItem.shipWindowStart,
           shipWindowEnd: firstItem.shipWindowEnd,
           orderAmount: groupAmount,
@@ -402,7 +403,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       orders: createdOrders.map(o => ({
         orderId: o.orderId,
         orderNumber: o.orderNumber,
-        categoryName: o.categoryName,
+        collectionName: o.collectionName,
         shipWindowStart: o.shipWindowStart,
         shipWindowEnd: o.shipWindowEnd,
       })),

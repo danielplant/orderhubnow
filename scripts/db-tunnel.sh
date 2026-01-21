@@ -22,7 +22,7 @@ if [ ! -f "$EC2_KEY" ]; then
 fi
 
 # Check if port is already in use
-if lsof -i :$LOCAL_PORT > /dev/null 2>&1; then
+if lsof -iTCP:$LOCAL_PORT -sTCP:LISTEN > /dev/null 2>&1; then
     echo "ERROR: Port $LOCAL_PORT is already in use."
     echo "Either another tunnel is running, or you have a local SQL Server."
     echo ""

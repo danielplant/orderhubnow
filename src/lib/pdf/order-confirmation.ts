@@ -167,24 +167,36 @@ export function generateOrderConfirmationHtml(input: OrderConfirmationInput): st
   const hasPrepacks = items.some((item) => (item.unitsPerSku ?? 1) > 1)
 
   // ============================================================================
-  // PAGE 1: Order Summary Table (No Images)
+  // PAGE 1: Order Summary Table (With Thumbnails)
   // ============================================================================
   const summaryRows = items
     .map(
       (item) => {
-        const units = item.unitsPerSku ?? 1
-        const unitPrice = item.unitPrice ?? item.price
+        const piecesPerSku = item.unitsPerSku ?? 1
+        const pricePerPiece = item.unitPrice ?? item.price
+        const totalPieces = item.quantity * piecesPerSku
+        // Combine description + color into one cell
+        const styleName = [
+          item.description || '',
+          item.color ? `(${item.color})` : ''
+        ].filter(Boolean).join(' ') || '—'
+        
         return `
       <tr>
-        <td class="cell-sku">${escapeHtml(getStyleFromSku(item.sku))}</td>
-        <td class="cell-name">${item.description ? escapeHtml(item.description) : '—'}</td>
-        <td class="cell-color">${item.color ? escapeHtml(item.color) : '—'}</td>
+        <td class="cell-image">
+          ${item.imageUrl 
+            ? `<img src="${item.imageUrl}" alt="${escapeHtml(item.sku)}" class="thumb-image" />`
+            : `<div class="no-thumb">—</div>`
+          }
+        </td>
+        <td class="cell-sku">${escapeHtml(item.sku)}</td>
+        <td class="cell-name">${escapeHtml(styleName)}</td>
         <td class="cell-size">${item.size || '—'}</td>
+        <td class="cell-pieces-per">${piecesPerSku}</td>
         <td class="cell-qty">${item.quantity}</td>
-        ${hasPrepacks ? `<td class="cell-units">${units > 1 ? `${units}pc` : '1'}</td>` : ''}
-        <td class="cell-price">${formatCurrency(item.price, order.currency)}</td>
-        ${hasPrepacks ? `<td class="cell-unit-price">${formatCurrency(unitPrice, order.currency)}</td>` : ''}
-        ${hasDiscounts ? `<td class="cell-discount">${item.discount > 0 ? `${item.discount}%` : '—'}</td>` : ''}
+        <td class="cell-pieces-total">${totalPieces}</td>
+        <td class="cell-price-piece">${formatCurrency(pricePerPiece, order.currency)}</td>
+        <td class="cell-price-sku">${formatCurrency(item.price, order.currency)}</td>
         <td class="cell-total">${formatCurrency(item.lineTotal, order.currency)}</td>
       </tr>
     `
@@ -269,40 +281,41 @@ export function generateOrderConfirmationHtml(input: OrderConfirmationInput): st
           }
         </div>
         <div class="header-contact">
-          <div>${escapeHtml(companyWebsite)}</div>
-          <div>TEL: ${escapeHtml(companyPhone)}</div>
-          <div>EMAIL: ${escapeHtml(companyEmail)}</div>
+          <div class="contact-row"><span class="contact-icon">🌐</span>${escapeHtml(companyWebsite)}</div>
+          <div class="contact-row"><span class="contact-icon">📞</span>${escapeHtml(companyPhone)}</div>
+          <div class="contact-row"><span class="contact-icon">✉️</span>${escapeHtml(companyEmail)}</div>
         </div>
       </header>
 
       <!-- Order Metadata -->
       <div class="order-meta-bar">
-        <div class="meta-row">
+        <!-- Column 1: aligns with Buyer Info -->
+        <div class="meta-col">
           <div class="meta-item">
             <span class="meta-label">Order Number:</span>
             <span class="meta-value">${escapeHtml(order.orderNumber)}</span>
           </div>
           <div class="meta-item">
-            <span class="meta-label">PO#:</span>
-            <span class="meta-value">${order.customerPO ? escapeHtml(order.customerPO) : '—'}</span>
-          </div>
-          <div class="meta-item">
-            <span class="meta-label">Sales Rep:</span>
-            <span class="meta-value">${escapeHtml(order.salesRep)}</span>
-          </div>
-        </div>
-        <div class="meta-row">
-          <div class="meta-item">
             <span class="meta-label">Order Date:</span>
             <span class="meta-value">${formatDateShort(order.orderDate)}</span>
+          </div>
+        </div>
+        <!-- Column 2: aligns with Ship To -->
+        <div class="meta-col">
+          <div class="meta-item">
+            <span class="meta-label">PO#:</span>
+            <span class="meta-value">${order.customerPO ? escapeHtml(order.customerPO) : '—'}</span>
           </div>
           <div class="meta-item">
             <span class="meta-label">Ship Window:</span>
             <span class="meta-value">${formatShipWindow(order.shipStartDate, order.shipEndDate)}</span>
           </div>
+        </div>
+        <!-- Column 3: aligns with Bill To -->
+        <div class="meta-col">
           <div class="meta-item">
-            <span class="meta-label">Status:</span>
-            <span class="meta-value status-badge status-${order.orderStatus.toLowerCase().replace(/\s+/g, '-')}">${escapeHtml(order.orderStatus)}</span>
+            <span class="meta-label">Sales Rep:</span>
+            <span class="meta-value">${escapeHtml(order.salesRep)}</span>
           </div>
         </div>
       </div>
@@ -340,15 +353,15 @@ export function generateOrderConfirmationHtml(input: OrderConfirmationInput): st
         <table class="summary-table">
           <thead>
             <tr>
+              <th class="th-image">Image</th>
               <th class="th-sku">Style #</th>
               <th class="th-name">Style Name</th>
-              <th class="th-color">Color</th>
               <th class="th-size">Size</th>
+              <th class="th-pieces-per">Pcs/SKU</th>
               <th class="th-qty">Qty</th>
-              ${hasPrepacks ? '<th class="th-units">Units</th>' : ''}
-              <th class="th-price">${hasPrepacks ? 'Pack Price' : 'Wholesale'}</th>
-              ${hasPrepacks ? '<th class="th-unit-price">Unit Price</th>' : ''}
-              ${hasDiscounts ? '<th class="th-discount">Discount</th>' : ''}
+              <th class="th-pieces-total">Pieces</th>
+              <th class="th-price-piece">Price/Pc</th>
+              <th class="th-price-sku">Price/SKU</th>
               <th class="th-total">Line Total</th>
             </tr>
           </thead>
@@ -506,10 +519,22 @@ export function generateOrderConfirmationHtml(input: OrderConfirmationInput): st
       }
 
       .header-contact {
-        text-align: right;
+        text-align: left;
         font-size: 8pt;
         color: #525252;
-        line-height: 1.6;
+        line-height: 1.8;
+      }
+
+      .contact-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .contact-icon {
+        font-size: 10pt;
+        width: 16px;
+        text-align: center;
       }
 
       /* ===== Order Metadata Bar ===== */
@@ -519,16 +544,15 @@ export function generateOrderConfirmationHtml(input: OrderConfirmationInput): st
         border-radius: 4px;
         padding: 10px 14px;
         margin-bottom: 16px;
-      }
-
-      .meta-row {
         display: flex;
-        gap: 30px;
-        margin-bottom: 6px;
+        gap: 12px;
       }
 
-      .meta-row:last-child {
-        margin-bottom: 0;
+      .meta-col {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
       }
 
       .meta-item {
@@ -656,27 +680,45 @@ export function generateOrderConfirmationHtml(input: OrderConfirmationInput): st
       }
 
       /* Summary Table Column Widths */
-      .th-sku { width: 80px; }
+      .th-image { width: 50px; text-align: center; }
+      .th-sku { width: 100px; }
       .th-name { width: auto; }
-      .th-color { width: 80px; }
-      .th-size { width: 50px; text-align: center; }
-      .th-qty { width: 45px; text-align: center; }
-      .th-units { width: 45px; text-align: center; }
-      .th-price { width: 75px; text-align: right; }
-      .th-unit-price { width: 75px; text-align: right; }
-      .th-discount { width: 60px; text-align: center; }
-      .th-total { width: 85px; text-align: right; }
+      .th-size { width: 45px; text-align: center; }
+      .th-qty { width: 40px; text-align: center; }
+      .th-pieces-per { width: 50px; text-align: center; }
+      .th-pieces-total { width: 50px; text-align: center; }
+      .th-price-sku { width: 65px; text-align: right; }
+      .th-price-piece { width: 65px; text-align: right; }
+      .th-total { width: 75px; text-align: right; }
 
-      .cell-sku { font-weight: 600; }
-      .cell-name { }
-      .cell-color { }
+      .cell-image { text-align: center; vertical-align: middle; }
+      .cell-sku { font-weight: 600; font-size: 7pt; white-space: nowrap; }
+      .cell-name { font-size: 7pt; }
       .cell-size { text-align: center; }
       .cell-qty { text-align: center; font-weight: 500; }
-      .cell-units { text-align: center; font-size: 7pt; color: #525252; }
-      .cell-price { text-align: right; }
-      .cell-unit-price { text-align: right; font-size: 7pt; color: #525252; }
-      .cell-discount { text-align: center; color: #16a34a; }
+      .cell-pieces-per { text-align: center; font-size: 7pt; color: #525252; }
+      .cell-pieces-total { text-align: center; font-weight: 500; }
+      .cell-price-sku { text-align: right; }
+      .cell-price-piece { text-align: right; font-size: 7pt; color: #525252; }
       .cell-total { text-align: right; font-weight: 600; }
+
+      /* Thumbnail image in summary table */
+      .thumb-image {
+        width: 40px;
+        height: 40px;
+        object-fit: contain;
+        border-radius: 2px;
+      }
+
+      .no-thumb {
+        width: 40px;
+        height: 40px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #a3a3a3;
+        font-size: 7pt;
+      }
 
       /* ===== Totals Container ===== */
       .totals-container {

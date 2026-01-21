@@ -293,37 +293,40 @@ async function deriveIsPreOrderFromSkus(
     return new Map()
   }
 
-  // Query SKUs with their category IsPreOrder flag
+  // Query SKUs with their Collection type (source of truth for pre-order status)
+  // Note: skuVariantIds are ShopifyProductVariantId values, not Sku.ID
   const skus = await prisma.sku.findMany({
-    where: { ID: { in: skuVariantIds } },
+    where: { ShopifyProductVariantId: { in: skuVariantIds } },
     select: {
-      ID: true,
-      CategoryID: true,
-      SkuCategories: {
-        select: { IsPreOrder: true },
+      ShopifyProductVariantId: true,
+      CollectionID: true,
+      Collection: {
+        select: { type: true },
       },
     },
   })
 
   const result = new Map<string, boolean>()
   for (const sku of skus) {
-    // Use category's IsPreOrder flag, default to false (ATS) if null
-    const isPreOrder = sku.SkuCategories?.IsPreOrder ?? false
-    result.set(String(sku.ID), isPreOrder)
+    // Use Collection.type to determine pre-order status
+    // 'PreOrder' = true, 'ATS' or null = false
+    const isPreOrder = sku.Collection?.type === 'PreOrder'
+    result.set(String(sku.ShopifyProductVariantId), isPreOrder)
   }
 
   return result
 }
 
 /**
- * Get order grouping key that includes both ship window AND order type.
+ * Get order grouping key that includes both Collection AND order type.
  * This ensures ATS and Pre-Order items are split into separate orders.
+ * 
+ * Grouping: CollectionID → default
+ * (No CategoryID fallback - Collection is the source of truth)
  */
 function getOrderGroupKey(
   item: {
-    categoryId?: number | null
-    shipWindowStart?: string | null
-    shipWindowEnd?: string | null
+    collectionId?: number | null
     skuVariantId: number | bigint
   },
   skuPreOrderMap: Map<string, boolean>
@@ -331,12 +334,9 @@ function getOrderGroupKey(
   const isPreOrder = skuPreOrderMap.get(String(item.skuVariantId)) ?? false
   const typePrefix = isPreOrder ? 'preorder' : 'ats'
   
-  // Group by order type first, then by category/ship window
-  if (item.categoryId) {
-    return `${typePrefix}-cat-${item.categoryId}`
-  }
-  if (item.shipWindowStart || item.shipWindowEnd) {
-    return `${typePrefix}-window-${item.shipWindowStart || 'none'}-${item.shipWindowEnd || 'none'}`
+  // Group by order type first, then by collection
+  if (item.collectionId) {
+    return `${typePrefix}-collection-${item.collectionId}`
   }
   return `${typePrefix}-default`
 }
@@ -379,7 +379,7 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
     const createdOrders: Array<{
       orderId: string
       orderNumber: string
-      categoryName: string | null
+      collectionName: string | null
       shipWindowStart: string | null
       shipWindowEnd: string | null
       orderAmount: number
@@ -478,7 +478,7 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
         createdOrders.push({
           orderId: newOrder.ID.toString(),
           orderNumber,
-          categoryName: firstItem.categoryName ?? null,
+          collectionName: firstItem.collectionName ?? null,
           shipWindowStart: firstItem.shipWindowStart ?? null,
           shipWindowEnd: firstItem.shipWindowEnd ?? null,
           orderAmount,
@@ -599,9 +599,10 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
       orders: createdOrders.map((o) => ({
         orderId: o.orderId,
         orderNumber: o.orderNumber,
-        categoryName: o.categoryName,
+        collectionName: o.collectionName,
         shipWindowStart: o.shipWindowStart,
         shipWindowEnd: o.shipWindowEnd,
+        orderAmount: o.orderAmount,
       })),
     }
   } catch (e) {

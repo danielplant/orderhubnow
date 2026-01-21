@@ -1,5 +1,6 @@
 import {
   getInventoryList,
+  getInventoryFacets,
   type InventoryStatusFilter,
   type InventorySortField,
   type SortDirection,
@@ -21,6 +22,10 @@ export default async function InventoryPage({
   // Parse URL params
   const status = (typeof sp.status === 'string' ? sp.status : 'all') as InventoryStatusFilter
   const q = typeof sp.q === 'string' ? sp.q : undefined
+  const collectionId = typeof sp.collectionId === 'string' ? sp.collectionId : undefined
+  const color = typeof sp.color === 'string' ? sp.color : undefined
+  const fabric = typeof sp.fabric === 'string' ? sp.fabric : undefined
+  const size = typeof sp.size === 'string' ? sp.size : undefined
   const page = typeof sp.page === 'string' ? Math.max(1, Number(sp.page) || 1) : 1
   const pageSize = typeof sp.pageSize === 'string' ? Math.max(10, Number(sp.pageSize) || 50) : 50
 
@@ -31,8 +36,15 @@ export default async function InventoryPage({
     : undefined
   const sortDir: SortDirection = sp.sortDir === 'desc' ? 'desc' : 'asc'
 
-  // Fetch inventory data
-  const result = await getInventoryList({ status, search: q, sortBy, sortDir }, page, pageSize)
+  // Fetch inventory data and facets in parallel
+  const [result, facets] = await Promise.all([
+    getInventoryList(
+      { status, search: q, sortBy, sortDir, collectionId, color, fabric, size },
+      page,
+      pageSize
+    ),
+    getInventoryFacets(),
+  ])
 
   return (
     <main className="p-10 bg-muted/30 min-h-screen">
@@ -48,6 +60,7 @@ export default async function InventoryPage({
         total={result.total}
         statusCounts={result.statusCounts}
         lowThreshold={result.lowThreshold}
+        facets={facets}
         sortBy={sortBy}
         sortDir={sortDir}
       />

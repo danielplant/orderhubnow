@@ -1,6 +1,7 @@
 import {
   getCustomers,
   getRepNames,
+  getCustomerFacets,
   type CustomerSortField,
   type SortDirection,
 } from '@/lib/data/queries/customers'
@@ -20,6 +21,9 @@ export default async function CustomersPage({
 
   // Parse URL params
   const q = typeof sp.q === 'string' ? sp.q : undefined
+  const country = typeof sp.country === 'string' ? sp.country : undefined
+  const state = typeof sp.state === 'string' ? sp.state : undefined
+  const repFilter = typeof sp.repFilter === 'string' ? sp.repFilter : undefined
   const page = typeof sp.page === 'string' ? Math.max(1, Number(sp.page) || 1) : 1
   const pageSize = typeof sp.pageSize === 'string' ? Math.max(10, Number(sp.pageSize) || 50) : 50
 
@@ -31,9 +35,19 @@ export default async function CustomersPage({
   const sortDir: SortDirection = sp.sortDir === 'desc' ? 'desc' : 'asc'
 
   // Fetch data in parallel
-  const [customersResult, reps] = await Promise.all([
-    getCustomers({ search: q, page, pageSize, sortBy, sortDir }),
+  const [customersResult, reps, facets] = await Promise.all([
+    getCustomers({
+      search: q,
+      page,
+      pageSize,
+      sortBy,
+      sortDir,
+      country,
+      state,
+      rep: repFilter,
+    }),
     getRepNames(),
+    getCustomerFacets(),
   ])
 
   return (
@@ -49,6 +63,7 @@ export default async function CustomersPage({
         initialCustomers={customersResult.customers}
         total={customersResult.total}
         reps={reps}
+        facets={facets}
         sortBy={sortBy}
         sortDir={sortDir}
       />

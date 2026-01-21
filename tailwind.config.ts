@@ -64,6 +64,12 @@ const config: Config = {
           dark: '#E89AAF',
           contrast: '#6B1F31',
         },
+        // Status colors
+        info: {
+          DEFAULT: '#3b82f6', // Blue 500 (matches --status-info)
+          light: '#60a5fa',   // Blue 400
+          dark: '#2563eb',    // Blue 600
+        },
       },
       borderRadius: {
         lg: "var(--radius)",
