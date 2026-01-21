@@ -16,9 +16,11 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
   SearchInput,
+  FilterPill,
 } from '@/components/ui'
+import { FilterChips, type FilterChip } from '@/components/admin/filter-chips'
 import type { Customer } from '@/lib/types/customer'
-import type { CustomerSortField, SortDirection } from '@/lib/data/queries/customers'
+import type { CustomerSortField, SortDirection, CustomerFacets } from '@/lib/data/queries/customers'
 import { createCustomer, updateCustomer, deleteCustomer } from '@/lib/data/actions/customers'
 import {
   MoreHorizontal,
@@ -41,6 +43,7 @@ export interface CustomersTableProps {
   initialCustomers: Customer[]
   total: number
   reps: Array<{ id: number; name: string; code: string }>
+  facets: CustomerFacets
   sortBy?: CustomerSortField
   sortDir?: SortDirection
 }
@@ -55,6 +58,7 @@ export function CustomersTable({
   initialCustomers,
   total,
   reps,
+  facets,
   sortBy,
   sortDir = 'asc',
 }: CustomersTableProps) {
@@ -63,6 +67,9 @@ export function CustomersTable({
 
   // URL params
   const q = searchParams.get('q') || ''
+  const country = searchParams.get('country') || ''
+  const state = searchParams.get('state') || ''
+  const repFilter = searchParams.get('repFilter') || ''
   const page = Number(searchParams.get('page') || '1')
   const pageSize = Number(searchParams.get('pageSize') || '50')
 
@@ -151,6 +158,49 @@ export function CustomersTable({
     },
     [router, searchParams]
   )
+
+  // Clear all filters
+  const clearAllFilters = React.useCallback(() => {
+    router.push('/admin/customers', { scroll: false })
+  }, [router])
+
+  // Build filter chips
+  const filterChips = React.useMemo<FilterChip[]>(() => {
+    const chips: FilterChip[] = []
+    if (country) {
+      chips.push({
+        key: 'country',
+        label: 'Country',
+        value: country,
+        onRemove: () => setParam('country', null),
+      })
+    }
+    if (state) {
+      chips.push({
+        key: 'state',
+        label: 'State',
+        value: state,
+        onRemove: () => setParam('state', null),
+      })
+    }
+    if (repFilter) {
+      chips.push({
+        key: 'rep',
+        label: 'Rep',
+        value: repFilter,
+        onRemove: () => setParam('repFilter', null),
+      })
+    }
+    if (q) {
+      chips.push({
+        key: 'search',
+        label: 'Search',
+        value: q,
+        onRemove: () => setParam('q', null),
+      })
+    }
+    return chips
+  }, [country, state, repFilter, q, setParam])
 
   const openModal = (mode: ModalMode, customer?: Customer) => {
     setModalMode(mode)
@@ -263,6 +313,7 @@ export function CustomersTable({
       {
         id: 'storeName',
         header: 'Store Name',
+        sortable: true,
         cell: (r) => <span className="font-medium">{r.storeName}</span>,
       },
       {
@@ -283,6 +334,7 @@ export function CustomersTable({
       {
         id: 'rep',
         header: 'Rep',
+        sortable: true,
         cell: (r) => {
           // Display rep name (looked up from code), fallback to raw value
           const displayName = r.rep ? (codeToName.get(r.rep.toLowerCase()) || r.rep) : null
@@ -290,17 +342,26 @@ export function CustomersTable({
         },
       },
       {
+        id: 'state',
+        header: 'State',
+        sortable: true,
+        cell: (r) => (
+          <span className="text-muted-foreground">{r.address.stateProvince || '—'}</span>
+        ),
+      },
+      {
         id: 'country',
         header: 'Country',
+        sortable: true,
         cell: (r) => {
-          const country = r.address.country
+          const countryVal = r.address.country
           return (
             <span className="text-sm">
-              {country === 'CA'
+              {countryVal === 'CA'
                 ? '🇨🇦'
-                : country === 'US'
+                : countryVal === 'US'
                   ? '🇺🇸'
-                  : country || '—'}
+                  : countryVal || '—'}
             </span>
           )
         },
@@ -354,7 +415,39 @@ export function CustomersTable({
             value={q}
             onValueChange={(v) => setParam('q', v || null)}
             placeholder="Search by store name, email, or rep..."
-            className="h-10 w-full max-w-md"
+            className="h-10 w-full max-w-xs"
+          />
+
+          {/* Filter Pills */}
+          <FilterPill
+            label="Country"
+            value={country || null}
+            options={facets.countries.map((c) => ({
+              value: c.value,
+              label: c.value,
+              count: c.count,
+            }))}
+            onChange={(v) => setParam('country', v)}
+          />
+          <FilterPill
+            label="State"
+            value={state || null}
+            options={facets.states.map((s) => ({
+              value: s.value,
+              label: s.value,
+              count: s.count,
+            }))}
+            onChange={(v) => setParam('state', v)}
+          />
+          <FilterPill
+            label="Rep"
+            value={repFilter || null}
+            options={facets.reps.map((r) => ({
+              value: r.value,
+              label: r.value,
+              count: r.count,
+            }))}
+            onChange={(v) => setParam('repFilter', v)}
           />
 
           <div className="ml-auto flex gap-2 items-center">
@@ -405,6 +498,13 @@ export function CustomersTable({
             </Button>
           </div>
         </div>
+
+        {/* Filter Chips */}
+        {filterChips.length > 0 && (
+          <div className="px-4 pb-3">
+            <FilterChips filters={filterChips} onClearAll={clearAllFilters} />
+          </div>
+        )}
       </div>
 
       {/* Data Table */}

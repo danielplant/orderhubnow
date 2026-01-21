@@ -18,7 +18,7 @@ const CUSTOMERS_SORT_FIELDS: Record<CustomerSortField, string> = {
 }
 
 /**
- * Get paginated list of customers with search.
+ * Get paginated list of customers with search and filters.
  * Search includes rep name lookup: if search matches a rep's name,
  * customers with that rep's code are also returned.
  */
@@ -28,11 +28,26 @@ export async function getCustomers(input: {
   pageSize: number
   sortBy?: CustomerSortField
   sortDir?: SortDirection
+  country?: string
+  state?: string
+  rep?: string
 }): Promise<CustomersListResult> {
   const q = (input.search ?? '').trim()
 
-  let where: Prisma.CustomersWhereInput = {}
+  const where: Prisma.CustomersWhereInput = {}
 
+  // Apply dropdown filters
+  if (input.country) {
+    where.Country = input.country
+  }
+  if (input.state) {
+    where.StateProvince = input.state
+  }
+  if (input.rep) {
+    where.Rep = input.rep
+  }
+
+  // Apply search filter
   if (q) {
     // Find rep codes that match the search term (by rep name)
     // This allows searching by rep name to find customers with that rep's code
@@ -57,7 +72,7 @@ export async function getCustomers(input: {
       orConditions.push({ Rep: { in: repCodes } })
     }
 
-    where = { OR: orConditions }
+    where.AND = [{ OR: orConditions }]
   }
 
   // Build dynamic orderBy based on sort params
@@ -156,4 +171,68 @@ export async function getRepNames(): Promise<Array<{ id: number; name: string; c
     name: r.Name ?? '',
     code: r.Code?.trim() || r.Name || '',  // Fallback: Code empty -> use Name
   }))
+}
+
+// ============================================================================
+// Customer Facets (for filter dropdowns)
+// ============================================================================
+
+export interface CustomerFacets {
+  countries: Array<{ value: string; count: number }>
+  states: Array<{ value: string; count: number }>
+  reps: Array<{ value: string; count: number }>
+}
+
+/**
+ * Get distinct filter options for customers with counts.
+ * Used to populate filter dropdown options.
+ */
+export async function getCustomerFacets(): Promise<CustomerFacets> {
+  const [countries, states, reps] = await Promise.all([
+    prisma.customers.groupBy({
+      by: ['Country'],
+      _count: { _all: true },
+      where: {
+        AND: [
+          { Country: { not: null } },
+          { Country: { not: '' } },
+        ],
+      },
+      orderBy: { Country: 'asc' },
+    }),
+    prisma.customers.groupBy({
+      by: ['StateProvince'],
+      _count: { _all: true },
+      where: {
+        AND: [
+          { StateProvince: { not: null } },
+          { StateProvince: { not: '' } },
+        ],
+      },
+      orderBy: { StateProvince: 'asc' },
+    }),
+    prisma.customers.groupBy({
+      by: ['Rep'],
+      _count: { _all: true },
+      where: {
+        AND: [
+          { Rep: { not: null } },
+          { Rep: { not: '' } },
+        ],
+      },
+      orderBy: { Rep: 'asc' },
+    }),
+  ])
+
+  return {
+    countries: countries
+      .filter((c) => c.Country)
+      .map((c) => ({ value: c.Country!, count: c._count._all })),
+    states: states
+      .filter((s) => s.StateProvince)
+      .map((s) => ({ value: s.StateProvince!, count: s._count._all })),
+    reps: reps
+      .filter((r) => r.Rep)
+      .map((r) => ({ value: r.Rep!, count: r._count._all })),
+  }
 }

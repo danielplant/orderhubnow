@@ -11,7 +11,8 @@ type SortDirection = 'asc' | 'desc'
  * - `id`: Unique column identifier
  * - `header`: Column header content
  * - `cell`: Render function for cell content
- * - `sortValue`: Optional function to extract sortable value (enables sorting)
+ * - `sortValue`: Optional function to extract sortable value (enables client-side sorting)
+ * - `sortable`: Optional flag for manual/server-side sorting (if true, header is clickable)
  * - `minWidth`: Optional minimum width in pixels (default: 50)
  */
 export type DataTableColumn<T> = {
@@ -19,6 +20,7 @@ export type DataTableColumn<T> = {
   header: React.ReactNode
   cell: (row: T) => React.ReactNode
   sortValue?: (row: T) => string | number | null | undefined
+  sortable?: boolean
   minWidth?: number
 }
 
@@ -259,7 +261,9 @@ export function DataTable<T>({
 
   const onHeaderClick = (columnId: string) => {
     const col = columns.find((c) => c.id === columnId)
-    // For manual sorting, allow click even without sortValue (parent handles it)
+    // For manual sorting, require explicit sortable flag
+    if (manualSorting && !col?.sortable) return
+    // For client-side sorting, require sortValue function
     if (!manualSorting && !col?.sortValue) return
 
     const newSort: { columnId: string; direction: SortDirection } =
@@ -337,8 +341,8 @@ export function DataTable<T>({
               {columns.map((col) => {
                 const isSorted = sort?.columnId === col.id
                 const caret = isSorted ? (sort!.direction === 'desc' ? '▼' : '▲') : null
-                // Column is sortable if: has sortValue (client-side) OR manualSorting is enabled
-                const isSortable = col.sortValue || manualSorting
+                // Column is sortable if: has sortValue (client-side) OR (manualSorting + sortable flag)
+                const isSortable = col.sortValue || (manualSorting && col.sortable)
                 const width = columnWidths?.[col.id]
 
                 return (

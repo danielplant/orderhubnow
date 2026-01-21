@@ -22,9 +22,15 @@ export interface InventoryListFilters {
   search?: string
   sortBy?: InventorySortField
   sortDir?: SortDirection
+  // Dropdown filter values
+  collectionId?: string
+  color?: string
+  fabric?: string
+  size?: string
 }
 
 export interface InventoryListItem {
+  id: string // Unique database ID (for React keys)
   skuId: string
   description: string | null
   quantity: number
@@ -36,6 +42,11 @@ export interface InventoryListItem {
   lastUpdated: string | null // ISO string for serialization
   isLowStock: boolean
   isOutOfStock: boolean
+  // Additional fields for filtering and display
+  collection: string | null
+  color: string | null
+  fabric: string | null
+  size: string | null
 }
 
 export interface InventoryListResult {
@@ -131,17 +142,38 @@ export async function getInventoryList(
   const q = (filters.search ?? '').trim()
   const lowThreshold = await getLowStockThreshold()
 
-  // Build where clause based on filters
+  // Build base where clause for search and dropdown filters
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const baseWhere: any = q
-    ? {
+  const baseWhere: any = {}
+
+  // Search filter
+  if (q) {
+    baseWhere.AND = [
+      ...(baseWhere.AND ?? []),
+      {
         OR: [
           { SkuID: { contains: q } },
           { Description: { contains: q } },
         ],
-      }
-    : {}
+      },
+    ]
+  }
 
+  // Dropdown filters
+  if (filters.collectionId) {
+    baseWhere.CollectionID = Number(filters.collectionId)
+  }
+  if (filters.color) {
+    baseWhere.SkuColor = filters.color
+  }
+  if (filters.fabric) {
+    baseWhere.FabricContent = filters.fabric
+  }
+  if (filters.size) {
+    baseWhere.Size = filters.size
+  }
+
+  // Add status filter
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const where: any = {
     ...baseWhere,
@@ -165,6 +197,7 @@ export async function getInventoryList(
       skip: (Math.max(1, page) - 1) * pageSize,
       take: pageSize,
       select: {
+        ID: true,
         SkuID: true,
         Description: true,
         Quantity: true,
@@ -173,6 +206,12 @@ export async function getInventoryList(
         UnitsPerSku: true,
         UnitPriceCAD: true,
         UnitPriceUSD: true,
+        Size: true,
+        SkuColor: true,
+        FabricContent: true,
+        Collection: {
+          select: { name: true },
+        },
       },
     }),
     prisma.sku.count({ where }),
@@ -188,6 +227,7 @@ export async function getInventoryList(
     const prepackMultiplier = r.UnitsPerSku ?? 1
 
     return {
+      id: String(r.ID), // Unique database ID for React keys
       skuId: r.SkuID,
       description: r.Description ?? null,
       quantity: qty,
@@ -199,6 +239,11 @@ export async function getInventoryList(
       lastUpdated: r.DateModified?.toISOString() ?? null,
       isLowStock: qty > 0 && qty <= lowThreshold,
       isOutOfStock: qty === 0,
+      // Additional fields for filtering and display
+      collection: r.Collection?.name ?? null,
+      color: r.SkuColor ?? null,
+      fabric: r.FabricContent ?? null,
+      size: r.Size ?? null,
     }
   })
 
@@ -230,5 +275,101 @@ export async function getInventoryList(
     total,
     statusCounts: { all: allCount, low: lowCount, out: outCount, onroute: onRouteCount },
     lowThreshold,
+  }
+}
+
+// ============================================================================
+// Inventory Facets (for filter dropdowns)
+// ============================================================================
+
+export interface InventoryFacets {
+  collections: Array<{ value: string; label: string; count: number }>
+  colors: Array<{ value: string; label: string; count: number }>
+  fabrics: Array<{ value: string; label: string; count: number }>
+  sizes: Array<{ value: string; label: string; count: number }>
+}
+
+/**
+ * Get distinct filter options for inventory with counts.
+ * Used to populate filter dropdown options.
+ */
+export async function getInventoryFacets(): Promise<InventoryFacets> {
+  // Get collections with SKU counts
+  const collections = await prisma.collection.findMany({
+    where: {
+      skus: { some: {} }, // Only collections with at least one SKU
+    },
+    select: {
+      id: true,
+      name: true,
+      _count: { select: { skus: true } },
+    },
+    orderBy: { name: 'asc' },
+  })
+
+  // Get distinct colors, fabrics, sizes with counts
+  const [colors, fabrics, sizes] = await Promise.all([
+    prisma.sku.groupBy({
+      by: ['SkuColor'],
+      _count: { _all: true },
+      where: {
+        AND: [
+          { SkuColor: { not: null } },
+          { SkuColor: { not: '' } },
+        ],
+      },
+      orderBy: { SkuColor: 'asc' },
+    }),
+    prisma.sku.groupBy({
+      by: ['FabricContent'],
+      _count: { _all: true },
+      where: {
+        AND: [
+          { FabricContent: { not: null } },
+          { FabricContent: { not: '' } },
+        ],
+      },
+      orderBy: { FabricContent: 'asc' },
+    }),
+    prisma.sku.groupBy({
+      by: ['Size'],
+      _count: { _all: true },
+      where: {
+        AND: [
+          { Size: { not: null } },
+          { Size: { not: '' } },
+        ],
+      },
+      orderBy: { Size: 'asc' },
+    }),
+  ])
+
+  return {
+    collections: collections.map((c) => ({
+      value: String(c.id),
+      label: c.name,
+      count: c._count.skus,
+    })),
+    colors: colors
+      .filter((c) => c.SkuColor)
+      .map((c) => ({
+        value: c.SkuColor!,
+        label: c.SkuColor!,
+        count: c._count._all,
+      })),
+    fabrics: fabrics
+      .filter((f) => f.FabricContent)
+      .map((f) => ({
+        value: f.FabricContent!,
+        label: f.FabricContent!.length > 30 ? f.FabricContent!.slice(0, 30) + '...' : f.FabricContent!,
+        count: f._count._all,
+      })),
+    sizes: sizes
+      .filter((s) => s.Size)
+      .map((s) => ({
+        value: s.Size!,
+        label: s.Size!,
+        count: s._count._all,
+      })),
   }
 }

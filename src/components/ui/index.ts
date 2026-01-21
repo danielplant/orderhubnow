@@ -71,3 +71,6 @@ export { DateRangePopover, type DateRange, type DateRangePopoverProps } from "./
 
 // Feature interest
 export { FeatureInterestModal, type FeatureInterestModalProps } from "./feature-interest-modal";
+
+// Filter components
+export { FilterPill, type FilterPillProps, type FilterPillOption } from "./filter-pill";

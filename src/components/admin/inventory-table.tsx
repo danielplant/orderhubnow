@@ -2,9 +2,10 @@
 
 import * as React from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { DataTable, type DataTableColumn, Button, SearchInput } from '@/components/ui'
+import { DataTable, type DataTableColumn, Button, SearchInput, FilterPill } from '@/components/ui'
 import { InlineEdit } from '@/components/ui/inline-edit'
-import type { InventoryListItem, InventorySortField, SortDirection } from '@/lib/data/queries/inventory'
+import { FilterChips, type FilterChip } from '@/components/admin/filter-chips'
+import type { InventoryListItem, InventorySortField, SortDirection, InventoryFacets } from '@/lib/data/queries/inventory'
 import { updateInventoryQuantity, updateInventoryOnRoute } from '@/lib/data/actions/inventory'
 import { cn } from '@/lib/utils'
 import { formatDate } from '@/lib/utils/format'
@@ -19,6 +20,7 @@ export interface InventoryTableProps {
   total: number
   statusCounts: { all: number; low: number; out: number; onroute: number }
   lowThreshold: number
+  facets: InventoryFacets
   sortBy?: InventorySortField
   sortDir?: SortDirection
 }
@@ -43,6 +45,7 @@ export function InventoryTable({
   total,
   statusCounts,
   lowThreshold,
+  facets,
   sortBy,
   sortDir = 'asc',
 }: InventoryTableProps) {
@@ -52,6 +55,10 @@ export function InventoryTable({
   // Parse current filter state from URL
   const status = (searchParams.get('status') || 'all') as (typeof TABS)[number]['value']
   const q = searchParams.get('q') || ''
+  const collectionId = searchParams.get('collectionId') || ''
+  const color = searchParams.get('color') || ''
+  const fabric = searchParams.get('fabric') || ''
+  const size = searchParams.get('size') || ''
   const page = Number(searchParams.get('page') || '1')
   const pageSize = Number(searchParams.get('pageSize') || '50')
 
@@ -94,12 +101,70 @@ export function InventoryTable({
     [router, searchParams]
   )
 
+  // Clear all filters
+  const clearAllFilters = React.useCallback(() => {
+    router.push('/admin/inventory', { scroll: false })
+  }, [router])
+
+  // Find collection name for display in filter chips
+  const getCollectionName = React.useCallback(
+    (id: string) => facets.collections.find((c) => c.value === id)?.label ?? id,
+    [facets.collections]
+  )
+
+  // Build filter chips
+  const filterChips = React.useMemo<FilterChip[]>(() => {
+    const chips: FilterChip[] = []
+    if (collectionId) {
+      chips.push({
+        key: 'collection',
+        label: 'Collection',
+        value: getCollectionName(collectionId),
+        onRemove: () => setParam('collectionId', null),
+      })
+    }
+    if (color) {
+      chips.push({
+        key: 'color',
+        label: 'Color',
+        value: color,
+        onRemove: () => setParam('color', null),
+      })
+    }
+    if (fabric) {
+      chips.push({
+        key: 'fabric',
+        label: 'Fabric',
+        value: fabric.length > 20 ? fabric.slice(0, 20) + '...' : fabric,
+        onRemove: () => setParam('fabric', null),
+      })
+    }
+    if (size) {
+      chips.push({
+        key: 'size',
+        label: 'Size',
+        value: size,
+        onRemove: () => setParam('size', null),
+      })
+    }
+    if (q) {
+      chips.push({
+        key: 'search',
+        label: 'Search',
+        value: q,
+        onRemove: () => setParam('q', null),
+      })
+    }
+    return chips
+  }, [collectionId, color, fabric, size, q, setParam, getCollectionName])
+
   // Table columns - IDs match sort field names for sortable columns
   const columns = React.useMemo<Array<DataTableColumn<InventoryListItem>>>(
     () => [
       {
         id: 'sku', // Matches InventorySortField
         header: 'SKU',
+        sortable: true,
         cell: (r) => <span className="font-medium font-mono text-sm">{r.skuId}</span>,
       },
       {
@@ -112,8 +177,18 @@ export function InventoryTable({
         ),
       },
       {
+        id: 'collection',
+        header: 'Collection',
+        cell: (r) => (
+          <span className="text-sm text-muted-foreground truncate block max-w-[120px]">
+            {r.collection ?? '—'}
+          </span>
+        ),
+      },
+      {
         id: 'qty', // Matches InventorySortField
         header: 'Qty',
+        sortable: true,
         cell: (r) => (
           <div className="flex items-center gap-2">
             <InlineEdit
@@ -136,6 +211,7 @@ export function InventoryTable({
       {
         id: 'onRoute',
         header: 'On Route',
+        sortable: true,
         cell: (r) => (
           <InlineEdit
             value={r.onRoute}
@@ -242,7 +318,33 @@ export function InventoryTable({
             value={q}
             onValueChange={(v) => setParam('q', v || null)}
             placeholder="Search by SKU or description..."
-            className="h-10 w-full max-w-md"
+            className="h-10 w-full max-w-xs"
+          />
+
+          {/* Filter Pills */}
+          <FilterPill
+            label="Collection"
+            value={collectionId || null}
+            options={facets.collections}
+            onChange={(v) => setParam('collectionId', v)}
+          />
+          <FilterPill
+            label="Color"
+            value={color || null}
+            options={facets.colors}
+            onChange={(v) => setParam('color', v)}
+          />
+          <FilterPill
+            label="Fabric"
+            value={fabric || null}
+            options={facets.fabrics}
+            onChange={(v) => setParam('fabric', v)}
+          />
+          <FilterPill
+            label="Size"
+            value={size || null}
+            options={facets.sizes}
+            onChange={(v) => setParam('size', v)}
           />
 
           <div className="ml-auto flex items-center gap-2 text-sm text-muted-foreground">
@@ -252,13 +354,20 @@ export function InventoryTable({
             </Button>
           </div>
         </div>
+
+        {/* Filter Chips */}
+        {filterChips.length > 0 && (
+          <div className="px-4 pb-3">
+            <FilterChips filters={filterChips} onClearAll={clearAllFilters} />
+          </div>
+        )}
       </div>
 
       {/* Data Table */}
       <DataTable
         data={initialItems}
         columns={columns}
-        getRowId={(r) => r.skuId}
+        getRowId={(r) => r.id}
         enableRowSelection={false}
         pageSize={pageSize}
         manualPagination
