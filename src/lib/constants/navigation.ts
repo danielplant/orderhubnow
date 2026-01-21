@@ -22,8 +22,25 @@ export const adminNav: NavItem[] = [
   { name: 'Customers', path: '/admin/customers' },
   { name: 'Reps', path: '/admin/reps' },
   { name: 'Prepacks', path: '/admin/prepacks' },
-  { name: 'Shopify', path: '/admin/shopify' },
-  { name: 'Developer', path: '/admin/developer' },
+  {
+    name: 'Shopify',
+    path: '/admin/shopify',
+    children: [
+      { name: 'Overview', path: '/admin/shopify' },
+      { name: 'Configuration', path: '/admin/shopify/config' },
+      { name: 'Discovery', path: '/admin/shopify/discovery' },
+      {
+        name: 'Sync',
+        path: '/admin/shopify/sync',
+        children: [
+          { name: 'Run Sync', path: '/admin/shopify/sync/run' },
+          { name: 'Mappings', path: '/admin/shopify/sync/mapping' },
+          { name: 'History', path: '/admin/shopify/sync/history' },
+        ],
+      },
+      { name: 'Settings', path: '/admin/shopify/settings' },
+    ],
+  },
   { name: 'Settings', path: '/admin/settings' },
 ]
 

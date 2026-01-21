@@ -1,7 +1,15 @@
-import { getCustomers, getRepNames } from '@/lib/data/queries/customers'
+import {
+  getCustomers,
+  getRepNames,
+  type CustomerSortField,
+  type SortDirection,
+} from '@/lib/data/queries/customers'
 import { CustomersTable } from '@/components/admin/customers-table'
 
 export const dynamic = 'force-dynamic'
+
+// Valid sort fields for customers list
+const VALID_SORT_FIELDS: CustomerSortField[] = ['storeName', 'country', 'state', 'rep']
 
 export default async function CustomersPage({
   searchParams,
@@ -15,9 +23,16 @@ export default async function CustomersPage({
   const page = typeof sp.page === 'string' ? Math.max(1, Number(sp.page) || 1) : 1
   const pageSize = typeof sp.pageSize === 'string' ? Math.max(10, Number(sp.pageSize) || 50) : 50
 
+  // Parse sort params (with validation)
+  const sortByRaw = typeof sp.sortBy === 'string' ? sp.sortBy : undefined
+  const sortBy = sortByRaw && VALID_SORT_FIELDS.includes(sortByRaw as CustomerSortField)
+    ? (sortByRaw as CustomerSortField)
+    : undefined
+  const sortDir: SortDirection = sp.sortDir === 'desc' ? 'desc' : 'asc'
+
   // Fetch data in parallel
   const [customersResult, reps] = await Promise.all([
-    getCustomers({ search: q, page, pageSize }),
+    getCustomers({ search: q, page, pageSize, sortBy, sortDir }),
     getRepNames(),
   ])
 
@@ -34,6 +49,8 @@ export default async function CustomersPage({
         initialCustomers={customersResult.customers}
         total={customersResult.total}
         reps={reps}
+        sortBy={sortBy}
+        sortDir={sortDir}
       />
     </main>
   )

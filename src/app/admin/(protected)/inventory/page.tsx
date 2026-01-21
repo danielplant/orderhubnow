@@ -1,7 +1,15 @@
-import { getInventoryList, type InventoryStatusFilter } from '@/lib/data/queries/inventory'
+import {
+  getInventoryList,
+  type InventoryStatusFilter,
+  type InventorySortField,
+  type SortDirection,
+} from '@/lib/data/queries/inventory'
 import { InventoryTable } from '@/components/admin/inventory-table'
 
 export const dynamic = 'force-dynamic'
+
+// Valid sort fields for inventory list
+const VALID_SORT_FIELDS: InventorySortField[] = ['sku', 'qty', 'onRoute']
 
 export default async function InventoryPage({
   searchParams,
@@ -16,8 +24,15 @@ export default async function InventoryPage({
   const page = typeof sp.page === 'string' ? Math.max(1, Number(sp.page) || 1) : 1
   const pageSize = typeof sp.pageSize === 'string' ? Math.max(10, Number(sp.pageSize) || 50) : 50
 
+  // Parse sort params (with validation)
+  const sortByRaw = typeof sp.sortBy === 'string' ? sp.sortBy : undefined
+  const sortBy = sortByRaw && VALID_SORT_FIELDS.includes(sortByRaw as InventorySortField)
+    ? (sortByRaw as InventorySortField)
+    : undefined
+  const sortDir: SortDirection = sp.sortDir === 'desc' ? 'desc' : 'asc'
+
   // Fetch inventory data
-  const result = await getInventoryList({ status, search: q }, page, pageSize)
+  const result = await getInventoryList({ status, search: q, sortBy, sortDir }, page, pageSize)
 
   return (
     <main className="p-10 bg-muted/30 min-h-screen">
@@ -33,6 +48,8 @@ export default async function InventoryPage({
         total={result.total}
         statusCounts={result.statusCounts}
         lowThreshold={result.lowThreshold}
+        sortBy={sortBy}
+        sortDir={sortDir}
       />
     </main>
   )

@@ -158,6 +158,26 @@ function ValidationModal({
               </div>
             )}
 
+            {/* Inactive SKUs (Blockers) */}
+            {validation.inactiveSkus.length > 0 && (
+              <div className="border border-amber-200 dark:border-amber-800 rounded-lg p-4">
+                <h4 className="font-medium text-amber-800 dark:text-amber-200 mb-2 flex items-center gap-2">
+                  <AlertTriangle className="h-4 w-4" />
+                  Inactive SKUs ({validation.inactiveSkus.length})
+                </h4>
+                <p className="text-sm text-muted-foreground mb-2">
+                  These SKUs are inactive in Shopify and cannot be transferred:
+                </p>
+                <ul className="text-sm font-mono space-y-1 max-h-32 overflow-y-auto">
+                  {validation.inactiveSkus.map((sku) => (
+                    <li key={sku} className="text-amber-700 dark:text-amber-300">
+                      • {sku}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
             {/* Inventory Status */}
             {validation.inventoryStatus.length > 0 && (
               <div className="border rounded-lg overflow-hidden">
@@ -387,6 +407,7 @@ export function OrdersPendingTransferTable({
     success: boolean
     message: string
     missingSkus?: string[]
+    inactiveSkus?: string[]
   } | null>(null)
 
   // Validation modal state
@@ -451,6 +472,7 @@ export function OrdersPendingTransferTable({
           success: false,
           message: `Failed to transfer ${validationResult.orderNumber}: ${result.error || 'Unknown error'}`,
           missingSkus: result.missingSkus,
+          inactiveSkus: result.inactiveSkus,
         })
       }
     } catch (e) {
@@ -486,12 +508,21 @@ export function OrdersPendingTransferTable({
             success: false,
             message: `Cannot transfer ${orderNumber}: ${result.missingSkus.length} SKU(s) not found in Shopify`,
             missingSkus: result.missingSkus,
+            inactiveSkus: result.inactiveSkus,
+          })
+        } else if (result.inactiveSkus && result.inactiveSkus.length > 0) {
+          setLastResult({
+            orderId,
+            success: false,
+            message: `Cannot transfer ${orderNumber}: ${result.inactiveSkus.length} SKU(s) inactive in Shopify`,
+            inactiveSkus: result.inactiveSkus,
           })
         } else {
           setLastResult({
             orderId,
             success: false,
             message: `Failed to transfer ${orderNumber}: ${result.error || 'Unknown error'}`,
+            inactiveSkus: result.inactiveSkus,
           })
         }
       } catch (e) {
@@ -698,6 +729,16 @@ export function OrdersPendingTransferTable({
               <p className="text-sm">Missing SKUs:</p>
               <ul className="mt-1 text-sm font-mono">
                 {lastResult.missingSkus.map((sku) => (
+                  <li key={sku}>• {sku}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {lastResult.inactiveSkus && lastResult.inactiveSkus.length > 0 && (
+            <div className="mt-2">
+              <p className="text-sm">Inactive SKUs:</p>
+              <ul className="mt-1 text-sm font-mono">
+                {lastResult.inactiveSkus.map((sku) => (
                   <li key={sku}>• {sku}</li>
                 ))}
               </ul>

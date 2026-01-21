@@ -13,6 +13,7 @@ import { formatDate, formatDateTime } from '@/lib/utils/format'
 import { getTrackingUrl } from '@/lib/types/shipment'
 import { updateOrderDetails } from '@/lib/data/actions/orders'
 import { syncOrderStatusFromShopify } from '@/lib/data/actions/shopify'
+import { syncFulfillmentsFromShopify } from '@/lib/data/actions/fulfillment-sync'
 import type { ShipmentRow, Carrier, LineItemStatus, CancelReason } from '@/lib/types/shipment'
 import { Pencil, X, Check, Loader2, RefreshCw, RotateCcw, FileText, Printer, Mail, Ban } from 'lucide-react'
 
@@ -625,12 +626,15 @@ export function ShopifyStatusCard({
   lastSyncedAt,
 }: ShopifyStatusCardProps) {
   const router = useRouter()
-  const [isSyncing, setIsSyncing] = React.useState(false)
+  const [isSyncingStatus, setIsSyncingStatus] = React.useState(false)
+  const [isSyncingFulfillments, setIsSyncingFulfillments] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
+  const [fulfillmentSyncResult, setFulfillmentSyncResult] = React.useState<string | null>(null)
 
-  const handleSync = async () => {
-    setIsSyncing(true)
+  const handleSyncStatus = async () => {
+    setIsSyncingStatus(true)
     setError(null)
+    setFulfillmentSyncResult(null)
     try {
       const result = await syncOrderStatusFromShopify(orderId)
       if (result.success) {
@@ -641,9 +645,34 @@ export function ShopifyStatusCard({
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to sync')
     } finally {
-      setIsSyncing(false)
+      setIsSyncingStatus(false)
     }
   }
+
+  const handleSyncFulfillments = async () => {
+    setIsSyncingFulfillments(true)
+    setError(null)
+    setFulfillmentSyncResult(null)
+    try {
+      const result = await syncFulfillmentsFromShopify(orderId)
+      if (result.success) {
+        if (result.shipmentsCreated > 0) {
+          setFulfillmentSyncResult(`Synced ${result.shipmentsCreated} shipment(s)`)
+        } else {
+          setFulfillmentSyncResult('No new fulfillments to sync')
+        }
+        router.refresh()
+      } else {
+        setError(result.error || 'Failed to sync fulfillments')
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to sync fulfillments')
+    } finally {
+      setIsSyncingFulfillments(false)
+    }
+  }
+
+  const isSyncing = isSyncingStatus || isSyncingFulfillments
 
   return (
     <Card>
@@ -652,11 +681,11 @@ export function ShopifyStatusCard({
         <Button
           variant="ghost"
           size="sm"
-          onClick={handleSync}
+          onClick={handleSyncStatus}
           disabled={isSyncing}
           title="Sync status from Shopify"
         >
-          <RefreshCw className={cn('h-4 w-4', isSyncing && 'animate-spin')} />
+          <RefreshCw className={cn('h-4 w-4', isSyncingStatus && 'animate-spin')} />
         </Button>
       </CardHeader>
       <CardContent className="space-y-2 text-sm">
@@ -682,6 +711,33 @@ export function ShopifyStatusCard({
             {lastSyncedAt ? formatDateTime(lastSyncedAt) : 'Never'}
           </span>
         </div>
+        
+        {/* Sync Fulfillments Button */}
+        <div className="pt-2 border-t border-border">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleSyncFulfillments}
+            disabled={isSyncing}
+            className="w-full"
+          >
+            {isSyncingFulfillments ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                Syncing...
+              </>
+            ) : (
+              <>
+                <RefreshCw className="h-4 w-4 mr-2" />
+                Sync Fulfillments
+              </>
+            )}
+          </Button>
+        </div>
+
+        {fulfillmentSyncResult && (
+          <div className="text-xs text-success pt-1">{fulfillmentSyncResult}</div>
+        )}
         {error && (
           <div className="text-xs text-destructive pt-1">{error}</div>
         )}

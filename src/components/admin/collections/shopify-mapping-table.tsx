@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { Button } from '@/components/ui'
 import { MapValueModal } from './map-value-modal'
 import { Check, Clock, AlertCircle } from 'lucide-react'
@@ -112,15 +113,16 @@ export function ShopifyMappingTable({
               filteredMappings.map((mapping) => (
                 <tr key={mapping.id} className="hover:bg-muted/30">
                   <td className="px-4 py-3">
-                    <span
-                      className={`font-bold text-sm ${
+                    <Link
+                      href={`/admin/collections/mapping/preview?rawValue=${encodeURIComponent(mapping.rawValue)}`}
+                      className={`font-bold text-sm hover:underline cursor-pointer ${
                         mapping.status === 'unmapped' && mapping.skuCount >= 50
                           ? 'text-destructive'
-                          : ''
+                          : 'text-primary'
                       }`}
                     >
-                      {mapping.skuCount}
-                    </span>
+                      {mapping.skuCount} SKUs
+                    </Link>
                   </td>
                   <td className="px-4 py-3">
                     <code className="text-xs bg-muted px-2 py-1 rounded font-mono max-w-md truncate block">

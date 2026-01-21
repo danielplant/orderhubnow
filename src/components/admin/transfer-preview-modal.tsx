@@ -39,6 +39,7 @@ export function TransferPreviewModal({
   if (!validation && !isLoading) return null
 
   const hasWarnings = validation?.inventoryStatus.some((item) => item.status !== 'ok')
+  const blockedCount = (validation?.missingSkus.length ?? 0) + (validation?.inactiveSkus.length ?? 0)
 
   // Build order type from order number prefix
   const orderType = validation?.orderNumber?.startsWith('A') ? 'ATS' : 'Pre Order'
@@ -93,7 +94,7 @@ export function TransferPreviewModal({
                       Cannot Transfer
                     </span>
                     <p className="text-sm text-red-700 dark:text-red-300">
-                      {validation.missingSkus.length} missing SKU(s) must be resolved first
+                      {blockedCount} blocking SKU(s) must be resolved first
                     </p>
                   </div>
                 </>
@@ -133,9 +134,15 @@ export function TransferPreviewModal({
                     </p>
                   </div>
                   <div>
-                    <span className="text-muted-foreground">Collection/Season</span>
+                    <span className="text-muted-foreground">OHN Collection</span>
                     <p className="font-medium">
-                      {validation.collection || '—'}
+                      {validation.ohnCollection || '—'}
+                    </p>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Shopify Collection</span>
+                    <p className="font-medium">
+                      {validation.shopifyCollectionRaw || '—'}
                     </p>
                   </div>
                 </div>
@@ -172,11 +179,16 @@ export function TransferPreviewModal({
                     {validation.shipWindowTag}
                   </span>
                 )}
-                {validation.collection && (
+                {validation.ohnCollection && validation.ohnCollection !== 'Mixed' && (
                   <span className="inline-flex items-center rounded-md bg-muted px-2 py-1 text-xs font-mono">
-                    SEASON_{validation.collection}
+                    OHN_COLLECTION_{validation.ohnCollection.replace(/\s+/g, '_').toUpperCase()}
                   </span>
                 )}
+                {validation.shopifyCollectionRawValues?.map((rawValue) => (
+                  <span key={rawValue} className="inline-flex items-center rounded-md bg-muted px-2 py-1 text-xs font-mono">
+                    SHOPIFY_COLLECTION_{rawValue.replace(/\s+/g, '_').toUpperCase()}
+                  </span>
+                ))}
                 {validation.salesRep && (
                   <span className="inline-flex items-center rounded-md bg-muted px-2 py-1 text-xs font-medium">
                     {validation.salesRep}
@@ -199,6 +211,26 @@ export function TransferPreviewModal({
                   <ul className="text-sm font-mono space-y-1">
                     {validation.missingSkus.map((sku) => (
                       <li key={sku} className="text-red-800 dark:text-red-200">{sku}</li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            )}
+
+            {/* Inactive SKUs (Blockers) */}
+            {validation.inactiveSkus.length > 0 && (
+              <div className="border border-amber-200 dark:border-amber-800 rounded-lg p-4 space-y-2">
+                <h4 className="font-medium text-amber-800 dark:text-amber-200 flex items-center gap-2">
+                  <AlertTriangle className="h-4 w-4" />
+                  Inactive SKUs ({validation.inactiveSkus.length})
+                </h4>
+                <p className="text-sm text-muted-foreground">
+                  These SKUs are inactive in Shopify and cannot be transferred:
+                </p>
+                <div className="bg-amber-100 dark:bg-amber-900/30 rounded p-2 max-h-32 overflow-y-auto">
+                  <ul className="text-sm font-mono space-y-1">
+                    {validation.inactiveSkus.map((sku) => (
+                      <li key={sku} className="text-amber-800 dark:text-amber-200">{sku}</li>
                     ))}
                   </ul>
                 </div>

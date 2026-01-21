@@ -4,7 +4,7 @@ import * as React from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { DataTable, type DataTableColumn, Button, SearchInput } from '@/components/ui'
 import { InlineEdit } from '@/components/ui/inline-edit'
-import type { InventoryListItem } from '@/lib/data/queries/inventory'
+import type { InventoryListItem, InventorySortField, SortDirection } from '@/lib/data/queries/inventory'
 import { updateInventoryQuantity, updateInventoryOnRoute } from '@/lib/data/actions/inventory'
 import { cn } from '@/lib/utils'
 import { formatDate } from '@/lib/utils/format'
@@ -19,6 +19,8 @@ export interface InventoryTableProps {
   total: number
   statusCounts: { all: number; low: number; out: number; onroute: number }
   lowThreshold: number
+  sortBy?: InventorySortField
+  sortDir?: SortDirection
 }
 
 // ============================================================================
@@ -41,6 +43,8 @@ export function InventoryTable({
   total,
   statusCounts,
   lowThreshold,
+  sortBy,
+  sortDir = 'asc',
 }: InventoryTableProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -78,11 +82,23 @@ export function InventoryTable({
     [router, searchParams]
   )
 
-  // Table columns
+  // Handle sort change - update URL params
+  const handleSortChange = React.useCallback(
+    (newSort: { columnId: string; direction: 'asc' | 'desc' }) => {
+      const params = new URLSearchParams(searchParams.toString())
+      params.set('sortBy', newSort.columnId)
+      params.set('sortDir', newSort.direction)
+      params.delete('page') // Reset pagination on sort change
+      router.push(`?${params.toString()}`, { scroll: false })
+    },
+    [router, searchParams]
+  )
+
+  // Table columns - IDs match sort field names for sortable columns
   const columns = React.useMemo<Array<DataTableColumn<InventoryListItem>>>(
     () => [
       {
-        id: 'skuId',
+        id: 'sku', // Matches InventorySortField
         header: 'SKU',
         cell: (r) => <span className="font-medium font-mono text-sm">{r.skuId}</span>,
       },
@@ -96,7 +112,7 @@ export function InventoryTable({
         ),
       },
       {
-        id: 'quantity',
+        id: 'qty', // Matches InventorySortField
         header: 'Qty',
         cell: (r) => (
           <div className="flex items-center gap-2">
@@ -249,6 +265,9 @@ export function InventoryTable({
         page={page}
         totalCount={total}
         onPageChange={setPageParam}
+        manualSorting
+        sort={sortBy ? { columnId: sortBy, direction: sortDir } : null}
+        onSortChange={handleSortChange}
       />
     </div>
   )

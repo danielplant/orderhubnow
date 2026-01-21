@@ -18,6 +18,7 @@ import {
   SearchInput,
 } from '@/components/ui'
 import type { Customer } from '@/lib/types/customer'
+import type { CustomerSortField, SortDirection } from '@/lib/data/queries/customers'
 import { createCustomer, updateCustomer, deleteCustomer } from '@/lib/data/actions/customers'
 import {
   MoreHorizontal,
@@ -40,6 +41,8 @@ export interface CustomersTableProps {
   initialCustomers: Customer[]
   total: number
   reps: Array<{ id: number; name: string; code: string }>
+  sortBy?: CustomerSortField
+  sortDir?: SortDirection
 }
 
 type ModalMode = 'add' | 'edit' | 'delete' | null
@@ -48,7 +51,13 @@ type ModalMode = 'add' | 'edit' | 'delete' | null
 // Component
 // ============================================================================
 
-export function CustomersTable({ initialCustomers, total, reps }: CustomersTableProps) {
+export function CustomersTable({
+  initialCustomers,
+  total,
+  reps,
+  sortBy,
+  sortDir = 'asc',
+}: CustomersTableProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
 
@@ -126,6 +135,18 @@ export function CustomersTable({ initialCustomers, total, reps }: CustomersTable
     (nextPage: number) => {
       const params = new URLSearchParams(searchParams.toString())
       params.set('page', String(Math.max(1, nextPage)))
+      router.push(`?${params.toString()}`, { scroll: false })
+    },
+    [router, searchParams]
+  )
+
+  // Handle sort change - update URL params
+  const handleSortChange = React.useCallback(
+    (newSort: { columnId: string; direction: 'asc' | 'desc' }) => {
+      const params = new URLSearchParams(searchParams.toString())
+      params.set('sortBy', newSort.columnId)
+      params.set('sortDir', newSort.direction)
+      params.delete('page') // Reset pagination on sort change
       router.push(`?${params.toString()}`, { scroll: false })
     },
     [router, searchParams]
@@ -397,6 +418,9 @@ export function CustomersTable({ initialCustomers, total, reps }: CustomersTable
         page={page}
         totalCount={total}
         onPageChange={setPageParam}
+        manualSorting
+        sort={sortBy ? { columnId: sortBy, direction: sortDir } : null}
+        onSortChange={handleSortChange}
       />
 
       {/* Add/Edit Modal */}

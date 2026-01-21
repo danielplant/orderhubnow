@@ -53,6 +53,10 @@ interface SyncConfigResponse {
     value: string
     enabled: boolean
   }>
+  runtimeFlags: Array<{
+    configKey: string
+    enabled: boolean
+  }>
   protectedFields: string[]
   schemaInfo?: {
     apiVersion: string
@@ -239,6 +243,16 @@ export function DeveloperToolsClient() {
   const [selectedStatuses, setSelectedStatuses] = useState<string[]>(['ACTIVE'])
   const [originalStatuses, setOriginalStatuses] = useState<string[]>(['ACTIVE'])
 
+  // Runtime flags state
+  const [runtimeFlags, setRuntimeFlags] = useState({
+    ingestionActiveOnly: false,
+    transferActiveOnly: false,
+  })
+  const [originalRuntimeFlags, setOriginalRuntimeFlags] = useState({
+    ingestionActiveOnly: false,
+    transferActiveOnly: false,
+  })
+
   // Field configuration state
   const [fieldConfig, setFieldConfig] = useState<FieldConfig[]>([])
   const [originalFieldConfig, setOriginalFieldConfig] = useState<FieldConfig[]>([])
@@ -273,7 +287,12 @@ export function DeveloperToolsClient() {
   const hasMetafieldChanges =
     JSON.stringify(enabledMetafields.sort()) !== JSON.stringify(originalMetafields.sort())
 
-  const hasUnsavedChanges = hasStatusChanges || hasFieldChanges || hasMetafieldChanges
+  const hasRuntimeChanges =
+    runtimeFlags.ingestionActiveOnly !== originalRuntimeFlags.ingestionActiveOnly ||
+    runtimeFlags.transferActiveOnly !== originalRuntimeFlags.transferActiveOnly
+
+  const hasUnsavedChanges =
+    hasStatusChanges || hasFieldChanges || hasMetafieldChanges || hasRuntimeChanges
 
   // Fetch entities
   useEffect(() => {
@@ -328,6 +347,21 @@ export function DeveloperToolsClient() {
             setOriginalStatuses(['ACTIVE', 'DRAFT', 'ARCHIVED'])
           }
 
+          const runtimeConfig = {
+            ingestionActiveOnly: false,
+            transferActiveOnly: false,
+          }
+          for (const flag of configData.runtimeFlags || []) {
+            if (flag.configKey === 'ingestionActiveOnly') {
+              runtimeConfig.ingestionActiveOnly = flag.enabled
+            }
+            if (flag.configKey === 'transferActiveOnly') {
+              runtimeConfig.transferActiveOnly = flag.enabled
+            }
+          }
+          setRuntimeFlags(runtimeConfig)
+          setOriginalRuntimeFlags(runtimeConfig)
+
           // Set field configuration
           const fields = configData.fields.map((f) => ({
             ...f,
@@ -378,6 +412,13 @@ export function DeveloperToolsClient() {
         return prev.filter((s) => s !== status)
       }
     })
+  }
+
+  const handleRuntimeFlagChange = (
+    key: 'ingestionActiveOnly' | 'transferActiveOnly',
+    enabled: boolean
+  ) => {
+    setRuntimeFlags((prev) => ({ ...prev, [key]: enabled }))
   }
 
   // Handle field toggle change
@@ -506,12 +547,26 @@ export function DeveloperToolsClient() {
           ]
         : []
 
+      const runtimeUpdates = hasRuntimeChanges
+        ? [
+            {
+              configKey: 'ingestionActiveOnly',
+              enabled: runtimeFlags.ingestionActiveOnly,
+            },
+            {
+              configKey: 'transferActiveOnly',
+              enabled: runtimeFlags.transferActiveOnly,
+            },
+          ]
+        : []
+
       const res = await fetch(`/api/admin/shopify/sync-config/${selectedEntity}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           fields: fieldUpdates.length > 0 ? fieldUpdates : undefined,
           filters: filterUpdates.length > 0 ? filterUpdates : undefined,
+          runtimeFlags: runtimeUpdates.length > 0 ? runtimeUpdates : undefined,
         }),
       })
 
@@ -521,6 +576,7 @@ export function DeveloperToolsClient() {
         setOriginalStatuses([...selectedStatuses])
         setOriginalFieldConfig(JSON.parse(JSON.stringify(fieldConfig)))
         setOriginalMetafields(JSON.parse(JSON.stringify(enabledMetafields)))
+        setOriginalRuntimeFlags({ ...runtimeFlags })
         setSuccessMessage('Configuration saved. Changes will apply on next sync.')
         setTimeout(() => setSuccessMessage(null), 5000)
         // Trigger sample data refresh
@@ -541,6 +597,7 @@ export function DeveloperToolsClient() {
     setSelectedStatuses([...originalStatuses])
     setFieldConfig(JSON.parse(JSON.stringify(originalFieldConfig)))
     setEnabledMetafields(JSON.parse(JSON.stringify(originalMetafields)))
+    setRuntimeFlags({ ...originalRuntimeFlags })
   }
 
   const currentEntity = entities.find((e) => e.name === selectedEntity)
@@ -603,6 +660,62 @@ export function DeveloperToolsClient() {
           onStatusChange={handleStatusChange}
           hasChanges={hasStatusChanges}
         />
+      )}
+
+      {/* Runtime Behavior Panel */}
+      {(selectedEntity === 'Product' || selectedEntity === 'ProductVariant') && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              Runtime Behavior
+              {hasRuntimeChanges && (
+                <span className="text-xs font-medium px-2 py-1 rounded-full border border-amber-600 text-amber-600">
+                  Unsaved
+                </span>
+              )}
+            </CardTitle>
+            <CardDescription>
+              Control where ACTIVE-only rules are enforced during sync and transfer.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              <label className="flex items-start gap-3 p-3 rounded-lg border border-border hover:bg-muted/50 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={runtimeFlags.ingestionActiveOnly}
+                  onChange={(e) =>
+                    handleRuntimeFlagChange('ingestionActiveOnly', e.target.checked)
+                  }
+                  className="mt-1 h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                />
+                <div className="flex-1">
+                  <div className="font-medium">Ingestion-time ACTIVE-only</div>
+                  <div className="text-sm text-muted-foreground">
+                    Skip writing non-ACTIVE variants into RawSkusFromShopify during sync.
+                  </div>
+                </div>
+              </label>
+
+              <label className="flex items-start gap-3 p-3 rounded-lg border border-border hover:bg-muted/50 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={runtimeFlags.transferActiveOnly}
+                  onChange={(e) =>
+                    handleRuntimeFlagChange('transferActiveOnly', e.target.checked)
+                  }
+                  className="mt-1 h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                />
+                <div className="flex-1">
+                  <div className="font-medium">Transfer-time ACTIVE-only</div>
+                  <div className="text-sm text-muted-foreground">
+                    Treat non-ACTIVE variants as unavailable during Shopify transfer validation.
+                  </div>
+                </div>
+              </label>
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       {/* Field Configuration Panel */}

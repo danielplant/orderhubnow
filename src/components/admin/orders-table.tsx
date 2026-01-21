@@ -62,7 +62,8 @@ const COLUMN_LABELS: Record<string, string> = {
   orderType: 'Type',
   storeName: 'Store',
   salesRep: 'Rep',
-  collection: 'Collection',
+  collection: 'OHN Collection',
+  shopifyCollectionRaw: 'Shopify Collection',
   season: 'Season',
   shipStartDate: 'Ship Window',
   orderDate: 'Order Date',
@@ -70,28 +71,40 @@ const COLUMN_LABELS: Record<string, string> = {
   shippedTotal: 'Shipped',
   variance: 'Variance',
   notes: 'Notes',
-  statusSync: 'Status/Sync',
+  statusSync: 'Status',
   actions: 'Actions',
 }
 
-const DEFAULT_VISIBLE_COLUMNS = Object.keys(COLUMN_LABELS)
+// Show essential columns by default (users can add more via column visibility toggle)
+const DEFAULT_VISIBLE_COLUMNS = [
+  'orderNumber',
+  'orderType',
+  'storeName',
+  'salesRep',
+  'shipStartDate',
+  'orderDate',
+  'orderAmount',
+  'statusSync',
+  'actions',
+]
 const REQUIRED_COLUMNS = ['orderNumber', 'actions']
 
 const DEFAULT_COLUMN_WIDTHS: Record<string, number> = {
-  orderNumber: 95,
-  orderType: 75,
-  storeName: 140,
-  salesRep: 80,
-  collection: 100,
-  season: 70,
-  shipStartDate: 140,
-  orderDate: 95,
-  orderAmount: 85,
-  shippedTotal: 85,
-  variance: 85,
-  notes: 110,
-  statusSync: 115,
-  actions: 50,
+  orderNumber: 100,
+  orderType: 80,
+  storeName: 160,
+  salesRep: 100,
+  collection: 110,
+  shopifyCollectionRaw: 130,
+  season: 80,
+  shipStartDate: 150,
+  orderDate: 100,
+  orderAmount: 100,
+  shippedTotal: 100,
+  variance: 100,
+  notes: 140,
+  statusSync: 120,
+  actions: 60,
 }
 
 // Map OrderStatus to StatusBadge status prop
@@ -145,41 +158,42 @@ export function OrdersTable({ initialOrders, total, statusCounts, reps }: Orders
   const [isBulkTransferring, setIsBulkTransferring] = React.useState(false)
 
   // Column visibility state (localStorage persisted)
-  const [visibleColumns, setVisibleColumns] = React.useState<string[]>(() => {
-    if (typeof window === 'undefined') return DEFAULT_VISIBLE_COLUMNS
-    try {
-      const saved = localStorage.getItem('orders-table-columns')
-      return saved ? JSON.parse(saved) : DEFAULT_VISIBLE_COLUMNS
-    } catch {
-      return DEFAULT_VISIBLE_COLUMNS
-    }
-  })
+  // Initialize with defaults to avoid hydration mismatch, then hydrate from localStorage
+  const [visibleColumns, setVisibleColumns] = React.useState<string[]>(DEFAULT_VISIBLE_COLUMNS)
+  const [columnWidths, setColumnWidths] = React.useState<Record<string, number>>(DEFAULT_COLUMN_WIDTHS)
+  const [isHydrated, setIsHydrated] = React.useState(false)
 
-  // Column widths state (localStorage persisted)
-  const [columnWidths, setColumnWidths] = React.useState<Record<string, number>>(() => {
-    if (typeof window === 'undefined') return DEFAULT_COLUMN_WIDTHS
-    try {
-      const saved = localStorage.getItem('orders-table-widths')
-      return saved ? JSON.parse(saved) : DEFAULT_COLUMN_WIDTHS
-    } catch {
-      return DEFAULT_COLUMN_WIDTHS
-    }
-  })
-
-  // Persist column visibility
+  // Hydrate state from localStorage on mount (client-side only)
   React.useEffect(() => {
-    localStorage.setItem('orders-table-columns', JSON.stringify(visibleColumns))
-  }, [visibleColumns])
+    try {
+      const savedColumns = localStorage.getItem('orders-table-columns')
+      if (savedColumns) {
+        setVisibleColumns(JSON.parse(savedColumns))
+      }
+      const savedWidths = localStorage.getItem('orders-table-widths')
+      if (savedWidths) {
+        setColumnWidths(JSON.parse(savedWidths))
+      }
+    } catch {}
+    setIsHydrated(true)
+  }, [])
 
-  // Persist column widths (debounced)
+  // Persist column visibility (skip initial render to avoid overwriting with defaults)
+  React.useEffect(() => {
+    if (!isHydrated) return
+    localStorage.setItem('orders-table-columns', JSON.stringify(visibleColumns))
+  }, [visibleColumns, isHydrated])
+
+  // Persist column widths (debounced, skip until hydrated)
   const widthsRef = React.useRef(columnWidths)
   widthsRef.current = columnWidths
   React.useEffect(() => {
+    if (!isHydrated) return
     const timeout = setTimeout(() => {
       localStorage.setItem('orders-table-widths', JSON.stringify(widthsRef.current))
     }, 500)
     return () => clearTimeout(timeout)
-  }, [columnWidths])
+  }, [columnWidths, isHydrated])
 
   // Parse current filter state from URL
   const status = (searchParams.get('status') || 'All') as 'All' | OrderStatus
@@ -381,7 +395,14 @@ export function OrdersTable({ initialOrders, total, statusCounts, reps }: Orders
       } else {
         // Show error in the validation result
         setValidationResult((prev) =>
-          prev ? { ...prev, valid: false, missingSkus: result.missingSkus ?? [] } : null
+          prev
+            ? {
+                ...prev,
+                valid: false,
+                missingSkus: result.missingSkus ?? [],
+                inactiveSkus: result.inactiveSkus ?? [],
+              }
+            : null
         )
       }
     } catch (error) {
@@ -441,9 +462,9 @@ export function OrdersTable({ initialOrders, total, statusCounts, reps }: Orders
     [searchParams, selectedIds]
   )
 
-  // Column width change handler
-  const handleColumnWidthChange = React.useCallback((columnId: string, width: number) => {
-    setColumnWidths((prev) => ({ ...prev, [columnId]: width }))
+  // Column width change handler (linked resize - receives multiple column updates)
+  const handleColumnWidthChange = React.useCallback((updates: Record<string, number>) => {
+    setColumnWidths((prev) => ({ ...prev, ...updates }))
   }, [])
 
   // Column visibility change handlers
@@ -475,7 +496,7 @@ export function OrdersTable({ initialOrders, total, statusCounts, reps }: Orders
         id: 'orderType',
         header: 'Type',
         minWidth: 60,
-        cell: (o) => <OrderTypeBadge orderNumber={o.orderNumber} />,
+        cell: (o) => <OrderTypeBadge orderNumber={o.orderNumber} isPreOrder={o.isPreOrder} />,
       },
       {
         id: 'storeName',
@@ -491,11 +512,21 @@ export function OrdersTable({ initialOrders, total, statusCounts, reps }: Orders
       },
       {
         id: 'collection',
-        header: 'Collection',
+        header: 'OHN Collection',
         minWidth: 80,
         cell: (o) => (
           <span className="text-sm text-muted-foreground truncate">
             {o.collection || '—'}
+          </span>
+        ),
+      },
+      {
+        id: 'shopifyCollectionRaw',
+        header: 'Shopify Collection',
+        minWidth: 100,
+        cell: (o) => (
+          <span className="text-sm text-muted-foreground truncate">
+            {o.shopifyCollectionRaw || '—'}
           </span>
         ),
       },
@@ -575,48 +606,61 @@ export function OrdersTable({ initialOrders, total, statusCounts, reps }: Orders
       },
       {
         id: 'statusSync',
-        header: 'Status/Sync',
-        minWidth: 90,
-        cell: (o) => (
-          <div className="flex flex-col gap-1">
-            {/* Order Status */}
-            <StatusBadge status={getStatusBadgeStatus(o.status)} className="text-xs">
-              {o.status}
-            </StatusBadge>
+        header: 'Status',
+        minWidth: 100,
+        cell: (o) => {
+          // Draft orders - grey, non-interactive
+          if (o.status === 'Draft') {
+            return (
+              <span className="inline-flex items-center rounded-full bg-muted border border-border px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
+                Draft
+              </span>
+            )
+          }
 
-            {/* Sync Status / Action */}
-            {o.status === 'Draft' ? (
-              <span className="text-xs text-muted-foreground">—</span>
-            ) : o.syncError ? (
+          // Sync error - RED pill, clickable to retry
+          if (o.syncError) {
+            return (
               <button
                 type="button"
                 onClick={() => handleValidateOrder(o.id)}
-                className="flex items-center gap-1 text-xs text-destructive hover:underline"
+                className="inline-flex items-center gap-1 rounded-full bg-destructive/10 border border-destructive/30 px-2.5 py-0.5 text-xs font-medium text-destructive hover:bg-destructive/20 transition-colors cursor-pointer"
               >
                 <AlertTriangle className="h-3 w-3" />
-                Failed
-                <RefreshCw className="h-3 w-3 ml-0.5" />
+                <span>Failed</span>
               </button>
-            ) : !o.inShopify ? (
+            )
+          }
+
+          // NOT in Shopify - GREY pill showing OHN status, clickable to transfer
+          if (!o.inShopify) {
+            return (
               <button
                 type="button"
                 onClick={() => handleValidateOrder(o.id)}
-                className="text-xs text-primary hover:underline font-medium"
+                className="inline-flex items-center gap-1 rounded-full bg-muted border border-border px-2.5 py-0.5 text-xs font-medium hover:bg-muted/80 transition-colors cursor-pointer"
               >
-                Transfer →
+                <span>{o.status}</span>
+                <span className="text-primary">→</span>
               </button>
-            ) : (
-              <div className="text-xs space-y-0.5">
-                <div className={o.shopifyFulfillmentStatus === 'fulfilled' ? 'text-success' : 'text-muted-foreground'}>
-                  ✓ {formatShopifyStatus(o.shopifyFulfillmentStatus) || 'Unfulfilled'}
-                </div>
-                <div className={o.shopifyFinancialStatus === 'paid' ? 'text-success' : 'text-muted-foreground'}>
-                  {formatShopifyStatus(o.shopifyFinancialStatus) || '—'}
-                </div>
-              </div>
-            )}
-          </div>
-        ),
+            )
+          }
+
+          // IN Shopify - GREEN pill showing Shopify fulfillment status
+          const fulfillmentText = formatShopifyStatus(o.shopifyFulfillmentStatus) || 'Unfulfilled'
+          const isFulfilled = o.shopifyFulfillmentStatus === 'fulfilled'
+
+          return (
+            <span className={cn(
+              "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium",
+              isFulfilled
+                ? "bg-success/10 border border-success/30 text-success"
+                : "bg-success/5 border border-success/20 text-success/80"
+            )}>
+              {fulfillmentText}
+            </span>
+          )
+        },
       },
       {
         id: 'actions',
@@ -791,6 +835,7 @@ export function OrdersTable({ initialOrders, total, statusCounts, reps }: Orders
             columns={columnConfig}
             onChange={handleColumnVisibilityChange}
             onReset={handleResetColumns}
+            isHydrated={isHydrated}
           />
 
           <div className="ml-auto flex gap-2">
@@ -871,15 +916,17 @@ export function OrdersTable({ initialOrders, total, statusCounts, reps }: Orders
         }}
       />
 
-      {/* Transfer Preview Modal */}
-      <TransferPreviewModal
-        open={previewOpen}
-        onOpenChange={setPreviewOpen}
-        validation={validationResult}
-        isLoading={validationLoading}
-        onTransfer={handleTransfer}
-        isTransferring={isTransferring}
-      />
+      {/* Transfer Preview Modal - only render when open to avoid React dev static flag error */}
+      {previewOpen && (
+        <TransferPreviewModal
+          open={previewOpen}
+          onOpenChange={setPreviewOpen}
+          validation={validationResult}
+          isLoading={validationLoading}
+          onTransfer={handleTransfer}
+          isTransferring={isTransferring}
+        />
+      )}
 
       {/* Bulk Transfer Modal */}
       <BulkTransferModal
