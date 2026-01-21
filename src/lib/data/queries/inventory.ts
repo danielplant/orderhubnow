@@ -7,10 +7,21 @@ import { getEffectiveQuantity } from '@/lib/utils'
 // ============================================================================
 
 export type InventoryStatusFilter = 'all' | 'low' | 'out' | 'onroute'
+export type InventorySortField = 'sku' | 'qty' | 'onRoute'
+export type SortDirection = 'asc' | 'desc'
+
+// Map UI column IDs to database field names
+const INVENTORY_SORT_FIELDS: Record<InventorySortField, string> = {
+  sku: 'SkuID',
+  qty: 'Quantity',
+  onRoute: 'OnRoute',
+}
 
 export interface InventoryListFilters {
   status?: InventoryStatusFilter
   search?: string
+  sortBy?: InventorySortField
+  sortDir?: SortDirection
 }
 
 export interface InventoryListItem {
@@ -143,10 +154,14 @@ export async function getInventoryList(
           : {}),
   }
 
+  // Build dynamic orderBy based on sort params
+  const sortField = INVENTORY_SORT_FIELDS[filters.sortBy ?? 'sku']
+  const sortDir = filters.sortDir ?? 'asc'
+
   const [rows, total] = await Promise.all([
     prisma.sku.findMany({
       where,
-      orderBy: [{ DateModified: 'desc' }, { SkuID: 'asc' }],
+      orderBy: { [sortField]: sortDir },
       skip: (Math.max(1, page) - 1) * pageSize,
       take: pageSize,
       select: {

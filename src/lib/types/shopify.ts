@@ -87,6 +87,7 @@ export interface ShopifyTransferResult {
   shopifyOrderId?: string
   shopifyOrderNumber?: string
   missingSkus?: string[]
+  inactiveSkus?: string[]
   customerCreated?: boolean
   error?: string
   errors?: string[]
@@ -113,13 +114,16 @@ export interface ShopifyValidationResult {
   orderAmount: number
   itemCount: number
   missingSkus: string[]
+  inactiveSkus: string[]
   customerEmail: string | null
   customerExists: boolean
   inventoryStatus: InventoryStatusItem[]
   // Enhanced fields for Transfer Preview modal
   shipWindow: string | null          // Formatted "Jan 15 – Jan 22, 2026"
   shipWindowTag: string | null       // For Shopify tag: "2026-01-15_2026-01-22"
-  collection: string | null          // Derived collection/season
+  ohnCollection: string | null       // OHN collection name (from Sku.CollectionID)
+  shopifyCollectionRaw: string | null        // Single Shopify raw value or "Mixed" if multiple
+  shopifyCollectionRawValues: string[]       // All unique Shopify raw values (for tags)
   salesRep: string | null            // Sales rep name
 }
 

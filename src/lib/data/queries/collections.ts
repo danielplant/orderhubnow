@@ -180,6 +180,104 @@ export async function getMappingById(
 }
 
 // ============================================================================
+// Raw SKU Preview Queries
+// ============================================================================
+
+/**
+ * Raw SKU preview record from RawSkusFromShopify table
+ */
+export interface RawSkuPreview {
+  skuId: string
+  displayName: string
+  productType: string | null
+  imageUrl: string | null
+  quantity: number
+  size: string
+  priceCAD: string | null
+  priceUSD: string | null
+  rawCollectionValue: string | null
+}
+
+/**
+ * Get raw SKUs from RawSkusFromShopify that match a specific raw collection value.
+ * Uses LIKE with comma-padding to handle comma-separated collection values.
+ * This approach works on all SQL Server versions (doesn't require STRING_SPLIT).
+ *
+ * @param rawValue - The exact raw Shopify collection value to match
+ * @param limit - Maximum number of results (default 100)
+ * @param offset - Pagination offset (default 0)
+ */
+export async function getRawSkusByCollectionValue(
+  rawValue: string,
+  limit = 100,
+  offset = 0
+): Promise<{ skus: RawSkuPreview[]; total: number }> {
+  // Build search patterns for LIKE matching
+  // We pad both the column and search value with commas to ensure exact matches
+  // e.g., searching for "SWIM" in "ATS, SWIM, PreOrder" becomes:
+  // ',ATS, SWIM, PreOrder,' LIKE '%,SWIM,%' OR '%,SWIM ,%' (with/without trailing space)
+  const searchPattern = `%,${rawValue},%`
+  const searchPatternWithSpace = `%, ${rawValue},%`
+  const searchPatternTrailingSpace = `%,${rawValue} ,%`
+
+  // Count total matching SKUs
+  const countResult = await prisma.$queryRaw<[{ count: number }]>`
+    SELECT COUNT(*) as count
+    FROM RawSkusFromShopify r
+    WHERE r.metafield_order_entry_collection IS NOT NULL
+      AND (
+        ',' + REPLACE(r.metafield_order_entry_collection, ' ', '') + ',' LIKE ${searchPattern.replace(/ /g, '')}
+        OR ',' + r.metafield_order_entry_collection + ',' LIKE ${searchPattern}
+        OR ',' + r.metafield_order_entry_collection + ',' LIKE ${searchPatternWithSpace}
+        OR ',' + r.metafield_order_entry_collection + ',' LIKE ${searchPatternTrailingSpace}
+      )
+  `
+  const total = Number(countResult[0]?.count ?? 0)
+
+  // Fetch paginated results
+  const rows = await prisma.$queryRaw<Array<{
+    SkuID: string
+    DisplayName: string | null
+    ProductType: string | null
+    ShopifyProductImageURL: string | null
+    Quantity: number | null
+    Size: string | null
+    metafield_cad_ws_price_test: string | null
+    metafield_usd_ws_price: string | null
+    metafield_order_entry_collection: string | null
+  }>>`
+    SELECT r.SkuID, r.DisplayName, r.ProductType, r.ShopifyProductImageURL,
+           r.Quantity, r.Size, r.metafield_cad_ws_price_test, r.metafield_usd_ws_price,
+           r.metafield_order_entry_collection
+    FROM RawSkusFromShopify r
+    WHERE r.metafield_order_entry_collection IS NOT NULL
+      AND (
+        ',' + REPLACE(r.metafield_order_entry_collection, ' ', '') + ',' LIKE ${searchPattern.replace(/ /g, '')}
+        OR ',' + r.metafield_order_entry_collection + ',' LIKE ${searchPattern}
+        OR ',' + r.metafield_order_entry_collection + ',' LIKE ${searchPatternWithSpace}
+        OR ',' + r.metafield_order_entry_collection + ',' LIKE ${searchPatternTrailingSpace}
+      )
+    ORDER BY r.SkuID
+    OFFSET ${offset} ROWS
+    FETCH NEXT ${limit} ROWS ONLY
+  `
+
+  const skus: RawSkuPreview[] = rows.map((r) => ({
+    skuId: r.SkuID,
+    displayName: r.DisplayName ?? r.SkuID,
+    productType: r.ProductType,
+    imageUrl: r.ShopifyProductImageURL,
+    quantity: r.Quantity ?? 0,
+    size: r.Size ?? '',
+    priceCAD: r.metafield_cad_ws_price_test,
+    priceUSD: r.metafield_usd_ws_price,
+    rawCollectionValue: r.metafield_order_entry_collection,
+  }))
+
+  return { skus, total }
+}
+
+// ============================================================================
 // Mappers
 // ============================================================================
 

@@ -42,6 +42,7 @@ export async function GET() {
  *   "shopifyOrderId": string (if success),
  *   "shopifyOrderNumber": string (if success),
  *   "missingSkus": string[] (if failed due to missing SKUs),
+ *   "inactiveSkus": string[] (if failed due to inactive SKUs),
  *   "customerCreated": boolean (if customer was created),
  *   "error": string (if failed)
  * }

@@ -93,12 +93,13 @@ model CustomerOrdersComments {
 }
 
 model CustomerOrdersItems {
-  ID              BigInt          @id(map: "PK_CustomerOrdersItems") @default(autoincrement())
-  CustomerOrderID BigInt
-  OrderNumber     String          @db.NVarChar(50)
-  SKU             String          @db.NVarChar(50)
-  SKUVariantID    BigInt
-  Quantity        Int
+  ID                BigInt          @id(map: "PK_CustomerOrdersItems") @default(autoincrement())
+  CustomerOrderID   BigInt
+  OrderNumber       String          @db.NVarChar(50)
+  SKU               String          @db.NVarChar(50)
+  SKUVariantID      BigInt
+  ShopifyLineItemID String?         @db.NVarChar(50) // Shopify line_item.id for precise fulfillment mapping
+  Quantity          Int
   Price           Float
   PriceCurrency   String          @db.NVarChar(50)
   Notes           String          @db.NVarChar(Max)
@@ -968,6 +969,19 @@ model SyncFilterConfig {
   @@index([entityType, enabled])
 }
 
+/// Runtime flags for sync behavior (e.g., ingestion and transfer gating)
+model SyncRuntimeConfig {
+  id         Int      @id @default(autoincrement())
+  entityType String   @db.NVarChar(50)   // Product
+  configKey  String   @db.NVarChar(100)  // ingestionActiveOnly, transferActiveOnly
+  enabled    Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([entityType, configKey])
+  @@index([entityType, enabled])
+}
+
 /// Cached Shopify GraphQL schema introspection results
 model ShopifySchemaCache {
   id          Int       @id @default(autoincrement())
@@ -1090,4 +1104,81 @@ model WebhookHistory {
   @@index([status, receivedAt])
   @@index([topic])
   @@index([shopifyWebhookId])
+}
+
+// ============================================================================
+// Sync Settings (Configurable via UI)
+// ============================================================================
+// Centralized settings for sync behavior, thumbnails, backups.
+// Versioned for audit trail - see what changed if sync behavior differs.
+//
+// Related: SyncSettingsHistory stores snapshots of previous versions.
+// ============================================================================
+
+/// Global sync settings - configurable via admin UI at /admin/shopify/settings
+model SyncSettings {
+  id                        Int      @id @default(autoincrement()) @map("ID")
+  version                   Int      @default(1) @map("Version")
+
+  // Thumbnail Configuration
+  thumbnailSettingsVersion  Int      @default(3) @map("ThumbnailSettingsVersion")
+  thumbnailSizeSm           Int      @default(120) @map("ThumbnailSizeSm")
+  thumbnailSizeMd           Int      @default(240) @map("ThumbnailSizeMd")
+  thumbnailSizeLg           Int      @default(480) @map("ThumbnailSizeLg")
+  thumbnailQuality          Int      @default(80) @map("ThumbnailQuality")
+  thumbnailFit              String   @default("contain") @map("ThumbnailFit") @db.NVarChar(20)
+  thumbnailBackground       String   @default("#FFFFFF") @map("ThumbnailBackground") @db.NVarChar(10)
+
+  // Thumbnail Processing
+  thumbnailFetchTimeoutMs   Int      @default(15000) @map("ThumbnailFetchTimeoutMs")
+  thumbnailBatchConcurrency Int      @default(10) @map("ThumbnailBatchConcurrency")
+  thumbnailEnabled          Boolean  @default(true) @map("ThumbnailEnabled")
+
+  // Backup Settings
+  backupEnabled             Boolean  @default(true) @map("BackupEnabled")
+  backupRetentionDays       Int      @default(7) @map("BackupRetentionDays")
+  cleanupStaleBackups       Boolean  @default(true) @map("CleanupStaleBackups")
+
+  // Sync Settings
+  syncMaxWaitMs             Int      @default(600000) @map("SyncMaxWaitMs")
+  syncPollIntervalMs        Int      @default(3000) @map("SyncPollIntervalMs")
+
+  updatedAt                 DateTime @default(now()) @updatedAt @map("UpdatedAt")
+
+  // Relation to history
+  history                   SyncSettingsHistory[]
+
+  @@map("SyncSettings")
+}
+
+/// History of sync settings changes for audit trail
+model SyncSettingsHistory {
+  id          Int          @id @default(autoincrement()) @map("ID")
+  settingsId  Int          @map("SettingsID")
+  version     Int          @map("Version")
+  snapshot    String       @map("Snapshot") @db.NVarChar(Max)  // JSON of settings at that version
+  changedBy   String?      @map("ChangedBy") @db.NVarChar(100)
+  changedAt   DateTime     @default(now()) @map("ChangedAt")
+  changeNote  String?      @map("ChangeNote") @db.NVarChar(500)
+
+  settings    SyncSettings @relation(fields: [settingsId], references: [id], onDelete: Cascade)
+
+  @@index([settingsId])
+  @@map("SyncSettingsHistory")
+}
+
+// ============================================================================
+// Size Order Configuration
+// ============================================================================
+// Configurable size ordering for product displays and reports.
+// Replaces hardcoded SIZE_ORDER array in size-sort.ts.
+// Single-row table pattern (like InventorySettings, CompanySettings).
+// ============================================================================
+
+/// Size ordering configuration - defines how sizes sort across the system
+model SizeOrderConfig {
+  ID        Int      @id(map: "PK_SizeOrderConfig") @default(autoincrement())
+  Sizes     String   @db.NVarChar(Max)  // JSON array of size strings
+  UpdatedAt DateTime @default(now()) @updatedAt
+  UpdatedBy String?  @db.NVarChar(255)
 }

@@ -24,6 +24,8 @@ interface RouteParams {
   params: Promise<{ type: string }>
 }
 
+const RUNTIME_CONFIG_KEYS = ['ingestionActiveOnly', 'transferActiveOnly'] as const
+
 /**
  * Initialize field configurations from introspection
  */
@@ -107,6 +109,11 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       orderBy: { fieldPath: 'asc' },
     })
 
+    const runtimeFlags = await prisma.syncRuntimeConfig.findMany({
+      where: { entityType: type },
+      orderBy: { configKey: 'asc' },
+    })
+
     // Get schema cache info
     const schemaCache = await prisma.shopifySchemaCache.findUnique({
       where: { entityType: type },
@@ -130,6 +137,10 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         fieldPath: f.fieldPath,
         operator: f.operator,
         value: f.value,
+        enabled: f.enabled,
+      })),
+      runtimeFlags: runtimeFlags.map((f) => ({
+        configKey: f.configKey,
         enabled: f.enabled,
       })),
       protectedFields: PROTECTED_FIELDS[type] || [],
@@ -159,11 +170,17 @@ interface FilterUpdate {
   enabled: boolean
 }
 
+interface RuntimeFlagUpdate {
+  configKey: string
+  enabled: boolean
+}
+
 type BulkAction = 'enable-scalars' | 'disable-non-protected' | 'reset'
 
 interface SyncConfigUpdateBody {
   fields?: FieldUpdate[]
   filters?: FilterUpdate[]
+  runtimeFlags?: RuntimeFlagUpdate[]
   bulkAction?: BulkAction
 }
 
@@ -402,6 +419,57 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
             action: current ? 'updated' : 'created',
             previousValue: currentValue,
             newValue,
+            changedBy,
+          })
+        }
+      }
+    }
+
+    // Process runtime flag updates
+    if (body.runtimeFlags && Array.isArray(body.runtimeFlags)) {
+      for (const runtimeUpdate of body.runtimeFlags) {
+        if (!RUNTIME_CONFIG_KEYS.includes(runtimeUpdate.configKey as (typeof RUNTIME_CONFIG_KEYS)[number])) {
+          return NextResponse.json(
+            { error: `Invalid runtime config key: ${runtimeUpdate.configKey}` },
+            { status: 400 }
+          )
+        }
+
+        const current = await prisma.syncRuntimeConfig.findUnique({
+          where: {
+            entityType_configKey: {
+              entityType: type,
+              configKey: runtimeUpdate.configKey,
+            },
+          },
+        })
+
+        await prisma.syncRuntimeConfig.upsert({
+          where: {
+            entityType_configKey: {
+              entityType: type,
+              configKey: runtimeUpdate.configKey,
+            },
+          },
+          update: {
+            enabled: runtimeUpdate.enabled,
+            updatedAt: new Date(),
+          },
+          create: {
+            entityType: type,
+            configKey: runtimeUpdate.configKey,
+            enabled: runtimeUpdate.enabled,
+          },
+        })
+
+        if (current?.enabled !== runtimeUpdate.enabled) {
+          auditEntries.push({
+            configType: 'runtime',
+            entityType: type,
+            fieldPath: runtimeUpdate.configKey,
+            action: current ? 'updated' : 'created',
+            previousValue: current?.enabled?.toString() ?? null,
+            newValue: runtimeUpdate.enabled.toString(),
             changedBy,
           })
         }

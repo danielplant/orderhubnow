@@ -9,6 +9,7 @@ import {
   type ShopifyCustomerRequest,
 } from '@/lib/shopify/client'
 import { findShopifyVariant, findCachedShopifyCustomer } from '@/lib/data/queries/shopify'
+import { getSyncRuntimeFlags } from '@/lib/data/queries/sync-config'
 import type {
   ShopifyTransferResult,
   AddMissingSkuInput,
@@ -261,6 +262,7 @@ export async function transferOrderToShopify(
 ): Promise<ShopifyTransferResult> {
   try {
     await requireAdmin()
+    const runtimeFlags = await getSyncRuntimeFlags('Product')
 
     // Check if Shopify is configured
     if (!shopify.isConfigured()) {
@@ -300,6 +302,7 @@ export async function transferOrderToShopify(
 
     // 4. Match items to Shopify variants
     const missingSkus: string[] = []
+    const inactiveSkus: string[] = []
     const lineItems: Array<{
       variant_id: number
       quantity: number
@@ -321,6 +324,11 @@ export async function transferOrderToShopify(
         continue
       }
 
+      if (runtimeFlags.transferActiveOnly && variant.productStatus !== 'ACTIVE') {
+        inactiveSkus.push(item.SKU)
+        continue
+      }
+
       lineItems.push({
         variant_id: Number(variant.shopifyId),
         quantity: item.Quantity,
@@ -332,12 +340,21 @@ export async function transferOrderToShopify(
       })
     }
 
-    // 5. If missing SKUs, return error
-    if (missingSkus.length > 0) {
+    // 5. If missing or inactive SKUs, return error
+    if (missingSkus.length > 0 || inactiveSkus.length > 0) {
+      const reasons: string[] = []
+      if (missingSkus.length > 0) {
+        reasons.push(`${missingSkus.length} SKU(s) not found in Shopify`)
+      }
+      if (inactiveSkus.length > 0) {
+        reasons.push(`${inactiveSkus.length} SKU(s) inactive in Shopify`)
+      }
+
       return {
         success: false,
         missingSkus,
-        error: `${missingSkus.length} SKU(s) not found in Shopify`,
+        inactiveSkus,
+        error: reasons.join('; '),
       }
     }
 
@@ -355,7 +372,12 @@ export async function transferOrderToShopify(
       note += ` | Customer PO #s: ${order.CustomerPO.trim()}`
     }
 
-    // Build tags array: ATS/Pre Order, Wholesale, osc-ignore, SalesRep, SHIPWINDOW, SEASON
+    // Derive collections for tags
+    const { ohnCollection, shopifyRawValues } = await deriveCollectionsForOrder(
+      orderItems.map((i) => i.SKU)
+    )
+
+    // Build tags array: ATS/Pre Order, Wholesale, osc-ignore, SalesRep, SHIPWINDOW, SEASON, collections
     const tagParts: string[] = []
 
     // Order type tag
@@ -380,6 +402,16 @@ export async function transferOrderToShopify(
     const seasonTag = deriveSeasonFromShipWindow(order.ShipStartDate)
     if (seasonTag) {
       tagParts.push(`SEASON_${seasonTag}`)
+    }
+
+    // OHN collection tag (only if single collection, not Mixed)
+    if (ohnCollection && ohnCollection !== 'Mixed') {
+      tagParts.push(`OHN_COLLECTION_${ohnCollection.replace(/\s+/g, '_').toUpperCase()}`)
+    }
+
+    // Shopify collection tags (all raw values)
+    for (const rawValue of shopifyRawValues) {
+      tagParts.push(`SHOPIFY_COLLECTION_${rawValue.replace(/\s+/g, '_').toUpperCase()}`)
     }
 
     const tags = tagParts.join(', ')
@@ -515,6 +547,9 @@ export async function transferOrderToShopify(
         },
       })
 
+      // Populate ShopifyLineItemID for precise fulfillment mapping
+      await populateShopifyLineItemIds(orderItems, retryResult.order.line_items)
+
       revalidatePath('/admin/orders')
       revalidatePath('/admin/shopify')
 
@@ -543,6 +578,9 @@ export async function transferOrderToShopify(
         ShopifyOrderID: String(createdOrder.id),
       },
     })
+
+    // Populate ShopifyLineItemID for precise fulfillment mapping
+    await populateShopifyLineItemIds(orderItems, createdOrder.line_items)
 
     revalidatePath('/admin/orders')
     revalidatePath('/admin/shopify')
@@ -575,6 +613,7 @@ export async function validateOrderForShopify(
 ): Promise<ShopifyValidationResult> {
   try {
     await requireAdmin()
+    const runtimeFlags = await getSyncRuntimeFlags('Product')
 
     // Get order info
     const order = await prisma.customerOrders.findUnique({
@@ -601,12 +640,15 @@ export async function validateOrderForShopify(
         orderAmount: 0,
         itemCount: 0,
         missingSkus: [],
+        inactiveSkus: [],
         customerEmail: null,
         customerExists: false,
         inventoryStatus: [],
         shipWindow: null,
         shipWindowTag: null,
-        collection: null,
+        ohnCollection: null,
+        shopifyCollectionRaw: null,
+        shopifyCollectionRawValues: [],
         salesRep: null,
       }
     }
@@ -630,6 +672,7 @@ export async function validateOrderForShopify(
 
     // Check each item for Shopify variant and inventory
     const missingSkus: string[] = []
+    const inactiveSkus: string[] = []
     const inventoryStatus: InventoryStatusItem[] = []
 
     for (const item of orderItems) {
@@ -641,6 +684,11 @@ export async function validateOrderForShopify(
 
       if (!variant || !variant.shopifyId) {
         missingSkus.push(item.SKU)
+        continue
+      }
+
+      if (runtimeFlags.transferActiveOnly && variant.productStatus !== 'ACTIVE') {
+        inactiveSkus.push(item.SKU)
         continue
       }
 
@@ -668,23 +716,28 @@ export async function validateOrderForShopify(
       })
     }
 
-    // Derive season/collection from ship window
-    const collection = deriveSeasonFromShipWindow(order.ShipStartDate)
+    // Derive OHN collection and Shopify raw values from order items
+    const { ohnCollection, shopifyRawValue, shopifyRawValues } = await deriveCollectionsForOrder(
+      orderItems.map((i) => i.SKU)
+    )
 
     return {
-      valid: missingSkus.length === 0,
+      valid: missingSkus.length === 0 && inactiveSkus.length === 0,
       orderId,
       orderNumber: order.OrderNumber,
       storeName: order.StoreName,
       orderAmount: order.OrderAmount,
       itemCount: orderItems.length,
       missingSkus,
+      inactiveSkus,
       customerEmail: order.CustomerEmail,
       customerExists,
       inventoryStatus,
       shipWindow: formatShipWindowDisplay(order.ShipStartDate, order.ShipEndDate),
       shipWindowTag: formatShipWindowTag(order.ShipStartDate, order.ShipEndDate),
-      collection,
+      ohnCollection,
+      shopifyCollectionRaw: shopifyRawValue,
+      shopifyCollectionRawValues: shopifyRawValues,
       salesRep: order.SalesRep ?? null,
     }
   } catch (e) {
@@ -698,12 +751,15 @@ export async function validateOrderForShopify(
       orderAmount: 0,
       itemCount: 0,
       missingSkus: [],
+      inactiveSkus: [],
       customerEmail: null,
       customerExists: false,
       inventoryStatus: [],
       shipWindow: null,
       shipWindowTag: null,
-      collection: null,
+      ohnCollection: null,
+      shopifyCollectionRaw: null,
+      shopifyCollectionRawValues: [],
       salesRep: null,
     }
   }
@@ -955,6 +1011,58 @@ export async function syncAllPendingOrderStatuses(options?: {
 // ============================================================================
 
 /**
+ * Populate ShopifyLineItemID on order items after successful transfer.
+ * Maps Shopify line items back to local order items by variant_id.
+ * For duplicate variants, uses quantity + price as secondary criteria.
+ */
+async function populateShopifyLineItemIds(
+  orderItems: Array<{ ID: bigint; SKUVariantID: bigint; Quantity: number; Price: number }>,
+  shopifyLineItems?: Array<{ id: number; variant_id: number; quantity: number; price: string }>
+): Promise<void> {
+  if (!shopifyLineItems || shopifyLineItems.length === 0) {
+    return
+  }
+
+  // Track which local items have been matched to avoid double-mapping
+  const matchedLocalIds = new Set<string>()
+
+  for (const shopifyItem of shopifyLineItems) {
+    // Find matching local items by variant_id
+    const candidates = orderItems.filter(
+      (oi) =>
+        Number(oi.SKUVariantID) === shopifyItem.variant_id &&
+        !matchedLocalIds.has(String(oi.ID))
+    )
+
+    if (candidates.length === 0) {
+      continue
+    }
+
+    let match = candidates[0]
+
+    // If multiple candidates (same variant_id), use quantity + price to disambiguate
+    if (candidates.length > 1) {
+      const exactMatch = candidates.find(
+        (c) =>
+          c.Quantity === shopifyItem.quantity &&
+          Math.abs(c.Price - parseFloat(shopifyItem.price)) < 0.01
+      )
+      if (exactMatch) {
+        match = exactMatch
+      }
+    }
+
+    // Update the local order item with Shopify line item ID
+    await prisma.customerOrdersItems.update({
+      where: { ID: match.ID },
+      data: { ShopifyLineItemID: String(shopifyItem.id) },
+    })
+
+    matchedLocalIds.add(String(match.ID))
+  }
+}
+
+/**
  * Split a full name into first and last name.
  * Matches .NET SplitName logic.
  */
@@ -1027,4 +1135,75 @@ function deriveSeasonFromShipWindow(startDate: Date | null): string | null {
   } else {
     return `FW${year}` // Fall/Winter
   }
+}
+
+/**
+ * Derive OHN collection and Shopify raw collection values for an order's SKUs.
+ * Used by both validation and transfer.
+ */
+async function deriveCollectionsForOrder(skuIds: string[]): Promise<{
+  ohnCollection: string | null
+  shopifyRawValue: string | null
+  shopifyRawValues: string[]
+}> {
+  if (skuIds.length === 0) {
+    return { ohnCollection: null, shopifyRawValue: null, shopifyRawValues: [] }
+  }
+
+  // Look up SKUs with their CollectionID and Collection name
+  const skus = await prisma.sku.findMany({
+    where: { SkuID: { in: skuIds } },
+    select: {
+      SkuID: true,
+      CollectionID: true,
+      Collection: { select: { name: true } },
+    },
+  })
+
+  // Derive OHN collection names
+  const ohnCollections = new Set<string>()
+  const collectionIds = new Set<number>()
+  for (const sku of skus) {
+    if (sku.Collection?.name) {
+      ohnCollections.add(sku.Collection.name)
+    }
+    if (sku.CollectionID) {
+      collectionIds.add(sku.CollectionID)
+    }
+  }
+
+  // Get OHN collection display value
+  let ohnCollection: string | null = null
+  if (ohnCollections.size === 1) {
+    ohnCollection = [...ohnCollections][0]
+  } else if (ohnCollections.size > 1) {
+    ohnCollection = 'Mixed'
+  }
+
+  // Get Shopify raw values from ShopifyValueMapping
+  const shopifyRawValues: string[] = []
+  if (collectionIds.size > 0) {
+    const mappings = await prisma.shopifyValueMapping.findMany({
+      where: {
+        status: 'mapped',
+        collectionId: { in: [...collectionIds] },
+      },
+      select: { rawValue: true },
+    })
+    for (const m of mappings) {
+      if (!shopifyRawValues.includes(m.rawValue)) {
+        shopifyRawValues.push(m.rawValue)
+      }
+    }
+  }
+
+  // Get single display value
+  let shopifyRawValue: string | null = null
+  if (shopifyRawValues.length === 1) {
+    shopifyRawValue = shopifyRawValues[0]
+  } else if (shopifyRawValues.length > 1) {
+    shopifyRawValue = 'Mixed'
+  }
+
+  return { ohnCollection, shopifyRawValue, shopifyRawValues }
 }

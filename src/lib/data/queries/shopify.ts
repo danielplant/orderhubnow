@@ -280,6 +280,7 @@ export async function findShopifyVariant(
   displayName: string
   price: number
   weightInGrams: number | null
+  productStatus: string | null
 } | null> {
   // First: try to match by exact ShopifyId (variant ID stored on order item)
   if (skuVariantId && skuVariantId > BigInt(0)) {
@@ -294,6 +295,7 @@ export async function findShopifyVariant(
         displayName: exact.DisplayName,
         price: exact.Price,
         weightInGrams: exact.VariantWeightInGrams ?? null,
+        productStatus: exact.ProductStatus ?? null,
       }
     }
   }
@@ -317,6 +319,7 @@ export async function findShopifyVariant(
         displayName: match2.DisplayName,
         price: match2.Price,
         weightInGrams: match2.VariantWeightInGrams ?? null,
+        productStatus: match2.ProductStatus ?? null,
       }
     }
   }
@@ -337,6 +340,7 @@ export async function findShopifyVariant(
         displayName: match3.DisplayName,
         price: match3.Price,
         weightInGrams: match3.VariantWeightInGrams ?? null,
+        productStatus: match3.ProductStatus ?? null,
       }
     }
   }

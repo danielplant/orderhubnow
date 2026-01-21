@@ -71,6 +71,16 @@ vi.mock('@/lib/data/queries/shopify', () => ({
   findCachedShopifyCustomer: vi.fn(),
 }))
 
+// Mock runtime flags
+vi.mock('@/lib/data/queries/sync-config', () => ({
+  getSyncRuntimeFlags: vi.fn(() =>
+    Promise.resolve({
+      ingestionActiveOnly: false,
+      transferActiveOnly: false,
+    })
+  ),
+}))
+
 // ============================================================================
 // Imports (after mocks)
 // ============================================================================
@@ -132,6 +142,7 @@ const mockShopifyVariant = {
   displayName: 'Test Product',
   price: 50,
   weightInGrams: 100,
+  productStatus: 'ACTIVE',
 }
 
 // ============================================================================

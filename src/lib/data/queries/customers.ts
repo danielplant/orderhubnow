@@ -2,6 +2,21 @@ import { prisma } from '@/lib/prisma'
 import type { Prisma } from '@prisma/client'
 import type { Customer, CustomersListResult } from '@/lib/types/customer'
 
+// ============================================================================
+// Types for Customers List Sorting
+// ============================================================================
+
+export type CustomerSortField = 'storeName' | 'country' | 'state' | 'rep'
+export type SortDirection = 'asc' | 'desc'
+
+// Map UI column IDs to database field names
+const CUSTOMERS_SORT_FIELDS: Record<CustomerSortField, string> = {
+  storeName: 'StoreName',
+  country: 'Country',
+  state: 'StateProvince',
+  rep: 'Rep',
+}
+
 /**
  * Get paginated list of customers with search.
  * Search includes rep name lookup: if search matches a rep's name,
@@ -11,6 +26,8 @@ export async function getCustomers(input: {
   search?: string
   page: number
   pageSize: number
+  sortBy?: CustomerSortField
+  sortDir?: SortDirection
 }): Promise<CustomersListResult> {
   const q = (input.search ?? '').trim()
 
@@ -43,10 +60,14 @@ export async function getCustomers(input: {
     where = { OR: orConditions }
   }
 
+  // Build dynamic orderBy based on sort params
+  const sortField = CUSTOMERS_SORT_FIELDS[input.sortBy ?? 'storeName']
+  const sortDir = input.sortDir ?? 'asc'
+
   const [rows, total] = await Promise.all([
     prisma.customers.findMany({
       where,
-      orderBy: { StoreName: 'asc' },
+      orderBy: { [sortField]: sortDir },
       skip: (Math.max(1, input.page) - 1) * input.pageSize,
       take: input.pageSize,
     }),
