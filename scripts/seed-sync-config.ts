@@ -2,7 +2,7 @@
  * Seed Script: Initialize Sync Configuration
  *
  * Sets up:
- * 1. Default filter: Product.status = ACTIVE (to exclude DRAFT/ARCHIVED products)
+ * 1. Status cascade config (ingestionAllowed, skuAllowed, transferAllowed)
  * 2. Protected fields: Fields that cannot be disabled in the UI
  *
  * Usage: npx tsx scripts/seed-sync-config.ts
@@ -29,16 +29,12 @@ const PROTECTED_FIELDS: Record<string, Array<{ fieldPath: string; fieldType: str
   ],
 }
 
-// Default filters
-const DEFAULT_FILTERS = [
-  {
-    entityType: 'Product',
-    fieldPath: 'status',
-    operator: 'in',
-    value: '["ACTIVE"]', // JSON array - only sync ACTIVE products
-    enabled: true,
-  },
-]
+// Default status cascade config
+const DEFAULT_CASCADE_CONFIG = {
+  ingestionAllowed: ['ACTIVE', 'DRAFT', 'ARCHIVED'], // Ingest all statuses by default
+  skuAllowed: ['ACTIVE'], // Only ACTIVE becomes SKUs
+  transferAllowed: ['ACTIVE'], // Only ACTIVE can be transferred
+}
 
 async function seedProtectedFields() {
   console.log('\n1. Seeding protected fields...')
@@ -75,28 +71,35 @@ async function seedProtectedFields() {
   }
 }
 
-async function seedDefaultFilters() {
-  console.log('\n2. Seeding default filters...')
+async function seedStatusCascadeConfig(entityType: string) {
+  console.log(`\n2. Seeding status cascade config for ${entityType}...`)
 
-  for (const filter of DEFAULT_FILTERS) {
-    const existing = await prisma.syncFilterConfig.findUnique({
+  const keys = ['ingestionAllowed', 'skuAllowed', 'transferAllowed'] as const
+
+  for (const key of keys) {
+    const existing = await prisma.syncRuntimeConfig.findUnique({
       where: {
-        entityType_fieldPath: {
-          entityType: filter.entityType,
-          fieldPath: filter.fieldPath,
+        entityType_configKey: {
+          entityType,
+          configKey: key,
         },
       },
     })
 
     if (existing) {
-      console.log(`   - ${filter.entityType}.${filter.fieldPath} already exists, skipping`)
+      console.log(`   - ${entityType}.${key} already exists, skipping`)
       continue
     }
 
-    await prisma.syncFilterConfig.create({
-      data: filter,
+    await prisma.syncRuntimeConfig.create({
+      data: {
+        entityType,
+        configKey: key,
+        configValue: JSON.stringify(DEFAULT_CASCADE_CONFIG[key]),
+        enabled: true,
+      },
     })
-    console.log(`   ✓ ${filter.entityType}.${filter.fieldPath} = ${filter.value}`)
+    console.log(`   ✓ ${entityType}.${key} = ${JSON.stringify(DEFAULT_CASCADE_CONFIG[key])}`)
   }
 }
 
@@ -107,7 +110,8 @@ async function main() {
 
   try {
     await seedProtectedFields()
-    await seedDefaultFilters()
+    await seedStatusCascadeConfig('Product')
+    await seedStatusCascadeConfig('ProductVariant')
 
     // Summary
     console.log('\n3. Verification...')
@@ -117,27 +121,28 @@ async function main() {
     })
     console.log(`   Total protected fields: ${protectedCount}`)
 
-    const filterCount = await prisma.syncFilterConfig.count({
-      where: { enabled: true },
+    // Show cascade config
+    const cascadeConfigs = await prisma.syncRuntimeConfig.findMany({
+      where: {
+        configKey: { in: ['ingestionAllowed', 'skuAllowed', 'transferAllowed'] },
+      },
+      orderBy: [{ entityType: 'asc' }, { configKey: 'asc' }],
     })
-    console.log(`   Total active filters: ${filterCount}`)
 
-    // Show active filters
-    const activeFilters = await prisma.syncFilterConfig.findMany({
-      where: { enabled: true },
-    })
-    if (activeFilters.length > 0) {
-      console.log('\n   Active filters:')
-      for (const f of activeFilters) {
-        console.log(`   - ${f.entityType}.${f.fieldPath} ${f.operator} ${f.value}`)
+    if (cascadeConfigs.length > 0) {
+      console.log('\n   Status Cascade Config:')
+      for (const c of cascadeConfigs) {
+        console.log(`   - ${c.entityType}.${c.configKey} = ${c.configValue}`)
       }
     }
 
     console.log('\n' + '='.repeat(60))
     console.log('Seed complete!')
     console.log('='.repeat(60))
-    console.log('\nNext step: Run a Shopify sync to apply the filter.')
-    console.log('Only ACTIVE products will now be included in the Sku table.')
+    console.log('\nThe status cascade config is now set up.')
+    console.log('- Ingestion: all statuses are ingested into RawSkusFromShopify')
+    console.log('- SKU: only ACTIVE products become SKUs')
+    console.log('- Transfer: only ACTIVE SKUs can be transferred to Shopify')
   } catch (error) {
     console.error('\nSeed failed:', error)
     process.exit(1)

@@ -5,7 +5,7 @@
  *
  * Interactive UI for configuring Shopify sync:
  * - Entity selector (Product, ProductVariant, etc.)
- * - Status filter configuration with checkboxes
+ * - Status cascade pipeline (Available > Ingestion > SKU > Transfer)
  * - Field configuration with toggles
  * - Access probe testing
  * - Metafield discovery
@@ -21,6 +21,7 @@ import { Button } from '@/components/ui/button'
 import { FieldConfigPanel, FieldConfig, FieldCategory } from './field-config-panel'
 import { MetafieldsPanel, EnabledMetafield } from './metafields-panel'
 import { SampleDataViewer } from './sample-data-viewer'
+import { StatusCascadePanel, StatusCascadeConfig } from './status-cascade-panel'
 import { AccessStatus } from './field-toggle-row'
 
 // ============================================================================
@@ -54,10 +55,8 @@ interface SyncConfigResponse {
     value: string
     enabled: boolean
   }>
-  runtimeFlags: Array<{
-    configKey: string
-    enabled: boolean
-  }>
+  statusCascade: StatusCascadeConfig
+  validStatuses: readonly string[]
   protectedFields: string[]
   schemaInfo?: {
     apiVersion: string
@@ -66,137 +65,6 @@ interface SyncConfigResponse {
   error?: string
 }
 
-// ============================================================================
-// Status Filter Panel
-// ============================================================================
-
-function StatusFilterPanel({
-  distribution,
-  selectedStatuses,
-  onStatusChange,
-  hasChanges,
-}: {
-  distribution: FilterDistribution | null
-  selectedStatuses: string[]
-  onStatusChange: (status: string, checked: boolean) => void
-  hasChanges: boolean
-}) {
-  const STATUSES = ['ACTIVE', 'DRAFT', 'ARCHIVED']
-
-  if (!distribution) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Product Status Filter</CardTitle>
-          <CardDescription>Loading distribution...</CardDescription>
-        </CardHeader>
-      </Card>
-    )
-  }
-
-  const total = distribution.total
-  const selectedCount = STATUSES.filter((s) => selectedStatuses.includes(s)).reduce(
-    (sum, s) => sum + (distribution.distribution[s] || 0),
-    0
-  )
-  const excludedCount = total - selectedCount
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          Product Status Filter
-          {hasChanges && (
-            <span className="text-xs font-medium px-2 py-1 rounded-full border border-amber-600 text-amber-600">
-              Unsaved
-            </span>
-          )}
-        </CardTitle>
-        <CardDescription>
-          Select which product statuses to include in the sync. Only products matching these statuses
-          will be added to the Sku table.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        {/* Status Distribution */}
-        <div className="mb-6">
-          <div className="text-sm font-medium mb-3">Current Distribution</div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            {STATUSES.map((status) => {
-              const count = distribution.distribution[status] || 0
-              const percentage = total > 0 ? ((count / total) * 100).toFixed(1) : '0'
-              const isSelected = selectedStatuses.includes(status)
-
-              return (
-                <div
-                  key={status}
-                  className={`p-4 rounded-lg border ${
-                    isSelected
-                      ? 'border-primary bg-primary/5'
-                      : 'border-border bg-muted/30 opacity-60'
-                  }`}
-                >
-                  <div className="text-2xl font-bold">{count.toLocaleString()}</div>
-                  <div className="text-sm text-muted-foreground">
-                    {status} ({percentage}%)
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-
-        {/* Status Checkboxes */}
-        <div className="space-y-3">
-          <div className="text-sm font-medium">Include in Sync</div>
-          {STATUSES.map((status) => {
-            const count = distribution.distribution[status] || 0
-            const isSelected = selectedStatuses.includes(status)
-
-            return (
-              <label
-                key={status}
-                className="flex items-center gap-3 p-3 rounded-lg border border-border hover:bg-muted/50 cursor-pointer"
-              >
-                <input
-                  type="checkbox"
-                  checked={isSelected}
-                  onChange={(e) => onStatusChange(status, e.target.checked)}
-                  className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
-                />
-                <div className="flex-1">
-                  <span className="font-medium">{status}</span>
-                  <span className="text-muted-foreground ml-2">({count.toLocaleString()} products)</span>
-                </div>
-                {status === 'ACTIVE' && (
-                  <span className="text-xs font-medium px-2 py-0.5 rounded bg-muted text-muted-foreground">
-                    Recommended
-                  </span>
-                )}
-              </label>
-            )
-          })}
-        </div>
-
-        {/* Impact Preview */}
-        <div className="mt-6 p-4 rounded-lg bg-muted/50 border border-border">
-          <div className="text-sm font-medium mb-2">Impact Preview</div>
-          <div className="flex items-center gap-4 text-sm">
-            <div>
-              <span className="text-green-600 font-medium">{selectedCount.toLocaleString()}</span>{' '}
-              products will be included
-            </div>
-            <div className="text-muted-foreground">|</div>
-            <div>
-              <span className="text-red-600 font-medium">{excludedCount.toLocaleString()}</span>{' '}
-              products will be excluded
-            </div>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  )
-}
 
 // ============================================================================
 // Entity Selector
@@ -234,25 +102,22 @@ function EntitySelector({
 // Main Component
 // ============================================================================
 
+const DEFAULT_CASCADE: StatusCascadeConfig = {
+  ingestionAllowed: ['ACTIVE', 'DRAFT', 'ARCHIVED'],
+  skuAllowed: ['ACTIVE'],
+  transferAllowed: ['ACTIVE'],
+}
+
 export function DeveloperToolsClient() {
   // Entity state
   const [entities, setEntities] = useState<Entity[]>([])
   const [selectedEntity, setSelectedEntity] = useState('Product')
 
-  // Status filter state
+  // Status cascade state (new model)
   const [distribution, setDistribution] = useState<FilterDistribution | null>(null)
-  const [selectedStatuses, setSelectedStatuses] = useState<string[]>(['ACTIVE'])
-  const [originalStatuses, setOriginalStatuses] = useState<string[]>(['ACTIVE'])
-
-  // Runtime flags state
-  const [runtimeFlags, setRuntimeFlags] = useState({
-    ingestionActiveOnly: false,
-    transferActiveOnly: false,
-  })
-  const [originalRuntimeFlags, setOriginalRuntimeFlags] = useState({
-    ingestionActiveOnly: false,
-    transferActiveOnly: false,
-  })
+  const [statusCascade, setStatusCascade] = useState<StatusCascadeConfig>(DEFAULT_CASCADE)
+  const [originalCascade, setOriginalCascade] = useState<StatusCascadeConfig>(DEFAULT_CASCADE)
+  const [validStatuses, setValidStatuses] = useState<readonly string[]>(['ACTIVE', 'DRAFT', 'ARCHIVED'])
 
   // Field configuration state
   const [fieldConfig, setFieldConfig] = useState<FieldConfig[]>([])
@@ -276,8 +141,8 @@ export function DeveloperToolsClient() {
   const [sampleRefreshTrigger, setSampleRefreshTrigger] = useState(0)
 
   // Calculate if there are unsaved changes
-  const hasStatusChanges =
-    JSON.stringify(selectedStatuses.sort()) !== JSON.stringify(originalStatuses.sort())
+  const hasCascadeChanges =
+    JSON.stringify(statusCascade) !== JSON.stringify(originalCascade)
 
   const hasFieldChanges =
     JSON.stringify(fieldConfig.map((f) => ({ path: f.fieldPath, enabled: f.enabled })).sort()) !==
@@ -288,12 +153,8 @@ export function DeveloperToolsClient() {
   const hasMetafieldChanges =
     JSON.stringify(enabledMetafields.sort()) !== JSON.stringify(originalMetafields.sort())
 
-  const hasRuntimeChanges =
-    runtimeFlags.ingestionActiveOnly !== originalRuntimeFlags.ingestionActiveOnly ||
-    runtimeFlags.transferActiveOnly !== originalRuntimeFlags.transferActiveOnly
-
   const hasUnsavedChanges =
-    hasStatusChanges || hasFieldChanges || hasMetafieldChanges || hasRuntimeChanges
+    hasCascadeChanges || hasFieldChanges || hasMetafieldChanges
 
   // Fetch entities
   useEffect(() => {
@@ -331,37 +192,14 @@ export function DeveloperToolsClient() {
         }
 
         if (configData.success) {
-          // Parse status filter
-          const statusFilter = configData.filters.find((f) => f.fieldPath === 'status')
-          if (statusFilter) {
-            try {
-              const parsed = JSON.parse(statusFilter.value)
-              const statuses = Array.isArray(parsed) ? parsed : [parsed]
-              setSelectedStatuses(statuses)
-              setOriginalStatuses(statuses)
-            } catch {
-              setSelectedStatuses([statusFilter.value])
-              setOriginalStatuses([statusFilter.value])
-            }
-          } else {
-            setSelectedStatuses(['ACTIVE', 'DRAFT', 'ARCHIVED'])
-            setOriginalStatuses(['ACTIVE', 'DRAFT', 'ARCHIVED'])
+          // Set status cascade config (new model)
+          if (configData.statusCascade) {
+            setStatusCascade(configData.statusCascade)
+            setOriginalCascade(JSON.parse(JSON.stringify(configData.statusCascade)))
           }
-
-          const runtimeConfig = {
-            ingestionActiveOnly: false,
-            transferActiveOnly: false,
+          if (configData.validStatuses) {
+            setValidStatuses(configData.validStatuses)
           }
-          for (const flag of configData.runtimeFlags || []) {
-            if (flag.configKey === 'ingestionActiveOnly') {
-              runtimeConfig.ingestionActiveOnly = flag.enabled
-            }
-            if (flag.configKey === 'transferActiveOnly') {
-              runtimeConfig.transferActiveOnly = flag.enabled
-            }
-          }
-          setRuntimeFlags(runtimeConfig)
-          setOriginalRuntimeFlags(runtimeConfig)
 
           // Set field configuration
           const fields = configData.fields.map((f) => ({
@@ -403,23 +241,9 @@ export function DeveloperToolsClient() {
     fetchData()
   }, [fetchData])
 
-  // Handle status checkbox change
-  const handleStatusChange = (status: string, checked: boolean) => {
-    setSelectedStatuses((prev) => {
-      if (checked) {
-        return [...prev, status]
-      } else {
-        if (prev.length === 1) return prev
-        return prev.filter((s) => s !== status)
-      }
-    })
-  }
-
-  const handleRuntimeFlagChange = (
-    key: 'ingestionActiveOnly' | 'transferActiveOnly',
-    enabled: boolean
-  ) => {
-    setRuntimeFlags((prev) => ({ ...prev, [key]: enabled }))
+  // Handle status cascade change
+  const handleCascadeChange = (newCascade: StatusCascadeConfig) => {
+    setStatusCascade(newCascade)
   }
 
   // Handle field toggle change
@@ -536,48 +360,21 @@ export function DeveloperToolsClient() {
         .filter((f, i) => f.enabled !== originalFieldConfig[i]?.enabled)
         .map((f) => ({ fieldPath: f.fieldPath, enabled: f.enabled }))
 
-      // Build filter updates
-      const filterUpdates = hasStatusChanges
-        ? [
-            {
-              fieldPath: 'status',
-              operator: 'in',
-              value: JSON.stringify(selectedStatuses),
-              enabled: true,
-            },
-          ]
-        : []
-
-      const runtimeUpdates = hasRuntimeChanges
-        ? [
-            {
-              configKey: 'ingestionActiveOnly',
-              enabled: runtimeFlags.ingestionActiveOnly,
-            },
-            {
-              configKey: 'transferActiveOnly',
-              enabled: runtimeFlags.transferActiveOnly,
-            },
-          ]
-        : []
-
       const res = await fetch(`/api/admin/shopify/sync-config/${selectedEntity}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           fields: fieldUpdates.length > 0 ? fieldUpdates : undefined,
-          filters: filterUpdates.length > 0 ? filterUpdates : undefined,
-          runtimeFlags: runtimeUpdates.length > 0 ? runtimeUpdates : undefined,
+          statusCascade: hasCascadeChanges ? statusCascade : undefined,
         }),
       })
 
       const data = await res.json()
 
       if (data.success) {
-        setOriginalStatuses([...selectedStatuses])
+        setOriginalCascade(JSON.parse(JSON.stringify(statusCascade)))
         setOriginalFieldConfig(JSON.parse(JSON.stringify(fieldConfig)))
         setOriginalMetafields(JSON.parse(JSON.stringify(enabledMetafields)))
-        setOriginalRuntimeFlags({ ...runtimeFlags })
         setSuccessMessage('Configuration saved. Changes will apply on next sync.')
         setTimeout(() => setSuccessMessage(null), 5000)
         // Trigger sample data refresh
@@ -595,10 +392,9 @@ export function DeveloperToolsClient() {
 
   // Discard changes
   const handleDiscard = () => {
-    setSelectedStatuses([...originalStatuses])
+    setStatusCascade(JSON.parse(JSON.stringify(originalCascade)))
     setFieldConfig(JSON.parse(JSON.stringify(originalFieldConfig)))
     setEnabledMetafields(JSON.parse(JSON.stringify(originalMetafields)))
-    setRuntimeFlags({ ...originalRuntimeFlags })
   }
 
   const currentEntity = entities.find((e) => e.name === selectedEntity)
@@ -653,70 +449,15 @@ export function DeveloperToolsClient() {
         </div>
       )}
 
-      {/* Status Filter Panel (only for Product/ProductVariant) */}
+      {/* Status Cascade Panel (only for Product/ProductVariant) */}
       {(selectedEntity === 'Product' || selectedEntity === 'ProductVariant') && (
-        <StatusFilterPanel
-          distribution={distribution}
-          selectedStatuses={selectedStatuses}
-          onStatusChange={handleStatusChange}
-          hasChanges={hasStatusChanges}
+        <StatusCascadePanel
+          distribution={distribution?.distribution ?? null}
+          config={statusCascade}
+          validStatuses={validStatuses}
+          onChange={handleCascadeChange}
+          hasChanges={hasCascadeChanges}
         />
-      )}
-
-      {/* Runtime Behavior Panel */}
-      {(selectedEntity === 'Product' || selectedEntity === 'ProductVariant') && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              Runtime Behavior
-              {hasRuntimeChanges && (
-                <span className="text-xs font-medium px-2 py-1 rounded-full border border-amber-600 text-amber-600">
-                  Unsaved
-                </span>
-              )}
-            </CardTitle>
-            <CardDescription>
-              Control where ACTIVE-only rules are enforced during sync and transfer.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              <label className="flex items-start gap-3 p-3 rounded-lg border border-border hover:bg-muted/50 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={runtimeFlags.ingestionActiveOnly}
-                  onChange={(e) =>
-                    handleRuntimeFlagChange('ingestionActiveOnly', e.target.checked)
-                  }
-                  className="mt-1 h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
-                />
-                <div className="flex-1">
-                  <div className="font-medium">Ingestion-time ACTIVE-only</div>
-                  <div className="text-sm text-muted-foreground">
-                    Skip writing non-ACTIVE variants into RawSkusFromShopify during sync.
-                  </div>
-                </div>
-              </label>
-
-              <label className="flex items-start gap-3 p-3 rounded-lg border border-border hover:bg-muted/50 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={runtimeFlags.transferActiveOnly}
-                  onChange={(e) =>
-                    handleRuntimeFlagChange('transferActiveOnly', e.target.checked)
-                  }
-                  className="mt-1 h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
-                />
-                <div className="flex-1">
-                  <div className="font-medium">Transfer-time ACTIVE-only</div>
-                  <div className="text-sm text-muted-foreground">
-                    Treat non-ACTIVE variants as unavailable during Shopify transfer validation.
-                  </div>
-                </div>
-              </label>
-            </div>
-          </CardContent>
-        </Card>
       )}
 
       {/* Field Configuration Panel */}

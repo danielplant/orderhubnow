@@ -3,7 +3,7 @@
  *
  * GET: Returns current sync configuration for an entity type
  *      Initializes fields from introspection if none exist
- * PUT: Updates sync configuration (fields and filters)
+ * PUT: Updates sync configuration (fields, filters, and status cascade)
  *
  * Protected fields cannot be disabled.
  */
@@ -19,12 +19,19 @@ import {
   CATEGORY_DEFAULTS,
   type FieldCategory,
 } from '@/lib/shopify/introspect'
+import {
+  getStatusCascadeConfig,
+  setStatusCascadeConfig,
+  getValidStatuses,
+  type StatusCascadeConfig,
+} from '@/lib/data/queries/sync-config'
 
 interface RouteParams {
   params: Promise<{ type: string }>
 }
 
-const RUNTIME_CONFIG_KEYS = ['ingestionActiveOnly', 'transferActiveOnly'] as const
+// Status cascade keys for the new model
+const STATUS_CASCADE_KEYS = ['ingestionAllowed', 'skuAllowed', 'transferAllowed'] as const
 
 /**
  * Initialize field configurations from introspection
@@ -109,10 +116,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       orderBy: { fieldPath: 'asc' },
     })
 
-    const runtimeFlags = await prisma.syncRuntimeConfig.findMany({
-      where: { entityType: type },
-      orderBy: { configKey: 'asc' },
-    })
+    // Get status cascade config (new model)
+    const statusCascade = await getStatusCascadeConfig(type)
 
     // Get schema cache info
     const schemaCache = await prisma.shopifySchemaCache.findUnique({
@@ -139,10 +144,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         value: f.value,
         enabled: f.enabled,
       })),
-      runtimeFlags: runtimeFlags.map((f) => ({
-        configKey: f.configKey,
-        enabled: f.enabled,
-      })),
+      // New status cascade config
+      statusCascade,
+      validStatuses: getValidStatuses(),
       protectedFields: PROTECTED_FIELDS[type] || [],
       schemaInfo: schemaCache
         ? {
@@ -170,17 +174,12 @@ interface FilterUpdate {
   enabled: boolean
 }
 
-interface RuntimeFlagUpdate {
-  configKey: string
-  enabled: boolean
-}
-
 type BulkAction = 'enable-scalars' | 'disable-non-protected' | 'reset'
 
 interface SyncConfigUpdateBody {
   fields?: FieldUpdate[]
   filters?: FilterUpdate[]
-  runtimeFlags?: RuntimeFlagUpdate[]
+  statusCascade?: StatusCascadeConfig
   bulkAction?: BulkAction
 }
 
@@ -425,51 +424,33 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       }
     }
 
-    // Process runtime flag updates
-    if (body.runtimeFlags && Array.isArray(body.runtimeFlags)) {
-      for (const runtimeUpdate of body.runtimeFlags) {
-        if (!RUNTIME_CONFIG_KEYS.includes(runtimeUpdate.configKey as (typeof RUNTIME_CONFIG_KEYS)[number])) {
-          return NextResponse.json(
-            { error: `Invalid runtime config key: ${runtimeUpdate.configKey}` },
-            { status: 400 }
-          )
-        }
+    // Process status cascade updates
+    if (body.statusCascade) {
+      const currentCascade = await getStatusCascadeConfig(type)
 
-        const current = await prisma.syncRuntimeConfig.findUnique({
-          where: {
-            entityType_configKey: {
-              entityType: type,
-              configKey: runtimeUpdate.configKey,
-            },
-          },
-        })
+      // Validate and save the new cascade config
+      const result = await setStatusCascadeConfig(type, body.statusCascade)
 
-        await prisma.syncRuntimeConfig.upsert({
-          where: {
-            entityType_configKey: {
-              entityType: type,
-              configKey: runtimeUpdate.configKey,
-            },
-          },
-          update: {
-            enabled: runtimeUpdate.enabled,
-            updatedAt: new Date(),
-          },
-          create: {
-            entityType: type,
-            configKey: runtimeUpdate.configKey,
-            enabled: runtimeUpdate.enabled,
-          },
-        })
+      if (!result.success) {
+        return NextResponse.json(
+          { error: `Invalid status cascade: ${result.error}` },
+          { status: 400 }
+        )
+      }
 
-        if (current?.enabled !== runtimeUpdate.enabled) {
+      // Add audit entries for each changed cascade key
+      for (const key of STATUS_CASCADE_KEYS) {
+        const prevValue = JSON.stringify(currentCascade[key])
+        const newValue = JSON.stringify(body.statusCascade[key])
+
+        if (prevValue !== newValue) {
           auditEntries.push({
-            configType: 'runtime',
+            configType: 'statusCascade',
             entityType: type,
-            fieldPath: runtimeUpdate.configKey,
-            action: current ? 'updated' : 'created',
-            previousValue: current?.enabled?.toString() ?? null,
-            newValue: runtimeUpdate.enabled.toString(),
+            fieldPath: key,
+            action: 'updated',
+            previousValue: prevValue,
+            newValue: newValue,
             changedBy,
           })
         }
