@@ -151,6 +151,7 @@ export function OrdersTable({ initialOrders, total, statusCounts, reps }: Orders
   const [validationLoading, setValidationLoading] = React.useState(false)
   const [validationResult, setValidationResult] = React.useState<ShopifyValidationResult | null>(null)
   const [isTransferring, setIsTransferring] = React.useState(false)
+  const [transferError, setTransferError] = React.useState<string | null>(null)
 
   // Bulk transfer modal state
   const [bulkModalOpen, setBulkModalOpen] = React.useState(false)
@@ -372,6 +373,7 @@ export function OrdersTable({ initialOrders, total, statusCounts, reps }: Orders
     setPreviewOpen(true)
     setValidationLoading(true)
     setValidationResult(null)
+    setTransferError(null) // Clear any previous error
 
     try {
       const result = await validateOrderForShopify(orderId)
@@ -383,29 +385,36 @@ export function OrdersTable({ initialOrders, total, statusCounts, reps }: Orders
     }
   }, [])
 
-  const handleTransfer = React.useCallback(async () => {
+  const handleTransfer = React.useCallback(async (enabledTagIds?: string[]) => {
     if (!previewOrderId) return
 
     setIsTransferring(true)
+    setTransferError(null)
     try {
-      const result = await transferOrderToShopify(previewOrderId)
+      const result = await transferOrderToShopify(previewOrderId, { enabledTagIds })
       if (result.success) {
         setPreviewOpen(false)
+        setTransferError(null)
         router.refresh()
       } else {
-        // Show error in the validation result
+        // Capture the actual error from Shopify
+        const errorMessage = result.error || result.errors?.join(', ') || 'Transfer failed'
+        setTransferError(errorMessage)
+        // Update validation to show failed state
         setValidationResult((prev) =>
           prev
             ? {
                 ...prev,
                 valid: false,
-                missingSkus: result.missingSkus ?? [],
-                inactiveSkus: result.inactiveSkus ?? [],
+                missingSkus: result.missingSkus ?? prev.missingSkus,
+                inactiveSkus: result.inactiveSkus ?? prev.inactiveSkus,
               }
             : null
         )
       }
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Transfer failed unexpectedly'
+      setTransferError(errorMessage)
       console.error('Transfer failed:', error)
     } finally {
       setIsTransferring(false)
@@ -925,6 +934,7 @@ export function OrdersTable({ initialOrders, total, statusCounts, reps }: Orders
           isLoading={validationLoading}
           onTransfer={handleTransfer}
           isTransferring={isTransferring}
+          transferError={transferError}
         />
       )}
 

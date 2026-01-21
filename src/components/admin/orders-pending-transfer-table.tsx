@@ -451,12 +451,12 @@ export function OrdersPendingTransferTable({
   }, [])
 
   // Handle transfer from validation modal
-  const handleTransferFromValidation = React.useCallback(async () => {
+  const handleTransferFromValidation = React.useCallback(async (enabledTagIds?: string[]) => {
     if (!validationResult) return
 
     setValidationTransferring(true)
     try {
-      const result = await transferOrderToShopify(validationResult.orderId)
+      const result = await transferOrderToShopify(validationResult.orderId, { enabledTagIds })
 
       if (result.success) {
         setLastResult({
