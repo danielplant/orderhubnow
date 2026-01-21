@@ -975,14 +975,15 @@ model SyncFilterConfig {
   @@index([entityType, enabled])
 }
 
-/// Runtime flags for sync behavior (e.g., ingestion and transfer gating)
+/// Runtime config for sync behavior (status cascade arrays, flags)
 model SyncRuntimeConfig {
-  id         Int      @id @default(autoincrement())
-  entityType String   @db.NVarChar(50)   // Product
-  configKey  String   @db.NVarChar(100)  // ingestionActiveOnly, transferActiveOnly
-  enabled    Boolean  @default(false)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id          Int      @id @default(autoincrement())
+  entityType  String   @db.NVarChar(50)   // Product
+  configKey   String   @db.NVarChar(100)  // ingestionAllowed, skuAllowed, transferAllowed
+  configValue String?  @db.NVarChar(Max)  // JSON value (e.g., '["ACTIVE","DRAFT"]')
+  enabled     Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   @@unique([entityType, configKey])
   @@index([entityType, enabled])

@@ -106,6 +106,36 @@ export interface InventoryStatusItem {
   status: InventoryItemStatus
 }
 
+// Tag source types for the Transfer Preview modal
+export type TagSource =
+  | 'orderType'
+  | 'wholesale'
+  | 'oscIgnore'
+  | 'salesRep'
+  | 'shipWindow'
+  | 'season'
+  | 'ohnCollection'
+  | 'shopifyCollection'
+  | 'customerWholesale'
+  | 'customerSalesRep'
+
+export type TagScope = 'order' | 'customer'
+
+export interface TagValidation {
+  valid: boolean
+  reason?: string  // e.g., "contains invalid characters", "too long"
+  originalValue?: string  // The value before sanitization (if different)
+}
+
+export interface TransferTag {
+  id: string
+  scope: TagScope
+  source: TagSource
+  value: string
+  enabled: boolean
+  validation: TagValidation
+}
+
 export interface ShopifyValidationResult {
   valid: boolean
   orderId: string
@@ -125,6 +155,10 @@ export interface ShopifyValidationResult {
   shopifyCollectionRaw: string | null        // Single Shopify raw value or "Mixed" if multiple
   shopifyCollectionRawValues: string[]       // All unique Shopify raw values (for tags)
   salesRep: string | null            // Sales rep name
+  // Tags for transfer (can be toggled in UI)
+  tags: TransferTag[]
+  // True if any tag failed validation (would cause Shopify to reject)
+  hasInvalidTags: boolean
 }
 
 // ============================================================================

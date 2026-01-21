@@ -52,16 +52,17 @@ export type OrderFormData = z.infer<typeof orderFormSchema>
 
 /**
  * Schema for cart items passed to createOrder
- * Includes ship window metadata for order splitting by delivery date
+ * Uses Collection for order splitting by delivery date
  */
 export const orderItemSchema = z.object({
   sku: z.string().min(1),
   skuVariantId: z.union([z.bigint(), z.number()]),
   quantity: z.number().int().positive(),
   price: z.number().nonnegative(),
-  // Ship window grouping fields (for splitting orders by delivery date)
-  categoryId: z.number().nullable().optional(),
-  categoryName: z.string().nullable().optional(),
+  // Collection is the source for order splitting and pre-order detection
+  collectionId: z.number().nullable().optional(),
+  collectionName: z.string().nullable().optional(),
+  // Ship window dates from Collection
   shipWindowStart: z.string().nullable().optional(),
   shipWindowEnd: z.string().nullable().optional(),
 })

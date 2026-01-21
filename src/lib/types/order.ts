@@ -114,20 +114,22 @@ export interface OrdersListInput {
 
 /**
  * Result shape from createOrder action.
- * Supports single order (backwards compat) or multiple orders (when split by ship window).
+ * Supports single order (backwards compat) or multiple orders (when split by Collection).
  */
 export interface CreateOrderResult {
   success: boolean
   // Single order (backwards compat - primary order when split)
   orderId?: string
   orderNumber?: string
-  // Multiple orders (when split by ship window)
+  // Multiple orders (when split by Collection)
   orders?: Array<{
     orderId: string
     orderNumber: string
-    categoryName: string | null
+    // Collection name - what users see on pre-order pages
+    collectionName: string | null
     shipWindowStart: string | null
     shipWindowEnd: string | null
+    orderAmount: number
   }>
   error?: string
 }
