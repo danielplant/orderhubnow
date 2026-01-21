@@ -34,7 +34,7 @@ import { formatCurrency } from '@/lib/utils'
 import { isRepPortalReturn } from '@/lib/utils/rep-context'
 import type { Currency } from '@/lib/types'
 import type { OrderForEditing } from '@/lib/data/queries/orders'
-import { EmailConfirmationModal } from './email-confirmation-modal'
+import { EmailConfirmationModal, type SubmittedOrder } from './email-confirmation-modal'
 
 interface OrderFormProps {
   currency: Currency
@@ -45,9 +45,10 @@ interface OrderFormProps {
     quantity: number
     price: number
     description?: string
-    // Ship window metadata for order splitting by delivery date
-    categoryId?: number | null
-    categoryName?: string | null
+    // Collection is the source of truth for order splitting
+    collectionId?: number | null
+    collectionName?: string | null
+    // Ship window dates from Collection
     shipWindowStart?: string | null
     shipWindowEnd?: string | null
   }>
@@ -56,6 +57,8 @@ interface OrderFormProps {
   existingOrder?: OrderForEditing | null
   returnTo?: string
   repContext?: { repId: string } | null
+  // Items missing CollectionID - blocks checkout
+  itemsMissingCollection?: Array<{ sku: string; description: string }>
 }
 
 // Helper to format date as YYYY-MM-DD for input[type="date"]
@@ -79,6 +82,7 @@ export function OrderForm({
   existingOrder = null,
   returnTo = '/buyer/select-journey',
   repContext = null,
+  itemsMissingCollection = [],
 }: OrderFormProps) {
   const router = useRouter()
   const { clearDraft, clearEditMode, getPreOrderShipWindow, formData: draftFormData, setFormData, isLoadingDraft } = useOrder()
@@ -100,8 +104,7 @@ export function OrderForm({
 
   // Email confirmation modal state
   const [showEmailModal, setShowEmailModal] = useState(false)
-  const [submittedOrderId, setSubmittedOrderId] = useState<string | null>(null)
-  const [submittedOrderNumber, setSubmittedOrderNumber] = useState<string | null>(null)
+  const [submittedOrders, setSubmittedOrders] = useState<SubmittedOrder[]>([])
 
   // Get pre-order ship window from cart metadata (if available)
   const preOrderWindow = isPreOrder ? getPreOrderShipWindow() : null
@@ -442,7 +445,7 @@ export function OrderForm({
         } else {
           // Create new order with customerId for strong ownership
           // Skip automatic email - show confirmation popup instead
-          // Includes ship window metadata for order splitting by delivery date
+          // Uses Collection data for order splitting by delivery date
           const result = await createOrder({
             ...data,
             currency,
@@ -451,8 +454,8 @@ export function OrderForm({
               skuVariantId: item.skuVariantId,
               quantity: item.quantity,
               price: item.price,
-              categoryId: item.categoryId,
-              categoryName: item.categoryName,
+              collectionId: item.collectionId,
+              collectionName: item.collectionName,
               shipWindowStart: item.shipWindowStart,
               shipWindowEnd: item.shipWindowEnd,
             })),
@@ -461,19 +464,32 @@ export function OrderForm({
             skipEmail: true, // Emails will be sent via confirmation popup
           })
 
-          if (result.success && result.orderId) {
-            // Check if order was split into multiple orders
-            const orderCount = result.orders?.length || 1
-            if (orderCount > 1) {
-              toast.info(`Order split into ${orderCount} orders by delivery window`)
-            }
+          if (result.success && result.orders?.length) {
+            // Store all orders for the modal (supports split orders by Collection)
+            setSubmittedOrders(result.orders.map((o) => ({
+              orderId: o.orderId,
+              orderNumber: o.orderNumber,
+              collectionName: o.collectionName,
+              shipWindowStart: o.shipWindowStart,
+              shipWindowEnd: o.shipWindowEnd,
+              orderAmount: o.orderAmount,
+            })))
             
             // NOTE: Do NOT call clearDraft() here - it empties the cart and triggers redirect
             // clearDraft() is called in handleEmailConfirm/handleEmailSkip after modal interaction
             
-            // Show email confirmation popup instead of immediate redirect
-            setSubmittedOrderId(result.orderId)
-            setSubmittedOrderNumber(result.orderNumber || '')
+            // Show email confirmation popup
+            setShowEmailModal(true)
+          } else if (result.success && result.orderId) {
+            // Backwards compatibility: single order without orders array
+            setSubmittedOrders([{
+              orderId: result.orderId,
+              orderNumber: result.orderNumber || '',
+              collectionName: null,
+              shipWindowStart: null,
+              shipWindowEnd: null,
+              orderAmount: orderTotal,
+            }])
             setShowEmailModal(true)
           } else {
             toast.error(result.error || 'Failed to create order')
@@ -496,31 +512,51 @@ export function OrderForm({
   // Handle email confirmation modal actions
   const handleEmailConfirm = async () => {
     setShowEmailModal(false)
-    toast.success(`Order ${submittedOrderNumber} created successfully!`)
+    
+    // Show appropriate success message based on order count
+    const orderCount = submittedOrders.length
+    const orderNumbers = submittedOrders.map((o) => o.orderNumber).join(', ')
+    
+    if (orderCount > 1) {
+      toast.success(`${orderCount} orders created: ${orderNumbers}`)
+    } else {
+      toast.success(`Order ${orderNumbers} created successfully!`)
+    }
     
     // Clear cart/draft AFTER modal is closed (prevents premature redirect)
     await clearDraft()
     
     // Redirect after email confirmation
+    const primaryOrderId = submittedOrders[0]?.orderId
     if (isRepPortalReturn(returnTo)) {
       router.push(returnTo)
-    } else if (submittedOrderId) {
-      router.push(`/buyer/confirmation/${submittedOrderId}`)
+    } else if (primaryOrderId) {
+      router.push(`/buyer/confirmation/${primaryOrderId}`)
     }
   }
 
   const handleEmailSkip = async () => {
     setShowEmailModal(false)
-    toast.success(`Order ${submittedOrderNumber} created (emails skipped)`)
+    
+    // Show appropriate success message based on order count
+    const orderCount = submittedOrders.length
+    const orderNumbers = submittedOrders.map((o) => o.orderNumber).join(', ')
+    
+    if (orderCount > 1) {
+      toast.success(`${orderCount} orders created (emails skipped): ${orderNumbers}`)
+    } else {
+      toast.success(`Order ${orderNumbers} created (emails skipped)`)
+    }
     
     // Clear cart/draft AFTER modal is closed (prevents premature redirect)
     await clearDraft()
     
     // Redirect after skipping emails
+    const primaryOrderId = submittedOrders[0]?.orderId
     if (isRepPortalReturn(returnTo)) {
       router.push(returnTo)
-    } else if (submittedOrderId) {
-      router.push(`/buyer/confirmation/${submittedOrderId}`)
+    } else if (primaryOrderId) {
+      router.push(`/buyer/confirmation/${primaryOrderId}`)
     }
   }
 
@@ -929,6 +965,35 @@ export function OrderForm({
             <div className="text-lg font-semibold">
               Order Total: {formatCurrency(orderTotal, currency)}
             </div>
+
+            {/* Warning for items missing Collection assignment */}
+            {itemsMissingCollection.length > 0 && (
+              <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
+                <div className="flex items-start gap-2">
+                  <span className="text-red-600 text-lg">⚠️</span>
+                  <div className="text-sm text-red-800">
+                    <p className="font-medium mb-1">
+                      {itemsMissingCollection.length} item{itemsMissingCollection.length > 1 ? 's' : ''} missing collection assignment
+                    </p>
+                    <p className="text-red-600 mb-2">
+                      These items cannot be ordered until assigned to a collection. Please contact an administrator.
+                    </p>
+                    <ul className="list-disc list-inside space-y-0.5 text-xs text-red-700">
+                      {itemsMissingCollection.slice(0, 5).map((item) => (
+                        <li key={item.sku}>
+                          <span className="font-mono">{item.sku}</span>
+                          {item.description && ` - ${item.description}`}
+                        </li>
+                      ))}
+                      {itemsMissingCollection.length > 5 && (
+                        <li>...and {itemsMissingCollection.length - 5} more</li>
+                      )}
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            )}
+
             <div className="flex gap-2">
               {editMode && (
                 <Button
@@ -942,7 +1007,7 @@ export function OrderForm({
               <Button
                 type="submit"
                 size="lg"
-                disabled={isPending || isSubmitting}
+                disabled={isPending || isSubmitting || itemsMissingCollection.length > 0}
                 className="w-full sm:w-auto"
               >
                 {isPending || isSubmitting
@@ -959,8 +1024,8 @@ export function OrderForm({
     <EmailConfirmationModal
       open={showEmailModal}
       onOpenChange={setShowEmailModal}
-      orderId={submittedOrderId || ''}
-      orderNumber={submittedOrderNumber || ''}
+      orders={submittedOrders}
+      currency={currency}
       onConfirm={handleEmailConfirm}
       onSkip={handleEmailSkip}
     />

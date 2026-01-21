@@ -34,7 +34,8 @@ export default async function MyOrderPage({ searchParams }: Props) {
   // Extract rep context for rep-created orders
   const repContext = params.repId ? { repId: params.repId } : null
 
-  // Fetch reps for dropdown and SKU data for cart items (includes category/ship window for order splitting)
+  // Fetch reps for dropdown and SKU data for cart items
+  // Uses Collection data for order splitting (Collection is the source of truth)
   const [reps, skuList] = await Promise.all([
     getRepsForFilter(),
     prisma.sku.findMany({
@@ -44,19 +45,20 @@ export default async function MyOrderPage({ searchParams }: Props) {
         PriceCAD: true,
         PriceUSD: true,
         Description: true,
-        CategoryID: true,
-        SkuCategories: {
+        CollectionID: true,
+        Collection: {
           select: {
-            Name: true,
-            OnRouteAvailableDate: true,
-            OnRouteAvailableDateEnd: true,
+            name: true,
+            shipWindowStart: true,
+            shipWindowEnd: true,
           },
         },
       },
     }),
   ])
 
-  // Build SKU lookup map for the client (includes ship window for order splitting by delivery date)
+  // Build SKU lookup map for the client
+  // Uses Collection for grouping and ship windows
   const skuMap = new Map(
     skuList.map((sku) => [
       sku.SkuID,
@@ -65,10 +67,10 @@ export default async function MyOrderPage({ searchParams }: Props) {
         priceCAD: parseFloat(sku.PriceCAD || '0'),
         priceUSD: parseFloat(sku.PriceUSD || '0'),
         description: sku.Description || '',
-        categoryId: sku.CategoryID ?? null,
-        categoryName: sku.SkuCategories?.Name ?? null,
-        shipWindowStart: sku.SkuCategories?.OnRouteAvailableDate?.toISOString() ?? null,
-        shipWindowEnd: sku.SkuCategories?.OnRouteAvailableDateEnd?.toISOString() ?? null,
+        collectionId: sku.CollectionID ?? null,
+        collectionName: sku.Collection?.name ?? null,
+        shipWindowStart: sku.Collection?.shipWindowStart?.toISOString() ?? null,
+        shipWindowEnd: sku.Collection?.shipWindowEnd?.toISOString() ?? null,
       },
     ])
   )

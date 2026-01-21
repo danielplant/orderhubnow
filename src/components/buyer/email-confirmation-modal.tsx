@@ -12,14 +12,29 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Loader2, Mail, Plus, X } from 'lucide-react'
+import { Loader2, Mail, Plus, X, Package } from 'lucide-react'
 import type { EmailRecipientInfo } from '@/lib/types/email'
+import { formatCurrency } from '@/lib/utils'
+
+/**
+ * Represents a submitted order for the email confirmation modal.
+ * When a cart is split by Collection, multiple orders are created.
+ */
+export interface SubmittedOrder {
+  orderId: string
+  orderNumber: string
+  // Collection name - what users see on pre-order pages
+  collectionName: string | null
+  shipWindowStart: string | null
+  shipWindowEnd: string | null
+  orderAmount: number
+}
 
 interface EmailConfirmationModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  orderId: string
-  orderNumber: string
+  orders: SubmittedOrder[]
+  currency?: 'USD' | 'CAD'
   onConfirm: () => void
   onSkip: () => void
 }
@@ -27,11 +42,14 @@ interface EmailConfirmationModalProps {
 export function EmailConfirmationModal({
   open,
   onOpenChange,
-  orderId,
-  orderNumber,
+  orders,
+  currency = 'USD',
   onConfirm,
   onSkip,
 }: EmailConfirmationModalProps) {
+  // Use first order for fetching recipients (all orders share same customer/rep)
+  const primaryOrderId = orders[0]?.orderId || ''
+  const orderCount = orders.length
   const [isLoading, setIsLoading] = useState(true)
   const [isSending, setIsSending] = useState(false)
   const [recipients, setRecipients] = useState<EmailRecipientInfo | null>(null)
@@ -49,13 +67,13 @@ export function EmailConfirmationModal({
   const [newCustomerRecipient, setNewCustomerRecipient] = useState('')
   const [newSalesRecipient, setNewSalesRecipient] = useState('')
 
-  // Fetch recipient info when modal opens
+  // Fetch recipient info when modal opens (use first order - all share same customer/rep)
   useEffect(() => {
-    if (open && orderId) {
+    if (open && primaryOrderId) {
       setIsLoading(true)
       setError(null)
 
-      fetch(`/api/orders/${orderId}/email-recipients`)
+      fetch(`/api/orders/${primaryOrderId}/email-recipients`)
         .then(res => res.json())
         .then((data: EmailRecipientInfo) => {
           setRecipients(data)
@@ -69,7 +87,7 @@ export function EmailConfirmationModal({
           setIsLoading(false)
         })
     }
-  }, [open, orderId])
+  }, [open, primaryOrderId])
 
   const addCustomerRecipient = () => {
     if (newCustomerRecipient && newCustomerRecipient.includes('@')) {
@@ -98,23 +116,39 @@ export function EmailConfirmationModal({
     setError(null)
 
     try {
-      const res = await fetch(`/api/orders/${orderId}/send-emails`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sendCustomer,
-          sendRep,
-          sendAdmin,
-          additionalCustomerRecipients,
-          additionalSalesRecipients,
-          saveAsRepDefault,
-        }),
-      })
+      // Send emails for ALL orders
+      const emailPayload = {
+        sendCustomer,
+        sendRep,
+        sendAdmin,
+        additionalCustomerRecipients,
+        additionalSalesRecipients,
+        saveAsRepDefault,
+      }
 
-      const data = await res.json()
+      const errors: string[] = []
 
-      if (!res.ok) {
-        throw new Error(data.error || 'Failed to send emails')
+      for (const order of orders) {
+        try {
+          const res = await fetch(`/api/orders/${order.orderId}/send-emails`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(emailPayload),
+          })
+
+          const data = await res.json()
+
+          if (!res.ok) {
+            errors.push(`${order.orderNumber}: ${data.error || 'Failed'}`)
+          }
+        } catch (err) {
+          errors.push(`${order.orderNumber}: ${err instanceof Error ? err.message : 'Failed'}`)
+        }
+      }
+
+      if (errors.length > 0 && errors.length === orders.length) {
+        // All failed
+        throw new Error(`Failed to send emails: ${errors.join(', ')}`)
       }
 
       onConfirm()
@@ -129,13 +163,25 @@ export function EmailConfirmationModal({
     onSkip()
   }
 
+  // Helper to format ship window display
+  const formatShipWindow = (start: string | null, end: string | null): string => {
+    if (!start && !end) return 'TBD'
+    const startDate = start ? new Date(start).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''
+    const endDate = end ? new Date(end).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : ''
+    if (startDate && endDate) return `${startDate} - ${endDate}`
+    return startDate || endDate || 'TBD'
+  }
+
+  // Calculate total across all orders
+  const totalAmount = orders.reduce((sum, o) => sum + o.orderAmount, 0)
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[500px]">
+      <DialogContent className="sm:max-w-[550px]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Mail className="h-5 w-5" />
-            Order {orderNumber} Submitted
+            {orderCount > 1 ? 'Orders Submitted Successfully' : `Order ${orders[0]?.orderNumber} Submitted`}
           </DialogTitle>
         </DialogHeader>
 
@@ -150,6 +196,43 @@ export function EmailConfirmationModal({
           </div>
         ) : recipients && (
           <div className="space-y-6">
+            {/* Orders Summary Section - shown when multiple orders */}
+            {orderCount > 1 && (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <Package className="h-4 w-4 text-muted-foreground" />
+                  <Label className="text-base font-semibold">
+                    Your cart was split into {orderCount} orders by delivery window:
+                  </Label>
+                </div>
+                <div className="bg-muted/50 rounded-lg p-3 space-y-2">
+                  {orders.map((order) => (
+                    <div key={order.orderId} className="flex items-center justify-between text-sm">
+                      <div className="flex items-center gap-3">
+                        <span className="font-mono font-medium">{order.orderNumber}</span>
+                        <span className="text-muted-foreground">
+                          {order.collectionName || 'Standard'}
+                        </span>
+                        <span className="text-muted-foreground">
+                          Ships {formatShipWindow(order.shipWindowStart, order.shipWindowEnd)}
+                        </span>
+                      </div>
+                      <span className="font-medium">
+                        {formatCurrency(order.orderAmount, currency)}
+                      </span>
+                    </div>
+                  ))}
+                  <div className="border-t pt-2 mt-2 flex items-center justify-between text-sm font-semibold">
+                    <span>Total</span>
+                    <span>{formatCurrency(totalAmount, currency)}</span>
+                  </div>
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  Each order will receive its own confirmation email.
+                </p>
+              </div>
+            )}
+
             {/* Customer Confirmation Section */}
             <div className="space-y-3">
               <div className="flex items-center justify-between">
@@ -325,10 +408,10 @@ export function EmailConfirmationModal({
             {isSending ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Sending...
+                Sending{orderCount > 1 ? ` ${orderCount} emails...` : '...'}
               </>
             ) : (
-              'Confirm and Send'
+              orderCount > 1 ? `Send ${orderCount} Emails` : 'Confirm and Send'
             )}
           </Button>
         </DialogFooter>

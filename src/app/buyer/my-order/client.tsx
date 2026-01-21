@@ -23,8 +23,10 @@ interface SkuData {
   priceCAD: number
   priceUSD: number
   description: string
-  categoryId: number | null
-  categoryName: string | null
+  // Collection is the source of truth for order splitting
+  collectionId: number | null
+  collectionName: string | null
+  // Ship window dates from Collection
   shipWindowStart: string | null
   shipWindowEnd: string | null
 }
@@ -141,7 +143,7 @@ export function MyOrderClient({
   const effectiveCurrency = currency
 
   // Unified cart items from context - works for both new and edit mode
-  // Includes ship window metadata for order splitting by delivery date
+  // Uses Collection data for order splitting by delivery date
   const cartItems = useMemo(() => {
     const items: Array<{
       productId: string
@@ -150,8 +152,8 @@ export function MyOrderClient({
       quantity: number
       price: number
       description: string
-      categoryId: number | null
-      categoryName: string | null
+      collectionId: number | null
+      collectionName: string | null
       shipWindowStart: string | null
       shipWindowEnd: string | null
     }> = []
@@ -167,8 +169,8 @@ export function MyOrderClient({
             quantity,
             price: effectiveCurrency === 'CAD' ? skuData.priceCAD : skuData.priceUSD,
             description: skuData.description,
-            categoryId: skuData.categoryId,
-            categoryName: skuData.categoryName,
+            collectionId: skuData.collectionId,
+            collectionName: skuData.collectionName,
             shipWindowStart: skuData.shipWindowStart,
             shipWindowEnd: skuData.shipWindowEnd,
           })
@@ -179,15 +181,15 @@ export function MyOrderClient({
     return items
   }, [orders, skuMap, effectiveCurrency])
 
-  // Detect if order will be split by ship window (for UI warning)
+  // Detect if order will be split by Collection (for UI warning)
+  // CollectionID is the grouping key (what users see on pre-order pages)
   const shipWindowGroups = useMemo(() => {
     const groups = new Map<string, typeof cartItems>()
     for (const item of cartItems) {
-      const key = item.categoryId
-        ? `cat-${item.categoryId}`
-        : item.shipWindowStart
-          ? `window-${item.shipWindowStart}-${item.shipWindowEnd}`
-          : 'default'
+      // Group by collectionId, else default
+      const key = item.collectionId
+        ? `collection-${item.collectionId}`
+        : 'default'
       if (!groups.has(key)) groups.set(key, [])
       groups.get(key)!.push(item)
     }
@@ -195,6 +197,13 @@ export function MyOrderClient({
   }, [cartItems])
 
   const willSplitOrder = shipWindowGroups.size > 1
+
+  // Detect items missing CollectionID - these block checkout
+  const itemsMissingCollection = useMemo(() => {
+    return cartItems.filter(item => item.collectionId === null)
+  }, [cartItems])
+
+  const hasMissingCollections = itemsMissingCollection.length > 0
 
   // Calculate totals
   const orderTotal = cartItems.reduce(
@@ -404,6 +413,7 @@ export function MyOrderClient({
             existingOrder={existingOrder}
             returnTo={returnTo}
             repContext={repContext}
+            itemsMissingCollection={itemsMissingCollection}
           />
         </div>
       </div>
