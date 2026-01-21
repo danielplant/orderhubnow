@@ -5,6 +5,7 @@
  */
 
 import { prisma } from '@/lib/prisma'
+import { getSyncRuntimeFlags } from '@/lib/data/queries/sync-config'
 import {
   processThumbnailsBatch,
   logThumbnailSyncSummary,
@@ -465,10 +466,6 @@ export async function upsertShopifyVariant(data: ShopifyVariantData): Promise<vo
     InventoryItemId: data.inventoryItemGid ? parseShopifyGid(data.inventoryItemGid)?.toString() : null,
   }
 
-  // #region agent log
-  fetch('http://127.0.0.1:7243/ingest/a5fde547-ac60-4379-a83d-f48710b84ace',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'pre-fix',hypothesisId:'D',location:'shopify/sync.ts:upsertShopifyVariant',message:'Upserting raw Shopify SKU',data:{gid:data.gid,sku:data.sku,inventoryQuantity:data.inventoryQuantity,productType:data.productType},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion agent log
-
   if (existing) {
     await prisma.rawSkusFromShopify.update({
       where: { ID: existing.ID },
@@ -558,7 +555,10 @@ interface QuantityData {
  * Process a single JSONL line item.
  * Handles both ProductVariant and InventoryLevel records from bulk operation.
  */
-async function processJsonlItem(item: Record<string, unknown>): Promise<boolean> {
+async function processJsonlItem(
+  item: Record<string, unknown>,
+  options?: { ingestionActiveOnly?: boolean }
+): Promise<boolean> {
   const itemId = item.id as string | undefined
   const parentId = item.__parentId as string | undefined
 
@@ -570,13 +570,9 @@ async function processJsonlItem(item: Record<string, unknown>): Promise<boolean>
     const productStatus = product?.status ?? null
     const isActiveProduct = productStatus === 'ACTIVE'
 
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/a5fde547-ac60-4379-a83d-f48710b84ace',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'pre-fix',hypothesisId:'A',location:'shopify/sync.ts:processJsonlItem:variant',message:'Variant item status observed',data:{gid:itemId,sku:(item.sku as string) || '',productStatus,inventoryQuantity:(item.inventoryQuantity as number) ?? null},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion agent log
-
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/a5fde547-ac60-4379-a83d-f48710b84ace',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'pre-fix',hypothesisId:'B',location:'shopify/sync.ts:processJsonlItem:variant',message:'Variant upsert decision',data:{gid:itemId,sku:(item.sku as string) || '',isActiveProduct,willUpsert:true},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion agent log
+    if (options?.ingestionActiveOnly && !isActiveProduct) {
+      return false
+    }
 
     // Extract metafield values safely
     const metafields = {
@@ -597,10 +593,6 @@ async function processJsonlItem(item: Record<string, unknown>): Promise<boolean>
     const selectedOptions = item.selectedOptions as Array<{ name: string; value: string }> | undefined
     const sizeOption = selectedOptions?.find(opt => opt.name.toLowerCase() === 'size')
     const size = sizeOption?.value || (item.title as string) || ''
-
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/a5fde547-ac60-4379-a83d-f48710b84ace',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'pre-fix',hypothesisId:'C',location:'shopify/sync.ts:processJsonlItem:variant',message:'Variant size and title resolved',data:{gid:itemId,sku:(item.sku as string) || '',size,sizeSource:sizeOption ? 'selectedOption' : 'titleFallback'},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion agent log
 
     await upsertShopifyVariant({
       gid: itemId,
@@ -669,7 +661,8 @@ async function processJsonlItem(item: Record<string, unknown>): Promise<boolean>
  */
 export async function processJsonlStream(
   response: Response,
-  onProgress?: (processed: number) => void
+  onProgress?: (processed: number) => void,
+  options?: { ingestionActiveOnly?: boolean }
 ): Promise<{ processed: number; errors: number }> {
   const reader = response.body?.getReader()
   if (!reader) {
@@ -694,7 +687,7 @@ export async function processJsonlStream(
         if (!line.trim()) continue
         try {
           const item = JSON.parse(line)
-          const wasProcessed = await processJsonlItem(item)
+          const wasProcessed = await processJsonlItem(item, options)
           if (wasProcessed) {
             processed++
             if (onProgress && processed % 100 === 0) {
@@ -712,7 +705,7 @@ export async function processJsonlStream(
     if (buffer.trim()) {
       try {
         const item = JSON.parse(buffer)
-        const wasProcessed = await processJsonlItem(item)
+        const wasProcessed = await processJsonlItem(item, options)
         if (wasProcessed) {
           processed++
         }
@@ -734,7 +727,8 @@ export async function processJsonlStream(
  */
 export async function processJsonlLines(
   jsonlText: string,
-  onProgress?: (processed: number) => void
+  onProgress?: (processed: number) => void,
+  options?: { ingestionActiveOnly?: boolean }
 ): Promise<{ processed: number; errors: number }> {
   const lines = jsonlText.trim().split('\n').filter(Boolean)
   let processed = 0
@@ -743,7 +737,7 @@ export async function processJsonlLines(
   for (const line of lines) {
     try {
       const item = JSON.parse(line)
-      const wasProcessed = await processJsonlItem(item)
+      const wasProcessed = await processJsonlItem(item, options)
       if (wasProcessed) {
         processed++
         if (onProgress && processed % 100 === 0) {
@@ -1385,9 +1379,15 @@ export async function runFullSync(options?: {
       return { success: false, message: 'Failed to download JSONL', operationId }
     }
 
-    const processResult = await processJsonlStream(jsonlResponse, (n) => {
-      if (n % 500 === 0) onProgress('Step 3/5', `Processed ${n} variants`)
-    })
+    const runtimeFlags = await getSyncRuntimeFlags('Product')
+
+    const processResult = await processJsonlStream(
+      jsonlResponse,
+      (n) => {
+        if (n % 500 === 0) onProgress('Step 3/5', `Processed ${n} variants`)
+      },
+      { ingestionActiveOnly: runtimeFlags.ingestionActiveOnly }
+    )
     onProgress('Step 3/5', `Complete - ${processResult.processed} variants processed`)
 
     // Step 4: Transform to Sku table

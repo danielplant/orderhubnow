@@ -72,11 +72,22 @@ export interface ShopifyOrderRequest {
   }
 }
 
+export interface ShopifyOrderLineItem {
+  id: number
+  variant_id: number
+  sku: string
+  quantity: number
+  price: string
+  title?: string
+  name?: string
+}
+
 export interface ShopifyOrderResponse {
   order?: {
     id: number
     order_number: number
     name: string
+    line_items?: ShopifyOrderLineItem[]
   }
   errors?: Record<string, string[]> | string
 }
@@ -405,6 +416,35 @@ export interface ShopifyFulfillmentResponse {
 }
 
 /**
+ * Detailed fulfillment data returned when fetching fulfillments for an order.
+ * Used for back-sync: pulling fulfillment data FROM Shopify INTO OHN.
+ */
+export interface ShopifyFulfillmentDetails {
+  id: number
+  order_id: number
+  status: string
+  created_at: string
+  updated_at: string
+  tracking_company: string | null
+  tracking_number: string | null
+  tracking_numbers: string[]
+  tracking_url: string | null
+  tracking_urls: string[]
+  line_items: Array<{
+    id: number
+    variant_id: number
+    quantity: number
+    sku?: string
+    title?: string
+  }>
+}
+
+export interface ShopifyFulfillmentsListResponse {
+  fulfillments?: ShopifyFulfillmentDetails[]
+  errors?: Record<string, string[]> | string
+}
+
+/**
  * Create a fulfillment for a Shopify order.
  * See: https://shopify.dev/docs/api/admin-rest/2024-01/resources/fulfillment
  */
@@ -445,6 +485,25 @@ export async function getFulfillmentOrders(
   return { fulfillment_orders: data?.fulfillment_orders }
 }
 
+/**
+ * Get all fulfillments for a Shopify order.
+ * Used for back-sync: pulling tracking numbers and shipped line items from Shopify to OHN.
+ * See: https://shopify.dev/docs/api/admin-rest/2024-01/resources/fulfillment#get-orders-order-id-fulfillments
+ */
+export async function getOrderFulfillments(
+  orderId: string
+): Promise<{ fulfillments?: ShopifyFulfillmentDetails[]; error?: string }> {
+  const { data, error } = await shopifyFetch<ShopifyFulfillmentsListResponse>(
+    `/orders/${orderId}/fulfillments.json`
+  )
+
+  if (error) {
+    return { error }
+  }
+
+  return { fulfillments: data?.fulfillments ?? [] }
+}
+
 // ============================================================================
 // Convenience Exports
 // ============================================================================
@@ -464,5 +523,6 @@ export const shopify = {
   fulfillments: {
     create: createFulfillment,
     getFulfillmentOrders: getFulfillmentOrders,
+    list: getOrderFulfillments,
   },
 }
