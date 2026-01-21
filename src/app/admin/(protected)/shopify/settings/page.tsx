@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { Settings, Image, Database, Clock, History, RotateCcw, Save } from 'lucide-react'
+import { formatDateTime } from '@/lib/utils/format'
 
 interface SyncSettings {
   id: number
@@ -156,7 +157,7 @@ export default function SyncSettingsPage() {
         </p>
         {settings && (
           <p className="text-xs text-muted-foreground mt-1">
-            Version {settings.version} | Last updated: {new Date(settings.updatedAt).toLocaleString()}
+            Version {settings.version} | Last updated: {formatDateTime(settings.updatedAt)}
           </p>
         )}
       </div>
@@ -385,7 +386,7 @@ export default function SyncSettingsPage() {
                   <div>
                     <p className="font-medium">Version {entry.version}</p>
                     <p className="text-xs text-muted-foreground">
-                      {new Date(entry.changedAt).toLocaleString()}
+                      {formatDateTime(entry.changedAt)}
                       {entry.changedBy && ` by ${entry.changedBy}`}
                     </p>
                     {entry.changeNote && (

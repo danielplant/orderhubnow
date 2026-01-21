@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { Clock, Plus, Trash2, Play, Pause, AlertTriangle } from 'lucide-react';
+import { formatDateTime } from '@/lib/utils/format';
 
 interface Schedule {
   id: string;
@@ -132,8 +133,7 @@ export default function SchedulesPage() {
 
   const formatNextRun = (dateStr?: string) => {
     if (!dateStr) return 'Not scheduled';
-    const date = new Date(dateStr);
-    return date.toLocaleString();
+    return formatDateTime(dateStr);
   };
 
   if (loading) {

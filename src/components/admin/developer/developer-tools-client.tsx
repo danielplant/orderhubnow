@@ -15,6 +15,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { RefreshCw, Loader2 } from 'lucide-react'
+import { formatDate } from '@/lib/utils/format'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { FieldConfigPanel, FieldConfig, FieldCategory } from './field-config-panel'
@@ -623,7 +624,7 @@ export function DeveloperToolsClient() {
         <div className="flex items-center gap-2">
           {schemaInfo && (
             <span className="text-xs text-muted-foreground">
-              Schema: {schemaInfo.apiVersion} ({new Date(schemaInfo.fetchedAt).toLocaleDateString()})
+              Schema: {schemaInfo.apiVersion} ({formatDate(schemaInfo.fetchedAt)})
             </span>
           )}
           <Button

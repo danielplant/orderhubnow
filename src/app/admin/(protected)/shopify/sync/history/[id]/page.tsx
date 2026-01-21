@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, CheckCircle, XCircle, Clock, RefreshCw, FileText } from 'lucide-react';
+import { formatDateTime } from '@/lib/utils/format';
 
 interface SyncRunDetail {
   id: string;
@@ -59,10 +60,9 @@ export default function HistoryDetailPage() {
     return `${(ms / 60000).toFixed(2)}m`;
   };
 
-  const formatDate = (dateStr?: string): string => {
+  const formatDateLocal = (dateStr?: string): string => {
     if (!dateStr) return '-';
-    const date = new Date(dateStr);
-    return date.toLocaleString();
+    return formatDateTime(dateStr);
   };
 
   const StatusBadge = ({ status }: { status: SyncRunDetail['status'] }) => {
@@ -158,11 +158,11 @@ export default function HistoryDetailPage() {
             </div>
             <div className="flex justify-between">
               <dt className="text-muted-foreground">Started</dt>
-              <dd className="font-medium">{formatDate(run.startedAt)}</dd>
+              <dd className="font-medium">{formatDateLocal(run.startedAt)}</dd>
             </div>
             <div className="flex justify-between">
               <dt className="text-muted-foreground">Completed</dt>
-              <dd className="font-medium">{formatDate(run.completedAt)}</dd>
+              <dd className="font-medium">{formatDateLocal(run.completedAt)}</dd>
             </div>
             <div className="flex justify-between">
               <dt className="text-muted-foreground">Duration</dt>

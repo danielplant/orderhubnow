@@ -9,6 +9,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { ChevronLeft, ChevronRight, RefreshCw, Loader2 } from 'lucide-react'
+import { formatDateTime } from '@/lib/utils/format'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -160,7 +161,7 @@ export function SampleDataViewer({ entityType, refreshTrigger = 0 }: SampleDataV
               <div className="text-xs text-muted-foreground">
                 {fetchedAt && (
                   <span>
-                    Fetched at {new Date(fetchedAt).toLocaleTimeString()}
+                    Fetched at {formatDateTime(fetchedAt)}
                   </span>
                 )}
               </div>

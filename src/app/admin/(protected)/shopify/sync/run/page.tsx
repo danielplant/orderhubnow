@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Play, RefreshCw, CheckCircle, XCircle, Clock, Zap, Database, Image, ArrowRight } from 'lucide-react';
 import Link from 'next/link';
+import { formatDate } from '@/lib/utils/format';
 
 /**
  * Tesla-Style Sync Dashboard
@@ -268,7 +269,7 @@ export default function SyncDashboardPage() {
               <div className="flex gap-8 text-sm">
                 <div>
                   <span className="text-muted-foreground">Last Sync</span>
-                  <p className="font-medium">{new Date(normalizedLastRun.startedAt).toLocaleDateString()}</p>
+                  <p className="font-medium">{formatDate(normalizedLastRun.startedAt)}</p>
                 </div>
                 {normalizedLastRun.itemCount != null && (
                   <div>
