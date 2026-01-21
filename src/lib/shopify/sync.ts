@@ -5,7 +5,7 @@
  */
 
 import { prisma } from '@/lib/prisma'
-import { getSyncRuntimeFlags } from '@/lib/data/queries/sync-config'
+import { getStatusCascadeConfig } from '@/lib/data/queries/sync-config'
 import {
   processThumbnailsBatch,
   logThumbnailSyncSummary,
@@ -595,7 +595,7 @@ interface QuantityData {
  */
 async function processJsonlItem(
   item: Record<string, unknown>,
-  options?: { ingestionActiveOnly?: boolean }
+  options?: { ingestionAllowed?: string[] }
 ): Promise<boolean> {
   const itemId = item.id as string | undefined
   const parentId = item.__parentId as string | undefined
@@ -606,9 +606,9 @@ async function processJsonlItem(
     const inventoryItem = item.inventoryItem as InventoryItemData | undefined
     const variantImage = item.image as { url?: string } | undefined
     const productStatus = product?.status ?? null
-    const isActiveProduct = productStatus === 'ACTIVE'
 
-    if (options?.ingestionActiveOnly && !isActiveProduct) {
+    // Filter by allowed statuses (cascade ingestion filter)
+    if (options?.ingestionAllowed && !options.ingestionAllowed.includes(productStatus ?? '')) {
       return false
     }
 
@@ -700,7 +700,7 @@ async function processJsonlItem(
 export async function processJsonlStream(
   response: Response,
   onProgress?: (processed: number) => void,
-  options?: { ingestionActiveOnly?: boolean }
+  options?: { ingestionAllowed?: string[] }
 ): Promise<{ processed: number; errors: number }> {
   const reader = response.body?.getReader()
   if (!reader) {
@@ -766,7 +766,7 @@ export async function processJsonlStream(
 export async function processJsonlLines(
   jsonlText: string,
   onProgress?: (processed: number) => void,
-  options?: { ingestionActiveOnly?: boolean }
+  options?: { ingestionAllowed?: string[] }
 ): Promise<{ processed: number; errors: number }> {
   const lines = jsonlText.trim().split('\n').filter(Boolean)
   let processed = 0
@@ -983,40 +983,19 @@ export async function transformToSkuTable(options?: { skipBackup?: boolean }): P
       collectionTypeMap.set(c.id, c.type)
     }
 
-    // 3. Read sync filters from database
-    const syncFilters = await prisma.syncFilterConfig.findMany({
-      where: { entityType: 'Product', enabled: true },
-    })
-
-    // Build ProductStatus filter clause if configured
+    // 3. Get SKU allowed statuses from cascade config
     // SECURITY: Only allow known valid status values to prevent SQL injection
     const VALID_STATUSES = ['ACTIVE', 'DRAFT', 'ARCHIVED']
+    const skuCascade = await getStatusCascadeConfig('Product')
+
+    // Validate all status values against whitelist
+    const validatedStatuses = skuCascade.skuAllowed.filter((s) => VALID_STATUSES.includes(s))
+
     let statusFilterClause = ''
-
-    const statusFilter = syncFilters.find((f) => f.fieldPath === 'status')
-    if (statusFilter) {
-      let allowedStatuses: string[] = []
-      try {
-        const parsed = JSON.parse(statusFilter.value)
-        allowedStatuses = Array.isArray(parsed) ? parsed : [parsed]
-      } catch {
-        allowedStatuses = [statusFilter.value]
-      }
-
-      // Validate all status values against whitelist
-      const validatedStatuses = allowedStatuses.filter((s) => VALID_STATUSES.includes(s))
-
-      if (validatedStatuses.length > 0) {
-        if (statusFilter.operator === 'equals' || statusFilter.operator === 'in') {
-          const quotedStatuses = validatedStatuses.map((s) => `'${s}'`).join(', ')
-          statusFilterClause = `AND r.ProductStatus IN (${quotedStatuses})`
-          console.log(`Applying ProductStatus filter: IN (${quotedStatuses})`)
-        } else if (statusFilter.operator === 'not_in') {
-          const quotedStatuses = validatedStatuses.map((s) => `'${s}'`).join(', ')
-          statusFilterClause = `AND r.ProductStatus NOT IN (${quotedStatuses})`
-          console.log(`Applying ProductStatus filter: NOT IN (${quotedStatuses})`)
-        }
-      }
+    if (validatedStatuses.length > 0) {
+      const quotedStatuses = validatedStatuses.map((s) => `'${s}'`).join(', ')
+      statusFilterClause = `AND r.ProductStatus IN (${quotedStatuses})`
+      console.log(`Applying SKU status filter: IN (${quotedStatuses})`)
     }
 
     // 4. Get raw SKUs with required fields
@@ -1450,7 +1429,7 @@ export async function runFullSync(options?: {
       return { success: false, message: 'Failed to download JSONL', operationId }
     }
 
-    const runtimeFlags = await getSyncRuntimeFlags('Product')
+    const cascadeConfig = await getStatusCascadeConfig('Product')
 
     const processResult = await processJsonlStream(
       jsonlResponse,
@@ -1468,7 +1447,7 @@ export async function runFullSync(options?: {
           })
         }
       },
-      { ingestionActiveOnly: runtimeFlags.ingestionActiveOnly }
+      { ingestionAllowed: cascadeConfig.ingestionAllowed }
     )
     onProgress('Step 3/5', `Complete - ${processResult.processed} variants processed`)
     await updateSyncProgress(operationId, {

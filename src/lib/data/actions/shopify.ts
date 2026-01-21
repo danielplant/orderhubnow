@@ -9,7 +9,7 @@ import {
   type ShopifyCustomerRequest,
 } from '@/lib/shopify/client'
 import { findShopifyVariant, findCachedShopifyCustomer } from '@/lib/data/queries/shopify'
-import { getSyncRuntimeFlags } from '@/lib/data/queries/sync-config'
+import { getStatusCascadeConfig } from '@/lib/data/queries/sync-config'
 import type {
   ShopifyTransferResult,
   AddMissingSkuInput,
@@ -18,6 +18,10 @@ import type {
   InventoryStatusItem,
   SyncOrderStatusResult,
   BulkSyncResult,
+  TransferTag,
+  TagSource,
+  TagScope,
+  TagValidation,
 } from '@/lib/types/shopify'
 
 // ============================================================================
@@ -258,11 +262,15 @@ export async function bulkAddMissingSkus(
  * 7. On success, update IsTransferredToShopify = true
  */
 export async function transferOrderToShopify(
-  orderId: string
+  orderId: string,
+  options?: {
+    /** Tag IDs to include (if not provided, all tags are included) */
+    enabledTagIds?: string[]
+  }
 ): Promise<ShopifyTransferResult> {
   try {
     await requireAdmin()
-    const runtimeFlags = await getSyncRuntimeFlags('Product')
+    const cascadeConfig = await getStatusCascadeConfig('Product')
 
     // Check if Shopify is configured
     if (!shopify.isConfigured()) {
@@ -324,7 +332,8 @@ export async function transferOrderToShopify(
         continue
       }
 
-      if (runtimeFlags.transferActiveOnly && variant.productStatus !== 'ACTIVE') {
+      // Check if variant status is allowed for transfer (cascade filter)
+      if (!cascadeConfig.transferAllowed.includes(variant.productStatus ?? '')) {
         inactiveSkus.push(item.SKU)
         continue
       }
@@ -377,44 +386,33 @@ export async function transferOrderToShopify(
       orderItems.map((i) => i.SKU)
     )
 
-    // Build tags array: ATS/Pre Order, Wholesale, osc-ignore, SalesRep, SHIPWINDOW, SEASON, collections
-    const tagParts: string[] = []
+    // Generate all tags
+    const allTags = generateTransferTags({
+      orderNumber: order.OrderNumber,
+      salesRep: order.SalesRep,
+      shipStartDate: order.ShipStartDate,
+      shipEndDate: order.ShipEndDate,
+      ohnCollection,
+      shopifyRawValues,
+    })
 
-    // Order type tag
-    tagParts.push(order.OrderNumber.startsWith('A') ? 'ATS' : 'Pre Order')
+    // Filter tags based on enabledTagIds (if provided)
+    const enabledTagIds = options?.enabledTagIds
+    const filteredTags = enabledTagIds
+      ? allTags.filter((t) => enabledTagIds.includes(t.id))
+      : allTags
 
-    // Standard tags
-    tagParts.push('Wholesale')
-    tagParts.push('osc-ignore')
+    // Build order tags string (only enabled order-scope tags)
+    const orderTagValues = filteredTags
+      .filter((t) => t.scope === 'order')
+      .map((t) => t.value)
+    const tags = orderTagValues.join(', ')
 
-    // Sales rep tag
-    if (order.SalesRep?.trim()) {
-      tagParts.push(order.SalesRep.trim())
-    }
-
-    // Ship window tag for filtering in Shopify
-    const shipWindowTag = formatShipWindowTag(order.ShipStartDate, order.ShipEndDate)
-    if (shipWindowTag) {
-      tagParts.push(shipWindowTag)
-    }
-
-    // Season tag derived from ship window
-    const seasonTag = deriveSeasonFromShipWindow(order.ShipStartDate)
-    if (seasonTag) {
-      tagParts.push(`SEASON_${seasonTag}`)
-    }
-
-    // OHN collection tag (only if single collection, not Mixed)
-    if (ohnCollection && ohnCollection !== 'Mixed') {
-      tagParts.push(`OHN_COLLECTION_${ohnCollection.replace(/\s+/g, '_').toUpperCase()}`)
-    }
-
-    // Shopify collection tags (all raw values)
-    for (const rawValue of shopifyRawValues) {
-      tagParts.push(`SHOPIFY_COLLECTION_${rawValue.replace(/\s+/g, '_').toUpperCase()}`)
-    }
-
-    const tags = tagParts.join(', ')
+    // Build customer tags string (only enabled customer-scope tags)
+    const customerTagValues = filteredTags
+      .filter((t) => t.scope === 'customer')
+      .map((t) => t.value)
+    const customerTags = customerTagValues.join(', ')
 
     // Note attributes
     const noteAttributes = [
@@ -447,7 +445,7 @@ export async function transferOrderToShopify(
           email: order.CustomerEmail,
           first_name: firstName,
           last_name: lastName,
-          tags: `Wholesale, ${order.SalesRep}`,
+          tags: customerTags,
         },
         billing_address: {
           address1: customer?.Street1?.trim() || '',
@@ -487,13 +485,13 @@ export async function transferOrderToShopify(
 
     // 8. Handle customer not found - create customer and retry
     if (createError === 'CUSTOMER_NOT_FOUND') {
-      // Create customer in Shopify
+      // Create customer in Shopify (use same customerTags from above)
       const customerRequest: ShopifyCustomerRequest = {
         customer: {
           email: order.CustomerEmail,
           first_name: firstName,
           last_name: lastName,
-          tags: `Wholesale, ${order.SalesRep}`,
+          tags: customerTags,
         },
       }
 
@@ -613,7 +611,7 @@ export async function validateOrderForShopify(
 ): Promise<ShopifyValidationResult> {
   try {
     await requireAdmin()
-    const runtimeFlags = await getSyncRuntimeFlags('Product')
+    const cascadeConfig = await getStatusCascadeConfig('Product')
 
     // Get order info
     const order = await prisma.customerOrders.findUnique({
@@ -650,6 +648,8 @@ export async function validateOrderForShopify(
         shopifyCollectionRaw: null,
         shopifyCollectionRawValues: [],
         salesRep: null,
+        tags: [],
+        hasInvalidTags: false,
       }
     }
 
@@ -687,7 +687,8 @@ export async function validateOrderForShopify(
         continue
       }
 
-      if (runtimeFlags.transferActiveOnly && variant.productStatus !== 'ACTIVE') {
+      // Check if variant status is allowed for transfer (cascade filter)
+      if (!cascadeConfig.transferAllowed.includes(variant.productStatus ?? '')) {
         inactiveSkus.push(item.SKU)
         continue
       }
@@ -721,8 +722,21 @@ export async function validateOrderForShopify(
       orderItems.map((i) => i.SKU)
     )
 
+    // Generate transfer tags
+    const tags = generateTransferTags({
+      orderNumber: order.OrderNumber,
+      salesRep: order.SalesRep,
+      shipStartDate: order.ShipStartDate,
+      shipEndDate: order.ShipEndDate,
+      ohnCollection,
+      shopifyRawValues,
+    })
+
+    // Check if any enabled tags are invalid
+    const hasInvalidTags = tags.some(t => t.enabled && !t.validation.valid)
+
     return {
-      valid: missingSkus.length === 0 && inactiveSkus.length === 0,
+      valid: missingSkus.length === 0 && inactiveSkus.length === 0 && !hasInvalidTags,
       orderId,
       orderNumber: order.OrderNumber,
       storeName: order.StoreName,
@@ -739,6 +753,8 @@ export async function validateOrderForShopify(
       shopifyCollectionRaw: shopifyRawValue,
       shopifyCollectionRawValues: shopifyRawValues,
       salesRep: order.SalesRep ?? null,
+      tags,
+      hasInvalidTags,
     }
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Failed to validate order'
@@ -761,6 +777,8 @@ export async function validateOrderForShopify(
       shopifyCollectionRaw: null,
       shopifyCollectionRawValues: [],
       salesRep: null,
+      tags: [],
+      hasInvalidTags: false,
     }
   }
 }
@@ -1135,6 +1153,129 @@ function deriveSeasonFromShipWindow(startDate: Date | null): string | null {
   } else {
     return `FW${year}` // Fall/Winter
   }
+}
+
+/**
+ * Shopify tag validation rules:
+ * - Max 255 characters
+ * - No commas (used as separator)
+ * - Only letters, numbers, spaces, underscores, hyphens allowed
+ * - Parentheses, slashes, quotes, etc. are NOT allowed
+ */
+const SHOPIFY_TAG_INVALID_CHARS = /[^a-zA-Z0-9_\- ]/g
+
+/**
+ * Validate a tag value against Shopify rules.
+ * Returns validation result with reason if invalid.
+ */
+function validateTagValue(tag: string): { valid: boolean; reason?: string } {
+  if (!tag || !tag.trim()) {
+    return { valid: false, reason: 'empty' }
+  }
+  if (tag.length > 255) {
+    return { valid: false, reason: 'exceeds 255 characters' }
+  }
+  if (tag.includes(',')) {
+    return { valid: false, reason: 'contains comma' }
+  }
+  if (SHOPIFY_TAG_INVALID_CHARS.test(tag)) {
+    // Find the invalid characters for better error message
+    const invalidChars = tag.match(SHOPIFY_TAG_INVALID_CHARS)
+    const uniqueInvalid = [...new Set(invalidChars)].slice(0, 3).join(' ')
+    return { valid: false, reason: `contains invalid characters: ${uniqueInvalid}` }
+  }
+  return { valid: true }
+}
+
+/**
+ * Sanitize a tag value for Shopify.
+ * Removes invalid characters and enforces length limit.
+ */
+function sanitizeTag(tag: string): string {
+  return tag
+    .replace(SHOPIFY_TAG_INVALID_CHARS, '') // Remove invalid chars (parentheses, etc.)
+    .replace(/\s+/g, ' ')                    // Collapse multiple spaces
+    .trim()
+    .slice(0, 255)                           // Max 255 chars
+}
+
+/**
+ * Generate transfer tags for an order.
+ * Used by validation (to show in UI) and transfer (to send to Shopify).
+ * Validates each tag and includes validation info so UI can warn about problems.
+ */
+function generateTransferTags(params: {
+  orderNumber: string
+  salesRep: string | null
+  shipStartDate: Date | null
+  shipEndDate: Date | null
+  ohnCollection: string | null
+  shopifyRawValues: string[]
+}): TransferTag[] {
+  const tags: TransferTag[] = []
+  let id = 0
+
+  const addTag = (scope: TagScope, source: TagSource, value: string) => {
+    // Validate the original value
+    const validationResult = validateTagValue(value)
+
+    // Sanitize for actual transfer
+    const sanitized = sanitizeTag(value)
+    if (!sanitized) return // Skip completely empty tags
+
+    // Build validation info
+    const validation: TagValidation = validationResult.valid
+      ? { valid: true }
+      : {
+          valid: false,
+          reason: validationResult.reason,
+          originalValue: value !== sanitized ? value : undefined
+        }
+
+    tags.push({
+      id: String(id++),
+      scope,
+      source,
+      value: sanitized,
+      enabled: true,
+      validation,
+    })
+  }
+
+  // Order tags
+  addTag('order', 'orderType', params.orderNumber.startsWith('A') ? 'ATS' : 'Pre Order')
+  addTag('order', 'wholesale', 'Wholesale')
+  addTag('order', 'oscIgnore', 'osc-ignore')
+
+  if (params.salesRep?.trim()) {
+    addTag('order', 'salesRep', params.salesRep.trim())
+  }
+
+  const shipWindowTag = formatShipWindowTag(params.shipStartDate, params.shipEndDate)
+  if (shipWindowTag) {
+    addTag('order', 'shipWindow', shipWindowTag)
+  }
+
+  const seasonTag = deriveSeasonFromShipWindow(params.shipStartDate)
+  if (seasonTag) {
+    addTag('order', 'season', `SEASON_${seasonTag}`)
+  }
+
+  if (params.ohnCollection && params.ohnCollection !== 'Mixed') {
+    addTag('order', 'ohnCollection', `OHN_COLLECTION_${params.ohnCollection.replace(/\s+/g, '_').toUpperCase()}`)
+  }
+
+  for (const rawValue of params.shopifyRawValues) {
+    addTag('order', 'shopifyCollection', `SHOPIFY_COLLECTION_${rawValue.replace(/\s+/g, '_').toUpperCase()}`)
+  }
+
+  // Customer tags
+  addTag('customer', 'customerWholesale', 'Wholesale')
+  if (params.salesRep?.trim()) {
+    addTag('customer', 'customerSalesRep', params.salesRep.trim())
+  }
+
+  return tags
 }
 
 /**
