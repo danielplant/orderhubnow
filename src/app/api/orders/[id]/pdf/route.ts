@@ -16,6 +16,7 @@ import { generateOrderConfirmationHtml } from '@/lib/pdf/order-confirmation'
 import { parsePrice, resolveColor } from '@/lib/utils'
 import { extractSize } from '@/lib/utils/size-sort'
 import { getCompanySettings } from '@/lib/data/queries/settings'
+import { getImageDataUrl } from '@/lib/utils/pdf-images'
 
 interface RouteContext {
   params: Promise<{ id: string }>
@@ -145,6 +146,7 @@ export async function GET(
         SkuColor: true,
         Size: true,
         ShopifyImageURL: true,
+        ThumbnailPath: true,
         PriceCAD: true,
         PriceUSD: true,
         MSRPCAD: true,
@@ -206,38 +208,55 @@ export async function GET(
     let subtotal = 0
     let totalDiscount = 0
 
-    // Build line items with SKU details
-    const items = orderItems.map((item) => {
-      const sku = skuMap.get(item.SKU || '')
-      const qty = item.Quantity || 0
-      const price = item.Price || 0
-      const discount = item.LineDiscount || 0
-      const discountAmount = (price * qty * discount) / 100
-      const lineTotal = price * qty - discountAmount
+    // Build line items with SKU details (async for image fetching)
+    const items = await Promise.all(
+      orderItems.map(async (item) => {
+        const sku = skuMap.get(item.SKU || '')
+        const qty = item.Quantity || 0
+        const price = item.Price || 0
+        const discount = item.LineDiscount || 0
+        const discountAmount = (price * qty * discount) / 100
+        const lineTotal = price * qty - discountAmount
 
-      subtotal += price * qty
-      totalDiscount += discountAmount
+        subtotal += price * qty
+        totalDiscount += discountAmount
 
-      const description = sku?.OrderEntryDescription || sku?.Description || ''
+        const description = sku?.OrderEntryDescription || sku?.Description || ''
+        const skuId = item.SKU || ''
 
-      return {
-        sku: item.SKU || 'Unknown SKU',
-        quantity: qty,
-        price: price,
-        currency: currency,
-        lineTotal: lineTotal,
-        discount: discount,
-        // Enhanced SKU details
-        imageUrl: sku?.ShopifyImageURL || null,
-        size: extractSize(sku?.Size || ''),
-        description: description,
-        category: sku?.SkuCategories?.Name || '',
-        color: resolveColor(sku?.SkuColor || null, item.SKU || '', description),
-        retailPrice: currency === 'CAD'
-          ? parsePrice(sku?.MSRPCAD)
-          : parsePrice(sku?.MSRPUSD),
-      }
-    })
+        // Detect prepack: SKU starts with "2PC-" means 2 pieces per SKU
+        const unitsPerSku = skuId.toUpperCase().startsWith('2PC-') ? 2 : 1
+        const unitPrice = unitsPerSku > 1 ? price / unitsPerSku : price
+
+        // Get image as base64 data URL for PDF embedding
+        // Fetches from S3 first, falls back to Shopify CDN
+        const imageUrl = await getImageDataUrl(
+          sku?.ThumbnailPath || null,
+          sku?.ShopifyImageURL || null
+        )
+
+        return {
+          sku: skuId || 'Unknown SKU',
+          quantity: qty,
+          price: price,
+          currency: currency,
+          lineTotal: lineTotal,
+          discount: discount,
+          // Enhanced SKU details
+          imageUrl,
+          size: extractSize(sku?.Size || ''),
+          description: description,
+          category: sku?.SkuCategories?.Name || '',
+          color: resolveColor(sku?.SkuColor || null, skuId, description),
+          retailPrice: currency === 'CAD'
+            ? parsePrice(sku?.MSRPCAD)
+            : parsePrice(sku?.MSRPUSD),
+          // Prepack fields
+          unitsPerSku,
+          unitPrice,
+        }
+      })
+    )
 
     // Build order data for PDF
     const orderData = {

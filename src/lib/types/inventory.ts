@@ -66,6 +66,8 @@ export interface Product {
   msrpCad: number;
   msrpUsd: number;
   imageUrl: string;
+  /** S3 thumbnail cache key (16-char hex) for optimized image loading */
+  thumbnailPath?: string | null;
   blurHash?: string;
   variants: ProductVariant[];
   moq?: number;

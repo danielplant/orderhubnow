@@ -217,6 +217,7 @@ export async function getPreOrderProductsWithVariants(
       msrpCad: parsePriceFromString(firstSku.MSRPCAD),
       msrpUsd: parsePriceFromString(firstSku.MSRPUSD),
       imageUrl: firstSku.ShopifyImageURL || `/SkuImages/${baseSku}.jpg`,
+      thumbnailPath: firstSku.ThumbnailPath ?? null,
       variants: sortBySize(variants),
     })
   }

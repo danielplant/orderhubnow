@@ -491,6 +491,7 @@ export async function getSkusByCollection(collectionId: number): Promise<Product
       msrpCad: parsePrice(first.MSRPCAD),
       msrpUsd: parsePrice(first.MSRPUSD),
       imageUrl: first.ShopifyImageURL ?? '',
+      thumbnailPath: first.ThumbnailPath ?? null,
       variants,
     })
   }
@@ -561,6 +562,7 @@ export async function getPreOrderProductsByCollection(collectionId: number): Pro
       msrpCad: parsePrice(first.MSRPCAD),
       msrpUsd: parsePrice(first.MSRPUSD),
       imageUrl: first.ShopifyImageURL ?? '',
+      thumbnailPath: first.ThumbnailPath ?? null,
       variants,
     })
   }

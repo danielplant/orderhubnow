@@ -122,6 +122,29 @@ export function getThumbnailUrl(cacheKey: string, size: ThumbnailSize = 'sm'): s
   return `https://${bucket}.s3.${region}.amazonaws.com/${key}`
 }
 
+/**
+ * Get the best image URL for a SKU - prefer S3 thumbnail, fallback to Shopify CDN
+ *
+ * @param thumbnailPath - The ThumbnailPath from the SKU (16-char cache key or legacy format)
+ * @param shopifyImageUrl - The ShopifyImageURL fallback
+ * @param size - Thumbnail size variant ('sm' = 120px, 'md' = 240px, 'lg' = 480px)
+ * @returns S3 thumbnail URL if available, otherwise Shopify CDN URL, or null
+ */
+export function getSkuImageUrl(
+  thumbnailPath: string | null | undefined,
+  shopifyImageUrl: string | null | undefined,
+  size: ThumbnailSize = 'md'
+): string | null {
+  // Try S3 thumbnail first
+  const cacheKey = extractCacheKey(thumbnailPath ?? null)
+  if (cacheKey) {
+    return getThumbnailUrl(cacheKey, size)
+  }
+
+  // Fallback to Shopify CDN
+  return shopifyImageUrl ?? null
+}
+
 // =============================================================================
 // Thumbnail Status Checking
 // =============================================================================

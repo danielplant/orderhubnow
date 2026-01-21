@@ -58,6 +58,8 @@ export interface AdminSkuRow {
   unitPriceCad: number | null
   unitPriceUsd: number | null
   imageUrl: string | null
+  /** S3 thumbnail cache key (16-char hex) for optimized image loading */
+  thumbnailPath: string | null
 }
 
 export interface ProductsListResult {

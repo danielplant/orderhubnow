@@ -181,6 +181,7 @@ export async function getProducts(
         UnitPriceCAD: true,
         UnitPriceUSD: true,
         ShopifyImageURL: true,
+        ThumbnailPath: true,
         CollectionID: true,
         Size: true,
         Collection: {
@@ -225,6 +226,7 @@ export async function getProducts(
         unitPriceCad: r.UnitPriceCAD ? Number(r.UnitPriceCAD) : null,
         unitPriceUsd: r.UnitPriceUSD ? Number(r.UnitPriceUSD) : null,
         imageUrl: r.ShopifyImageURL ?? null,
+        thumbnailPath: r.ThumbnailPath ?? null,
       }
     }),
   }
@@ -277,6 +279,7 @@ export async function getSkuById(id: string) {
       PriceCAD: true,
       PriceUSD: true,
       ShopifyImageURL: true,
+      ThumbnailPath: true,
       DateAdded: true,
       DateModified: true,
     },
@@ -297,6 +300,7 @@ export async function getSkuById(id: string) {
     priceCad: row.PriceCAD ?? '',
     priceUsd: row.PriceUSD ?? '',
     imageUrl: row.ShopifyImageURL,
+    thumbnailPath: row.ThumbnailPath ?? null,
     dateAdded: row.DateAdded?.toISOString() ?? null,
     dateModified: row.DateModified?.toISOString() ?? null,
   }
@@ -329,6 +333,7 @@ export async function getProductByBaseSku(baseSku: string) {
       MSRPCAD: true,
       MSRPUSD: true,
       ShopifyImageURL: true,
+      ThumbnailPath: true,
       Size: true,
     },
   })
@@ -336,7 +341,7 @@ export async function getProductByBaseSku(baseSku: string) {
   if (skus.length === 0) return null
 
   const first = skus[0]
-  
+
   // Build variants array with size info
   const variants = skus.map((sku) => {
     return {
@@ -356,6 +361,7 @@ export async function getProductByBaseSku(baseSku: string) {
     color: resolveColor(first.SkuColor, first.SkuID, title),
     material: first.FabricContent ?? '',
     imageUrl: first.ShopifyImageURL ?? null,
+    thumbnailPath: first.ThumbnailPath ?? null,
     isPreOrder: first.ShowInPreOrder ?? false,
     priceCad: parsePrice(first.PriceCAD),
     priceUsd: parsePrice(first.PriceUSD),

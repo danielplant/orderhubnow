@@ -9,6 +9,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
+import { getSkuImageUrl } from '@/lib/utils/thumbnail-url'
 
 interface ProductVariant {
   sku: string
@@ -25,6 +26,7 @@ interface ProductDetail {
   color: string
   material: string
   imageUrl: string | null
+  thumbnailPath?: string | null
   isPreOrder: boolean
   priceCad: number
   priceUsd: number
@@ -48,9 +50,15 @@ export function ProductDetailModal({
 }: ProductDetailModalProps) {
   const [imageError, setImageError] = React.useState(false)
 
+  // Prefer S3 thumbnail (lg size for modal), fallback to Shopify CDN
+  const imageUrl = React.useMemo(
+    () => product ? getSkuImageUrl(product.thumbnailPath, product.imageUrl, 'lg') : null,
+    [product]
+  )
+
   React.useEffect(() => {
     setImageError(false)
-  }, [product?.imageUrl])
+  }, [imageUrl])
 
   if (!product) return null
 
@@ -81,9 +89,9 @@ export function ProductDetailModal({
         <div className="grid gap-6 md:grid-cols-2">
           {/* Product Image */}
           <div className="relative aspect-square bg-muted rounded-lg overflow-hidden">
-            {product.imageUrl && !imageError ? (
+            {imageUrl && !imageError ? (
               <Image
-                src={product.imageUrl}
+                src={imageUrl}
                 alt={product.title}
                 fill
                 className="object-contain p-4"

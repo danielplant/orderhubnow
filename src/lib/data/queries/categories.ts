@@ -146,11 +146,12 @@ export async function getCategoryWithProducts(id: string): Promise<CategoryWithP
       OrderEntryDescription: true,
       Description: true,
       ShopifyImageURL: true,
+      ThumbnailPath: true,
     },
   })
 
   // Group into "products" by BaseSku.
-  const byBase = new Map<string, { sortOrder: number; description: string; imageUrl: string | null }>()
+  const byBase = new Map<string, { sortOrder: number; description: string; imageUrl: string | null; thumbnailPath: string | null }>()
   for (const row of skus) {
     const { baseSku } = parseSkuId(row.SkuID)
     if (!baseSku) continue
@@ -158,14 +159,15 @@ export async function getCategoryWithProducts(id: string): Promise<CategoryWithP
     const sortOrder = row.DisplayPriority ?? 0
     const description = (row.OrderEntryDescription ?? row.Description ?? baseSku) as string
     const imageUrl = row.ShopifyImageURL ?? null
+    const thumbnailPath = row.ThumbnailPath ?? null
 
     const existing = byBase.get(baseSku)
     if (!existing) {
-      byBase.set(baseSku, { sortOrder, description, imageUrl })
+      byBase.set(baseSku, { sortOrder, description, imageUrl, thumbnailPath })
     } else {
       // Keep the lowest DisplayPriority encountered for stability
       if (sortOrder < existing.sortOrder) {
-        byBase.set(baseSku, { sortOrder, description: existing.description, imageUrl: existing.imageUrl })
+        byBase.set(baseSku, { sortOrder, description: existing.description, imageUrl: existing.imageUrl, thumbnailPath: existing.thumbnailPath })
       }
     }
   }
@@ -176,6 +178,7 @@ export async function getCategoryWithProducts(id: string): Promise<CategoryWithP
       skuId: baseSku,
       description: v.description,
       imageUrl: v.imageUrl,
+      thumbnailPath: v.thumbnailPath,
       sortOrder: v.sortOrder,
     }))
     .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.skuId.localeCompare(b.skuId))

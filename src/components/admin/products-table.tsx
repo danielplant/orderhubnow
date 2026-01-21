@@ -21,6 +21,7 @@ import type { CurrencyMode } from '@/lib/types/export'
 import { BulkActionsBar } from '@/components/admin/bulk-actions-bar'
 import { ProductDetailModal } from '@/components/admin/product-detail-modal'
 import { cn } from '@/lib/utils'
+import { getSkuImageUrl } from '@/lib/utils/thumbnail-url'
 import type { AdminSkuRow, CategoryForFilter } from '@/lib/types'
 import {
   deleteSku,
@@ -244,15 +245,17 @@ export function ProductsTable({
       {
         id: 'image',
         header: 'Image',
-        cell: (r) => (
+        cell: (r) => {
+          const thumbnailUrl = getSkuImageUrl(r.thumbnailPath, r.imageUrl, 'md')
+          return (
           <div className="w-24 h-24 relative bg-muted rounded overflow-hidden flex-shrink-0">
-            {r.imageUrl ? (
+            {thumbnailUrl ? (
               <Image
-                src={r.imageUrl}
+                src={thumbnailUrl}
                 alt={r.description}
                 fill
                 className="object-contain"
-                sizes="48px"
+                sizes="96px"
               />
             ) : (
               <div className="w-full h-full flex items-center justify-center text-muted-foreground">
@@ -262,7 +265,7 @@ export function ProductsTable({
               </div>
             )}
           </div>
-        ),
+        )},
       },
       {
         id: 'skuId',

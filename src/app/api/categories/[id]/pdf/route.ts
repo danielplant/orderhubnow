@@ -17,6 +17,7 @@ import { generatePdf, wrapHtml, formatDate } from '@/lib/pdf/generate'
 import { getEffectiveQuantity, parsePrice, parseSkuId, resolveColor } from '@/lib/utils'
 import { extractSize } from '@/lib/utils/size-sort'
 import { getCompanySettings } from '@/lib/data/queries/settings'
+import { getImageDataUrl } from '@/lib/utils/pdf-images'
 
 // ============================================================================
 // Types
@@ -28,6 +29,7 @@ interface ProductForLineSheet {
   priceCAD: number
   priceUSD: number
   color: string
+  imageUrl: string | null
   sizes: Array<{
     size: string
     quantity: number
@@ -82,11 +84,16 @@ export async function GET(
         PriceCAD: true,
         PriceUSD: true,
         Size: true,
+        ThumbnailPath: true,
+        ShopifyImageURL: true,
       },
     })
 
-    // Group by base SKU
-    const productMap = new Map<string, ProductForLineSheet>()
+    // Group by base SKU and collect image references
+    const productMap = new Map<string, ProductForLineSheet & {
+      thumbnailPath: string | null
+      shopifyImageUrl: string | null
+    }>()
 
     for (const sku of skus) {
       const { baseSku } = parseSkuId(sku.SkuID)
@@ -102,6 +109,9 @@ export async function GET(
           priceCAD: parsePrice(sku.PriceCAD),
           priceUSD: parsePrice(sku.PriceUSD),
           color: resolveColor(sku.SkuColor, sku.SkuID, description),
+          imageUrl: null, // Will be populated after fetching
+          thumbnailPath: sku.ThumbnailPath,
+          shopifyImageUrl: sku.ShopifyImageURL,
           sizes: [],
         })
       }
@@ -115,7 +125,27 @@ export async function GET(
       })
     }
 
-    const products = Array.from(productMap.values())
+    // Fetch images as base64 data URLs (parallel for performance)
+    const productEntries = Array.from(productMap.entries())
+    await Promise.all(
+      productEntries.map(async ([, product]) => {
+        product.imageUrl = await getImageDataUrl(
+          product.thumbnailPath,
+          product.shopifyImageUrl
+        )
+      })
+    )
+
+    // Extract final products (without the temp image ref fields)
+    const products: ProductForLineSheet[] = productEntries.map(([, p]) => ({
+      baseSku: p.baseSku,
+      description: p.description,
+      priceCAD: p.priceCAD,
+      priceUSD: p.priceUSD,
+      color: p.color,
+      imageUrl: p.imageUrl,
+      sizes: p.sizes,
+    }))
 
     // Fetch company settings for branding
     const companySettings = await getCompanySettings()
@@ -192,7 +222,10 @@ function generateLineSheetHtml(
       return `
         <div class="line-sheet-item">
           <div class="line-sheet-image">
-            <span style="color: #999; font-size: 9pt;">No Image</span>
+            ${product.imageUrl
+              ? `<img src="${product.imageUrl}" alt="${product.baseSku}" style="max-width: 100%; max-height: 100%; object-fit: contain;" />`
+              : `<span style="color: #999; font-size: 9pt;">No Image</span>`
+            }
           </div>
           <div class="line-sheet-details">
             <div class="line-sheet-sku">${product.baseSku}</div>

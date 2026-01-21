@@ -76,6 +76,7 @@ export async function getSkusByCategory(categoryId: number): Promise<Product[]> 
       msrpCad: parsePrice(first.MSRPCAD),
       msrpUsd: parsePrice(first.MSRPUSD),
       imageUrl: first.ShopifyImageURL ?? '',
+      thumbnailPath: first.ThumbnailPath ?? null,
       variants,
     })
   }

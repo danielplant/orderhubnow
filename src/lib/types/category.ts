@@ -43,6 +43,8 @@ export interface CategoryProduct {
   skuId: string // baseSku (explicit for clarity)
   description: string
   imageUrl?: string | null
+  /** S3 thumbnail cache key (16-char hex) for optimized image loading */
+  thumbnailPath?: string | null
   sortOrder: number // DisplayPriority
 }
 
