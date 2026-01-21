@@ -52,12 +52,18 @@ export type OrderFormData = z.infer<typeof orderFormSchema>
 
 /**
  * Schema for cart items passed to createOrder
+ * Includes ship window metadata for order splitting by delivery date
  */
 export const orderItemSchema = z.object({
   sku: z.string().min(1),
   skuVariantId: z.union([z.bigint(), z.number()]),
   quantity: z.number().int().positive(),
   price: z.number().nonnegative(),
+  // Ship window grouping fields (for splitting orders by delivery date)
+  categoryId: z.number().nullable().optional(),
+  categoryName: z.string().nullable().optional(),
+  shipWindowStart: z.string().nullable().optional(),
+  shipWindowEnd: z.string().nullable().optional(),
 })
 
 export type OrderItem = z.infer<typeof orderItemSchema>
@@ -68,10 +74,14 @@ export type OrderItem = z.infer<typeof orderItemSchema>
 export const createOrderInputSchema = orderFormSchema.extend({
   currency: z.enum(['USD', 'CAD']),
   items: z.array(orderItemSchema).min(1, 'Order must have at least one item'),
-  isPreOrder: z.boolean(),
+  // isPreOrder is now derived from SKU data on the server.
+  // Kept optional for backwards compatibility but ignored by server.
+  isPreOrder: z.boolean().optional(),
   // Optional customer ID for existing customer - enables strong ownership on order
   // Nullable to handle client state sending null for new stores
   customerId: z.number().int().positive().nullable().optional(),
+  // Skip automatic email sending - emails will be sent via confirmation popup
+  skipEmail: z.boolean().optional(),
 })
 
 export type CreateOrderInput = z.infer<typeof createOrderInputSchema>

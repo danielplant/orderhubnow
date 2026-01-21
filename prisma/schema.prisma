@@ -993,3 +993,101 @@ model SyncConfigAudit {
   @@index([entityType, changedAt])
   @@index([changedBy])
 }
+
+// ============================================================================
+// Sync Service: ETL Pipeline (Mapping & Scheduling)
+// ============================================================================
+// These tables power the sync service's ETL pipeline:
+// - SyncMapping: HOW to transform Shopify data and WHERE to write it
+// - SyncSchedule: WHEN to run syncs (cron-based scheduling)
+// - SyncRun: History of sync execution runs
+// - WebhookHistory: Incoming webhook tracking
+//
+// Relationship to SyncFieldConfig:
+// - SyncFieldConfig = WHAT fields to fetch from Shopify (field selection)
+// - SyncMapping = HOW to transform + WHERE to write (ETL mapping)
+// They are complementary, not duplicates.
+// ============================================================================
+
+/// Mapping configuration: source resource -> target table with field transformations
+model SyncMapping {
+  id             String         @id @default(uuid())
+  name           String         @db.NVarChar(200)
+  description    String?        @db.NVarChar(500)
+  sourceResource String         @db.NVarChar(100)  // products, collections, orders, etc.
+  targetTable    String         @db.NVarChar(200)  // dbo.Sku, dbo.RawSkusFromShopify, etc.
+  keyMapping     String?        @db.NVarChar(Max)  // JSON: source key -> target key mapping
+  mappingsJson   String         @db.NVarChar(Max)  // JSON: array of field mappings with transforms
+  webhookTopics  String?        @db.NVarChar(500)  // Comma-separated: products/update, products/create
+  enabled        Boolean        @default(true)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  schedules      SyncSchedule[]
+  runs           SyncRun[]
+
+  @@index([enabled])
+  @@index([sourceResource])
+}
+
+/// Schedule configuration for automated syncs
+model SyncSchedule {
+  id               String       @id @default(uuid())
+  mappingId        String
+  type             String       @db.NVarChar(20)   // full, incremental
+  cronPattern      String       @db.NVarChar(100)  // e.g., "0 */15 * * *" (every 15 min)
+  timezone         String       @default("UTC") @db.NVarChar(50)
+  enabled          Boolean      @default(true)
+  options          String?      @db.NVarChar(Max)  // JSON: { lookbackMinutes, deleteStale, etc. }
+  nextRun          DateTime?
+  lastRun          DateTime?
+  lastStatus       String?      @db.NVarChar(20)   // success, failed, skipped
+  consecutiveFails Int          @default(0)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  mapping          SyncMapping  @relation(fields: [mappingId], references: [id], onDelete: Cascade)
+
+  @@index([enabled, nextRun])
+  @@index([mappingId])
+}
+
+/// History of sync run executions
+model SyncRun {
+  id             String       @id @default(uuid())
+  mappingId      String?
+  syncType       String       @db.NVarChar(20)   // full, incremental, webhook
+  status         String       @db.NVarChar(20)   // running, completed, failed, cancelled
+  triggeredBy    String?      @db.NVarChar(100)  // manual, schedule, webhook, api
+  startedAt      DateTime     @default(now())
+  completedAt    DateTime?
+  recordsFetched Int?
+  recordsWritten Int?
+  recordsSkipped Int?
+  recordsFailed  Int?
+  durationMs     Int?
+  errorMessage   String?      @db.NVarChar(Max)
+  metadata       String?      @db.NVarChar(Max)  // JSON: additional run details
+  mapping        SyncMapping? @relation(fields: [mappingId], references: [id], onDelete: SetNull)
+
+  @@index([status, startedAt])
+  @@index([mappingId])
+  @@index([syncType])
+}
+
+/// History of received Shopify webhooks
+model WebhookHistory {
+  id                String    @id @default(uuid())
+  shopifyWebhookId  String    @unique @db.NVarChar(100)
+  topic             String    @db.NVarChar(100)  // products/update, orders/create, etc.
+  shopDomain        String    @db.NVarChar(200)
+  receivedAt        DateTime  @default(now())
+  processedAt       DateTime?
+  status            String    @db.NVarChar(20)   // pending, processing, completed, failed, skipped
+  mappingsProcessed Int?
+  recordsWritten    Int?
+  processingMs      Int?
+  errorMessage      String?   @db.NVarChar(Max)
+
+  @@index([status, receivedAt])
+  @@index([topic])
+  @@index([shopifyWebhookId])
+}

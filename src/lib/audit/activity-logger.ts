@@ -11,7 +11,7 @@ import { prisma } from '@/lib/prisma'
 // Types
 // ============================================================================
 
-export type EntityType = 'order' | 'shipment' | 'customer' | 'item'
+export type EntityType = 'order' | 'shipment' | 'customer' | 'item' | 'user'
 
 export type ActivityAction =
   // Order actions
@@ -33,6 +33,7 @@ export type ActivityAction =
   // Document actions
   | 'document_generated'
   | 'email_sent'
+  | 'email_preferences_set'
   // Customer actions
   | 'customer_created'
   | 'customer_updated'
@@ -232,6 +233,7 @@ function formatDescription(params: LogActivityParams): string {
     item_removed: 'Item removed',
     document_generated: 'Document generated',
     email_sent: 'Email sent',
+    email_preferences_set: 'Email preferences set',
     customer_created: 'Customer created',
     customer_updated: 'Customer updated',
   }
@@ -355,6 +357,7 @@ export type EmailType =
   | 'order_confirmation'
   | 'order_update'
   | 'sales_notification'
+  | 'password_reset'
 
 /**
  * Log email sent
@@ -362,8 +365,8 @@ export type EmailType =
 export async function logEmailSent(params: {
   entityType: EntityType
   entityId: string
-  orderId: string
-  orderNumber: string
+  orderId?: string
+  orderNumber?: string
   emailType: EmailType
   recipient: string
   performedBy?: string

@@ -189,6 +189,7 @@ export async function getOrders(
         ShipEndDate: true,
         OrderDate: true,
         IsTransferredToShopify: true,
+        IsPreOrder: true,  // Order type from SKU category
         ShopifyFulfillmentStatus: true,
         ShopifyFinancialStatus: true,
         BrandNotes: true,  // Used for shipping notes / variance explanations
@@ -225,9 +226,10 @@ export async function getOrders(
   // Get shipment summaries and collections for these orders
   const orderIds = orders.map((o) => String(o.ID));
   const orderNumbers = orders.map((o) => o.OrderNumber);
-  const [shipmentSummaries, collectionMap] = await Promise.all([
+  const [shipmentSummaries, collectionMap, shopifyRawCollectionMap] = await Promise.all([
     getShipmentSummariesForOrders(orderIds),
     getOrderCollections(orderNumbers),
+    getShopifyRawCollections(orderNumbers),
   ]);
 
   // Map to frontend shape
@@ -279,9 +281,12 @@ export async function getOrders(
         trackingNumbers: summary?.trackingNumbers ?? [],
         // Enhanced fields for Orders Dashboard
         collection: collectionMap.get(o.OrderNumber) ?? null,
+        shopifyCollectionRaw: shopifyRawCollectionMap.get(o.OrderNumber) ?? null,
         season: deriveSeasonFromShipDate(o.ShipStartDate),
         notes: o.BrandNotes ?? null,
         syncError: null,   // TODO: Add SyncError field to schema if needed
+        // Order type - derived from SkuCategories.IsPreOrder at creation
+        isPreOrder: o.IsPreOrder ?? o.OrderNumber.startsWith('P'),
       };
     }),
   };
@@ -358,6 +363,7 @@ export async function getOrderById(orderId: string): Promise<AdminOrderRow | nul
       ShipEndDate: true,
       OrderDate: true,
       IsTransferredToShopify: true,
+      IsPreOrder: true,
       ShopifyFulfillmentStatus: true,
       ShopifyFinancialStatus: true,
     },
@@ -412,9 +418,12 @@ export async function getOrderById(orderId: string): Promise<AdminOrderRow | nul
     trackingNumbers: summary?.trackingNumbers ?? [],
     // Enhanced fields
     collection: null,
+    shopifyCollectionRaw: null,
     season: deriveSeasonFromShipDate(order.ShipStartDate),
     notes: (order as { BrandNotes?: string | null }).BrandNotes ?? null,
     syncError: null,
+    // Order type - derived from SkuCategories.IsPreOrder at creation
+    isPreOrder: order.IsPreOrder ?? order.OrderNumber.startsWith('P'),
   };
 }
 
@@ -576,6 +585,103 @@ async function getOrderCollections(
 }
 
 /**
+ * Get Shopify raw collection values for a batch of orders.
+ * Uses ShopifyValueMapping to reverse-map from CollectionID -> rawValue.
+ * Returns single raw value if all items map to same value, "Mixed" if multiple.
+ */
+async function getShopifyRawCollections(
+  orderNumbers: string[]
+): Promise<Map<string, string>> {
+  if (orderNumbers.length === 0) {
+    return new Map();
+  }
+
+  // Get all items for these orders
+  const items = await prisma.customerOrdersItems.findMany({
+    where: { OrderNumber: { in: orderNumbers } },
+    select: { OrderNumber: true, SKU: true },
+  });
+
+  if (items.length === 0) {
+    return new Map();
+  }
+
+  // Get unique SKUs
+  const skuIds = [...new Set(items.map((i) => i.SKU).filter(Boolean))];
+
+  // Look up SKUs with their CollectionID
+  const skus = await prisma.sku.findMany({
+    where: { SkuID: { in: skuIds } },
+    select: {
+      SkuID: true,
+      CollectionID: true,
+    },
+  });
+
+  // Get unique collection IDs
+  const collectionIds = [...new Set(skus.map((s) => s.CollectionID).filter((id): id is number => id !== null))];
+
+  if (collectionIds.length === 0) {
+    return new Map();
+  }
+
+  // Get ShopifyValueMappings that are mapped to these collections
+  const mappings = await prisma.shopifyValueMapping.findMany({
+    where: {
+      status: 'mapped',
+      collectionId: { in: collectionIds },
+    },
+    select: {
+      rawValue: true,
+      collectionId: true,
+    },
+  });
+
+  // Build collectionId -> rawValue map (may have multiple mappings per collection)
+  const collectionToRawValues = new Map<number, string[]>();
+  for (const m of mappings) {
+    if (m.collectionId) {
+      const existing = collectionToRawValues.get(m.collectionId) || [];
+      existing.push(m.rawValue);
+      collectionToRawValues.set(m.collectionId, existing);
+    }
+  }
+
+  // Build SKU -> rawValues map
+  const skuToRawValues = new Map<string, string[]>();
+  for (const sku of skus) {
+    if (sku.CollectionID) {
+      const rawValues = collectionToRawValues.get(sku.CollectionID) || [];
+      skuToRawValues.set(sku.SkuID, rawValues);
+    }
+  }
+
+  // Build orderNumber -> rawValues set map
+  const orderRawValues = new Map<string, Set<string>>();
+  for (const item of items) {
+    const rawValues = skuToRawValues.get(item.SKU) || [];
+    for (const rv of rawValues) {
+      if (!orderRawValues.has(item.OrderNumber)) {
+        orderRawValues.set(item.OrderNumber, new Set());
+      }
+      orderRawValues.get(item.OrderNumber)!.add(rv);
+    }
+  }
+
+  // Convert to single rawValue or "Mixed"
+  const result = new Map<string, string>();
+  for (const [orderNumber, rawValues] of orderRawValues) {
+    if (rawValues.size === 1) {
+      result.set(orderNumber, [...rawValues][0]);
+    } else if (rawValues.size > 1) {
+      result.set(orderNumber, 'Mixed');
+    }
+  }
+
+  return result;
+}
+
+/**
  * Derive season code from ship start date.
  * SS = Spring/Summer (Jan-Jun), FW = Fall/Winter (Jul-Dec)
  */
@@ -671,6 +777,7 @@ export async function getOrdersByRep(
         ShipEndDate: true,
         OrderDate: true,
         IsTransferredToShopify: true,
+        IsPreOrder: true,
         ShopifyFulfillmentStatus: true,
         ShopifyFinancialStatus: true,
         BrandNotes: true,
@@ -705,9 +812,10 @@ export async function getOrdersByRep(
   // 6. Get categories, collections, and shipment summaries for these orders
   const orderNumbers = orders.map((o) => o.OrderNumber);
   const orderIds = orders.map((o) => String(o.ID));
-  const [categoryMap, collectionMap, shipmentSummaries] = await Promise.all([
+  const [categoryMap, collectionMap, shopifyRawCollectionMap, shipmentSummaries] = await Promise.all([
     getOrderCategories(orderNumbers),
     getOrderCollections(orderNumbers),
+    getShopifyRawCollections(orderNumbers),
     getShipmentSummariesForOrders(orderIds),
   ]);
 
@@ -765,9 +873,12 @@ export async function getOrdersByRep(
         trackingNumbers: summary?.trackingNumbers ?? [],
         // Enhanced fields
         collection: collectionMap.get(o.OrderNumber) ?? null,
+        shopifyCollectionRaw: shopifyRawCollectionMap.get(o.OrderNumber) ?? null,
         season: deriveSeasonFromShipDate(o.ShipStartDate),
         notes: o.BrandNotes ?? null,
         syncError: null,
+        // Order type - derived from SkuCategories.IsPreOrder at creation
+        isPreOrder: o.IsPreOrder ?? o.OrderNumber.startsWith('P'),
       };
     }),
   };

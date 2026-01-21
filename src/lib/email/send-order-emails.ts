@@ -5,7 +5,7 @@
  * Matches .NET EmailsProcessing.SendEmail() behavior.
  */
 
-import { transporter, EMAIL_FROM, EMAIL_CC, EMAIL_SALES } from './client'
+import { sendMailWithConfig, EMAIL_FROM, EMAIL_CC, EMAIL_SALES } from './client'
 import { customerConfirmationHtml, salesNotificationHtml } from './templates'
 import { generatePdf } from '@/lib/pdf/generate'
 import { generateOrderConfirmationHtml } from '@/lib/pdf/order-confirmation'
@@ -199,7 +199,7 @@ export async function sendOrderEmails(data: OrderEmailData, isUpdate = false): P
         ? `Order ${data.orderNumber} Updated - Order confirmation`
         : `Order ${data.orderNumber} Confirmed - Thank you for your order!`
 
-      await transporter.sendMail({
+      await sendMailWithConfig(config, {
         from: fromAddress,
         to: data.customerEmail,
         cc: ccList.length > 0 ? ccList.join(',') : undefined,
@@ -248,7 +248,7 @@ export async function sendOrderEmails(data: OrderEmailData, isUpdate = false): P
         ? `Order ${data.orderNumber} Updated - ${data.storeName}`
         : `New Order ${data.orderNumber} from ${data.storeName}`
 
-      await transporter.sendMail({
+      await sendMailWithConfig(config, {
         from: fromAddress,
         to: salesEmails,
         subject,

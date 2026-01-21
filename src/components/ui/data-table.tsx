@@ -77,8 +77,8 @@ export interface DataTableProps<T>
   enableColumnResizing?: boolean
   /** Controlled column widths (columnId -> width in px). Falls back to auto if not specified. */
   columnWidths?: Record<string, number>
-  /** Callback when a column width changes */
-  onColumnWidthChange?: (columnId: string, width: number) => void
+  /** Callback when column width(s) change. Receives a record of columnId -> width updates. */
+  onColumnWidthChange?: (updates: Record<string, number>) => void
 
   // --- Sticky header ---
   /** Enable sticky header that stays visible when scrolling. Requires maxHeight to be effective. */
@@ -119,11 +119,15 @@ export function DataTable<T>({
   const [internalSort, setInternalSort] = React.useState<{ columnId: string; direction: SortDirection } | null>(null)
   const [internalPage, setInternalPage] = React.useState(1)
 
-  // Resizing state
+  // Resizing state - tracks both left and right columns for linked resize
   const [resizing, setResizing] = React.useState<{
-    columnId: string
+    leftColumnId: string
+    rightColumnId: string | null // null if resizing last column
     startX: number
-    startWidth: number
+    leftStartWidth: number
+    rightStartWidth: number
+    leftMinWidth: number
+    rightMinWidth: number
   } | null>(null)
 
   // Use controlled or internal state
@@ -142,16 +146,40 @@ export function DataTable<T>({
     }
   }, [data, pageSize, internalSort, manualPagination])
 
-  // Handle column resize mouse events
+  // Handle column resize mouse events (linked resize - Airtable-style)
   React.useEffect(() => {
     if (!resizing) return
 
     const handleMouseMove = (e: MouseEvent) => {
       const delta = e.clientX - resizing.startX
-      const col = columns.find((c) => c.id === resizing.columnId)
-      const minWidth = col?.minWidth ?? 50
-      const newWidth = Math.max(minWidth, resizing.startWidth + delta)
-      onColumnWidthChange?.(resizing.columnId, newWidth)
+
+      // Calculate new widths for linked resize
+      let leftNewWidth = resizing.leftStartWidth + delta
+      let rightNewWidth = resizing.rightStartWidth - delta
+
+      // Clamp left column to minWidth
+      if (leftNewWidth < resizing.leftMinWidth) {
+        leftNewWidth = resizing.leftMinWidth
+        // Recalculate right width based on clamped left
+        rightNewWidth = resizing.leftStartWidth + resizing.rightStartWidth - leftNewWidth
+      }
+
+      // Clamp right column to minWidth (if exists)
+      if (resizing.rightColumnId && rightNewWidth < resizing.rightMinWidth) {
+        rightNewWidth = resizing.rightMinWidth
+        // Recalculate left width based on clamped right
+        leftNewWidth = resizing.leftStartWidth + resizing.rightStartWidth - rightNewWidth
+      }
+
+      // Build updates object
+      const updates: Record<string, number> = {
+        [resizing.leftColumnId]: leftNewWidth,
+      }
+      if (resizing.rightColumnId) {
+        updates[resizing.rightColumnId] = rightNewWidth
+      }
+
+      onColumnWidthChange?.(updates)
     }
 
     const handleMouseUp = () => {
@@ -171,7 +199,7 @@ export function DataTable<T>({
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
     }
-  }, [resizing, columns, onColumnWidthChange])
+  }, [resizing, onColumnWidthChange])
 
   // Sort data (only for client-side sorting)
   const sorted = React.useMemo(() => {
@@ -249,8 +277,24 @@ export function DataTable<T>({
   const handleResizeStart = (e: React.MouseEvent, columnId: string) => {
     e.preventDefault()
     e.stopPropagation()
-    const currentWidth = columnWidths?.[columnId] ?? 100
-    setResizing({ columnId, startX: e.clientX, startWidth: currentWidth })
+
+    // Find this column and its right neighbor for linked resize
+    const colIndex = columns.findIndex((c) => c.id === columnId)
+    const leftCol = columns[colIndex]
+    const rightCol = columns[colIndex + 1] // may be undefined for last column
+
+    const leftWidth = columnWidths?.[columnId] ?? 100
+    const rightWidth = rightCol ? (columnWidths?.[rightCol.id] ?? 100) : 0
+
+    setResizing({
+      leftColumnId: columnId,
+      rightColumnId: rightCol?.id ?? null,
+      startX: e.clientX,
+      leftStartWidth: leftWidth,
+      rightStartWidth: rightWidth,
+      leftMinWidth: leftCol?.minWidth ?? 50,
+      rightMinWidth: rightCol?.minWidth ?? 50,
+    })
   }
 
   return (
@@ -263,7 +307,12 @@ export function DataTable<T>({
         style={maxHeight ? { maxHeight } : undefined}
       >
         <table
-          className={cn(dataTableVariants({ size, variant }), 'relative', className)}
+          className={cn(
+            dataTableVariants({ size, variant }),
+            'relative',
+            enableColumnResizing && 'table-fixed',
+            className
+          )}
           {...props}
         >
           <thead
@@ -297,7 +346,7 @@ export function DataTable<T>({
                     key={col.id}
                     className={cn(
                       'relative p-3 px-4 text-left text-sm font-semibold text-muted-foreground bg-muted/30',
-                      enableColumnResizing && 'pr-2'
+                      enableColumnResizing && 'pr-2 overflow-hidden text-ellipsis whitespace-nowrap'
                     )}
                     style={width ? { width, minWidth: col.minWidth ?? 50 } : undefined}
                   >
@@ -319,17 +368,17 @@ export function DataTable<T>({
                       )}
                     </div>
 
-                    {/* Resize handle */}
+                    {/* Resize handle - wider hit area (12px) with centered visual indicator */}
                     {enableColumnResizing && (
                       <div
                         className={cn(
-                          'absolute right-0 top-0 h-full w-1.5 cursor-col-resize group',
-                          'hover:bg-primary/30 active:bg-primary/50',
-                          resizing?.columnId === col.id && 'bg-primary/50'
+                          'absolute right-0 top-0 h-full w-3 cursor-col-resize group',
+                          'hover:bg-primary/20 active:bg-primary/30',
+                          resizing?.leftColumnId === col.id && 'bg-primary/30'
                         )}
                         onMouseDown={(e) => handleResizeStart(e, col.id)}
                       >
-                        <div className="absolute right-0 top-0 h-full w-[1px] bg-border group-hover:bg-primary/50" />
+                        <div className="absolute right-0.5 top-1/4 h-1/2 w-[2px] rounded-full bg-border group-hover:bg-primary/50" />
                       </div>
                     )}
                   </th>
@@ -362,7 +411,10 @@ export function DataTable<T>({
                     return (
                       <td
                         key={col.id}
-                        className="p-4 px-4 align-middle"
+                        className={cn(
+                          "p-4 px-4 align-middle",
+                          enableColumnResizing && "overflow-hidden text-ellipsis whitespace-nowrap"
+                        )}
                         style={width ? { width, minWidth: col.minWidth ?? 50 } : undefined}
                       >
                         {col.cell(row)}
