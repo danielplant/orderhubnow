@@ -366,14 +366,20 @@ model ShopifySyncLog {
 /// Tracks Shopify bulk sync operations (run-level, not per-SKU).
 /// Note: This table must be created in production by DBA - see SQL script in plan.
 model ShopifySyncRun {
-  ID           BigInt    @id(map: "PK_ShopifySyncRun") @default(autoincrement())
-  SyncType     String    @db.NVarChar(20)
-  Status       String    @db.NVarChar(20)
-  OperationId  String?   @db.NVarChar(255)
-  StartedAt    DateTime  @db.DateTime
-  CompletedAt  DateTime? @db.DateTime
-  ItemCount    Int?
-  ErrorMessage String?   @db.NVarChar(Max)
+  ID                BigInt    @id(map: "PK_ShopifySyncRun") @default(autoincrement())
+  SyncType          String    @db.NVarChar(20)
+  Status            String    @db.NVarChar(20)
+  OperationId       String?   @db.NVarChar(255)
+  StartedAt         DateTime  @db.DateTime
+  CompletedAt       DateTime? @db.DateTime
+  ItemCount         Int?
+  ErrorMessage      String?   @db.NVarChar(Max)
+  // Progress tracking fields for real-time dashboard
+  CurrentStep       String?   @db.NVarChar(50)   // e.g., "Step 2/5"
+  CurrentStepDetail String?   @db.NVarChar(500)  // e.g., "Polling: RUNNING, 12,450 objects"
+  ProgressPercent   Int?                          // 0-100
+  RecordsProcessed  Int?                          // Current count processed
+  TotalRecords      Int?                          // Expected total (from bulk op)
 
   @@index([Status, StartedAt], map: "IX_ShopifySyncRun_Status_StartedAt")
 }

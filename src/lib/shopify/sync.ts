@@ -347,12 +347,38 @@ export async function completeSyncRun(
       CompletedAt: new Date(),
       ItemCount: itemCount ?? null,
       ErrorMessage: errorMessage ?? null,
+      ProgressPercent: status === 'completed' ? 100 : null,
     },
   })
 }
 
 /**
- * Get the latest sync run status.
+ * Update sync run progress for real-time dashboard.
+ */
+export async function updateSyncProgress(
+  operationId: string,
+  progress: {
+    step: string           // e.g., "Step 2/5"
+    detail: string         // e.g., "Polling: RUNNING, 12,450 objects"
+    percent: number        // 0-100
+    recordsProcessed?: number
+    totalRecords?: number
+  }
+): Promise<void> {
+  await prisma.shopifySyncRun.updateMany({
+    where: { OperationId: operationId },
+    data: {
+      CurrentStep: progress.step,
+      CurrentStepDetail: progress.detail,
+      ProgressPercent: progress.percent,
+      RecordsProcessed: progress.recordsProcessed ?? null,
+      TotalRecords: progress.totalRecords ?? null,
+    },
+  })
+}
+
+/**
+ * Get the latest sync run status with progress info.
  */
 export async function getLatestSyncRun(): Promise<{
   id: bigint
@@ -362,6 +388,12 @@ export async function getLatestSyncRun(): Promise<{
   completedAt: Date | null
   itemCount: number | null
   errorMessage: string | null
+  // Progress fields
+  currentStep: string | null
+  currentStepDetail: string | null
+  progressPercent: number | null
+  recordsProcessed: number | null
+  totalRecords: number | null
 } | null> {
   const run = await prisma.shopifySyncRun.findFirst({
     orderBy: { StartedAt: 'desc' },
@@ -377,6 +409,12 @@ export async function getLatestSyncRun(): Promise<{
     completedAt: run.CompletedAt,
     itemCount: run.ItemCount,
     errorMessage: run.ErrorMessage,
+    // Progress fields
+    currentStep: run.CurrentStep,
+    currentStepDetail: run.CurrentStepDetail,
+    progressPercent: run.ProgressPercent,
+    recordsProcessed: run.RecordsProcessed,
+    totalRecords: run.TotalRecords,
   }
 }
 
@@ -1273,6 +1311,7 @@ export async function runFullSync(options?: {
 
     // Step 1: Start bulk operation
     onProgress('Step 1/5', 'Starting bulk operation')
+    // Note: Can't update progress yet - no operationId until after start
     const result = await shopifyFetch(BULK_OPERATION_QUERY)
 
     if (result.error) {
@@ -1300,9 +1339,19 @@ export async function runFullSync(options?: {
     operationId = bulkOp.id
     await createSyncRun('on-demand', operationId)
     onProgress('Step 1/5', `Bulk operation started: ${operationId}`)
+    await updateSyncProgress(operationId, {
+      step: 'Step 1/5',
+      detail: 'Bulk operation started',
+      percent: 5,
+    })
 
     // Step 2: Poll until complete
     onProgress('Step 2/5', 'Polling for completion (this may take a few minutes)')
+    await updateSyncProgress(operationId, {
+      step: 'Step 2/5',
+      detail: 'Polling Shopify bulk operation...',
+      percent: 10,
+    })
 
     const statusQuery = `
       query($id: ID!) {
@@ -1338,7 +1387,17 @@ export async function runFullSync(options?: {
         return { success: false, message: 'Bulk operation not found', operationId }
       }
 
-      onProgress('Step 2/5', `Status: ${op.status}, Objects: ${op.objectCount || 0}`)
+      const currentObjectCount = Number(op.objectCount) || 0
+      onProgress('Step 2/5', `Status: ${op.status}, Objects: ${currentObjectCount}`)
+      // Update progress in DB - oscillate between 10-35% during polling
+      const elapsed = Date.now() - startTime
+      const pollPercent = Math.min(35, 10 + Math.floor(elapsed / maxWaitMs * 25))
+      await updateSyncProgress(operationId, {
+        step: 'Step 2/5',
+        detail: `Polling: ${op.status}, ${currentObjectCount} objects`,
+        percent: pollPercent,
+        totalRecords: currentObjectCount,
+      })
 
       if (op.status === 'COMPLETED') {
         if (!op.url) {
@@ -1346,7 +1405,7 @@ export async function runFullSync(options?: {
           return { success: false, message: 'Completed but no download URL', operationId }
         }
         pollUrl = op.url
-        objectCount = op.objectCount || 0
+        objectCount = Number(op.objectCount) || 0
         break
       }
 
@@ -1370,9 +1429,21 @@ export async function runFullSync(options?: {
     }
 
     onProgress('Step 2/5', `Complete - ${objectCount} objects`)
+    await updateSyncProgress(operationId, {
+      step: 'Step 2/5',
+      detail: `Complete - ${objectCount} objects ready`,
+      percent: 40,
+      totalRecords: objectCount,
+    })
 
     // Step 3: Download and process JSONL
     onProgress('Step 3/5', 'Downloading and processing variants')
+    await updateSyncProgress(operationId, {
+      step: 'Step 3/5',
+      detail: 'Downloading JSONL data...',
+      percent: 42,
+      totalRecords: objectCount,
+    })
     const jsonlResponse = await fetch(pollUrl)
     if (!jsonlResponse.ok) {
       await completeSyncRun(operationId, 'failed', 0, `Failed to download JSONL: ${jsonlResponse.status}`)
@@ -1383,21 +1454,57 @@ export async function runFullSync(options?: {
 
     const processResult = await processJsonlStream(
       jsonlResponse,
-      (n) => {
-        if (n % 500 === 0) onProgress('Step 3/5', `Processed ${n} variants`)
+      async (n) => {
+        if (n % 500 === 0) {
+          onProgress('Step 3/5', `Processed ${n} variants`)
+          // Update progress: 42-70% range during JSONL processing
+          const processPercent = Math.min(70, 42 + Math.floor((n / Math.max(objectCount, 1)) * 28))
+          await updateSyncProgress(operationId!, {
+            step: 'Step 3/5',
+            detail: `Processing variants: ${n.toLocaleString()} / ${objectCount.toLocaleString()}`,
+            percent: processPercent,
+            recordsProcessed: n,
+            totalRecords: objectCount,
+          })
+        }
       },
       { ingestionActiveOnly: runtimeFlags.ingestionActiveOnly }
     )
     onProgress('Step 3/5', `Complete - ${processResult.processed} variants processed`)
+    await updateSyncProgress(operationId, {
+      step: 'Step 3/5',
+      detail: `Complete - ${processResult.processed.toLocaleString()} variants ingested`,
+      percent: 70,
+      recordsProcessed: processResult.processed,
+      totalRecords: objectCount,
+    })
 
     // Step 4: Transform to Sku table
     onProgress('Step 4/5', 'Transforming to Sku table')
+    await updateSyncProgress(operationId, {
+      step: 'Step 4/5',
+      detail: 'Transforming raw data to SKU table...',
+      percent: 72,
+      recordsProcessed: processResult.processed,
+    })
     const transformResult = await transformToSkuTable()
     onProgress('Step 4/5', `Complete - ${transformResult.processed} SKUs created`)
+    await updateSyncProgress(operationId, {
+      step: 'Step 4/5',
+      detail: `Complete - ${transformResult.processed.toLocaleString()} SKUs created`,
+      percent: 85,
+      recordsProcessed: transformResult.processed,
+    })
 
     // Step 5: Generate thumbnails with smart caching
     // Only regenerates when: URL changed, settings changed, or file missing
     onProgress('Step 5/5', 'Processing thumbnails (smart cache)')
+    await updateSyncProgress(operationId, {
+      step: 'Step 5/5',
+      detail: 'Loading SKUs for thumbnail processing...',
+      percent: 86,
+      recordsProcessed: transformResult.processed,
+    })
     const skusWithImages = await prisma.sku.findMany({
       where: { ShopifyImageURL: { not: null } },
       select: { SkuID: true, ShopifyImageURL: true, ThumbnailPath: true },
@@ -1412,12 +1519,21 @@ export async function runFullSync(options?: {
     if (thumbnailItems.length > 0) {
       const { results, stats } = await processThumbnailsBatch(thumbnailItems, {
         concurrency: 10,
-        onProgress: (processed, total, currentStats) => {
+        onProgress: async (processed, total, currentStats) => {
           const pct = Math.round((processed / total) * 100)
           onProgress(
             'Step 5/5',
             `Thumbnails: ${pct}% (${currentStats.generated} new, ${currentStats.skipped} cached)`
           )
+          // Update progress: 86-99% range during thumbnail processing
+          const thumbPercent = Math.min(99, 86 + Math.floor((processed / total) * 13))
+          await updateSyncProgress(operationId!, {
+            step: 'Step 5/5',
+            detail: `Thumbnails: ${pct}% (${currentStats.generated} new, ${currentStats.skipped} cached)`,
+            percent: thumbPercent,
+            recordsProcessed: processed,
+            totalRecords: total,
+          })
         },
       })
 
@@ -1440,8 +1556,20 @@ export async function runFullSync(options?: {
         'Step 5/5',
         `Complete - ${stats.generated} generated, ${stats.skipped} cached, ${stats.failed} failed`
       )
+      await updateSyncProgress(operationId, {
+        step: 'Step 5/5',
+        detail: `Complete - ${stats.generated} new, ${stats.skipped} cached, ${stats.failed} failed`,
+        percent: 99,
+        recordsProcessed: thumbnailItems.length,
+        totalRecords: thumbnailItems.length,
+      })
     } else {
       onProgress('Step 5/5', 'Complete - No images to process')
+      await updateSyncProgress(operationId, {
+        step: 'Step 5/5',
+        detail: 'Complete - No images to process',
+        percent: 99,
+      })
     }
 
     // Mark sync as complete
