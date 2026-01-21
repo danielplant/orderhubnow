@@ -6,11 +6,21 @@
  * - Baby/Toddler months: 0/6M, 6/12M, 12/18M, 18/24M
  * - Toddler/Kids: 2T, 2/3, 3T, 4, 4/5, 5, 5/6, 6, 6/6X, 6/7, 7, 7/8, 8, 10, 10/12, 12, 14, 14/16, 16
  * - Women/Girls letters: XXS, XS, S, M, L, XL, XXL
+ *
+ * Configurable via Admin Settings → Size Order.
+ * When no config exists, falls back to DEFAULT_SIZE_ORDER.
  */
 
-// Size order from smallest to largest
-// Covers: Baby months → Toddler → Kids → Teen → Ladies/Girls letters
-const SIZE_ORDER: string[] = [
+// ============================================================================
+// Default Size Order (fallback when no config exists)
+// ============================================================================
+
+/**
+ * Default size order from smallest to largest.
+ * Covers: Baby months → Toddler → Kids → Teen → Ladies/Girls letters
+ * Exported for use by admin UI to show defaults.
+ */
+export const DEFAULT_SIZE_ORDER: string[] = [
   // Baby months (smallest first)
   '0/6M', '6/12M', '12/18M', '18/24M',
   // Toddler
@@ -23,12 +33,47 @@ const SIZE_ORDER: string[] = [
   // Letter sizes (small to large)
   'XXXS', 'XXS', 'XS', 'S', 'M', 'M/L', 'L', 'XL', 'XXL',
   // Letter sizes with parenthetical numeric (small to large)
-  'XS(6/6X)', 'S(7/8)', 'M(10/12)', 'L(14/16)',
+  'XS/S(4-6)', 'XS(6/6X)', 'S(7/8)', 'M/L(7-16)', 'M(10/12)', 'L(14/16)',
   // Junior sizes
   'JR-XS', 'JR-S', 'JR-M', 'JR-L', 'JR-XL',
   // One-size
   'O/S'
 ];
+
+// ============================================================================
+// Runtime Cache for Configurable Size Order
+// ============================================================================
+
+/**
+ * Cached size order from database config.
+ * Set to null when cache should be invalidated.
+ * Falls back to DEFAULT_SIZE_ORDER when null.
+ */
+let cachedSizeOrder: string[] | null = null;
+
+/**
+ * Invalidate the size order cache.
+ * Call this after admin saves new size order config.
+ */
+export function invalidateSizeOrderCache(): void {
+  cachedSizeOrder = null;
+}
+
+/**
+ * Set the size order cache directly.
+ * Used by loadSizeOrderConfig() after fetching from DB.
+ */
+export function setSizeOrderCache(sizes: string[]): void {
+  cachedSizeOrder = sizes;
+}
+
+/**
+ * Get the current size order (cached or default).
+ * Synchronous for use in sorting functions.
+ */
+function getSizeOrder(): string[] {
+  return cachedSizeOrder ?? DEFAULT_SIZE_ORDER;
+}
 
 /**
  * Normalize a size string for consistent matching.
@@ -50,11 +95,11 @@ function normalizeSize(raw: string): string {
 
 /**
  * Check if a string is a known size.
- * Normalizes before checking.
+ * Normalizes before checking against current size order (cached or default).
  */
 function isKnownSize(s: string): boolean {
   const normalized = normalizeSize(s);
-  return SIZE_ORDER.some(size => size.toUpperCase() === normalized);
+  return getSizeOrder().some(size => size.toUpperCase() === normalized);
 }
 
 /**
@@ -123,6 +168,7 @@ export function extractSize(variantTitle: string): string {
 /**
  * Get the sort index for a size string.
  * Automatically extracts and normalizes the size from variant titles.
+ * Uses current size order (cached or default).
  * Returns a high number for unknown sizes so they sort to the end.
  */
 function getSizeIndex(size: string): number {
@@ -130,7 +176,7 @@ function getSizeIndex(size: string): number {
   const cleanSize = extractSize(size);
   // Already normalized by extractSize, but normalize again for safety
   const normalized = normalizeSize(cleanSize);
-  const index = SIZE_ORDER.findIndex(s => s.toUpperCase() === normalized);
+  const index = getSizeOrder().findIndex(s => s.toUpperCase() === normalized);
   return index >= 0 ? index : 9999;
 }
 

@@ -2,7 +2,15 @@
 
 import { prisma } from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
-import type { ActionResult, InventorySettingsEditableFields, CompanySettingsEditableFields, EmailSettingsEditableFields } from '@/lib/types/settings'
+import type {
+  ActionResult,
+  InventorySettingsEditableFields,
+  CompanySettingsEditableFields,
+  EmailSettingsEditableFields,
+  SyncSettingsEditableFields,
+} from '@/lib/types/settings'
+import { SYNC_SETTINGS_DEFAULTS } from '@/lib/types/settings'
+import { invalidateSizeOrderCache, setSizeOrderCache } from '@/lib/utils/size-sort'
 
 /**
  * Parse a value that may be number or string to a valid number, or null.
@@ -277,5 +285,195 @@ export async function updateSmtpSettings(
     return { success: true, message: 'SMTP settings have been updated successfully.' }
   } catch {
     return { success: false, error: 'Sorry, there was an error, please try again.' }
+  }
+}
+
+// ============================================================================
+// Sync Settings (Shopify sync, thumbnails, backups)
+// ============================================================================
+
+/**
+ * Update sync settings with versioning and history tracking.
+ * Creates history snapshot before each update for audit trail.
+ */
+export async function updateSyncSettings(
+  input: Partial<SyncSettingsEditableFields>,
+  userId?: string,
+  changeNote?: string
+): Promise<ActionResult> {
+  try {
+    const existing = await prisma.syncSettings.findFirst()
+
+    // Validate numeric fields
+    if (input.thumbnailSizeSm !== undefined && (input.thumbnailSizeSm < 10 || input.thumbnailSizeSm > 1000)) {
+      return { success: false, error: 'Thumbnail small size must be between 10 and 1000' }
+    }
+    if (input.thumbnailSizeMd !== undefined && (input.thumbnailSizeMd < 10 || input.thumbnailSizeMd > 1000)) {
+      return { success: false, error: 'Thumbnail medium size must be between 10 and 1000' }
+    }
+    if (input.thumbnailSizeLg !== undefined && (input.thumbnailSizeLg < 10 || input.thumbnailSizeLg > 2000)) {
+      return { success: false, error: 'Thumbnail large size must be between 10 and 2000' }
+    }
+    if (input.thumbnailQuality !== undefined && (input.thumbnailQuality < 1 || input.thumbnailQuality > 100)) {
+      return { success: false, error: 'Thumbnail quality must be between 1 and 100' }
+    }
+    if (input.backupRetentionDays !== undefined && (input.backupRetentionDays < 1 || input.backupRetentionDays > 365)) {
+      return { success: false, error: 'Backup retention days must be between 1 and 365' }
+    }
+    if (input.syncMaxWaitMs !== undefined && (input.syncMaxWaitMs < 60000 || input.syncMaxWaitMs > 3600000)) {
+      return { success: false, error: 'Sync max wait must be between 1 minute and 1 hour' }
+    }
+    if (input.syncPollIntervalMs !== undefined && (input.syncPollIntervalMs < 1000 || input.syncPollIntervalMs > 60000)) {
+      return { success: false, error: 'Sync poll interval must be between 1 second and 1 minute' }
+    }
+
+    const newVersion = (existing?.version ?? 0) + 1
+
+    if (existing) {
+      // Create history snapshot before update
+      await prisma.syncSettingsHistory.create({
+        data: {
+          settingsId: existing.id,
+          version: existing.version,
+          snapshot: JSON.stringify(existing),
+          changedBy: userId || 'system',
+          changeNote: changeNote || null,
+        },
+      })
+
+      // Update with incremented version
+      await prisma.syncSettings.update({
+        where: { id: existing.id },
+        data: {
+          ...input,
+          version: newVersion,
+          // Increment thumbnail settings version if any thumbnail setting changed
+          thumbnailSettingsVersion:
+            input.thumbnailSizeSm !== undefined ||
+            input.thumbnailSizeMd !== undefined ||
+            input.thumbnailSizeLg !== undefined ||
+            input.thumbnailQuality !== undefined ||
+            input.thumbnailFit !== undefined ||
+            input.thumbnailBackground !== undefined
+              ? existing.thumbnailSettingsVersion + 1
+              : existing.thumbnailSettingsVersion,
+        },
+      })
+    } else {
+      // Create new record with defaults + input
+      const newSettings = await prisma.syncSettings.create({
+        data: {
+          ...SYNC_SETTINGS_DEFAULTS,
+          ...input,
+          version: 1,
+        },
+      })
+
+      // Create initial history entry
+      await prisma.syncSettingsHistory.create({
+        data: {
+          settingsId: newSettings.id,
+          version: 0,
+          snapshot: JSON.stringify({ ...SYNC_SETTINGS_DEFAULTS, version: 0 }),
+          changedBy: userId || 'system',
+          changeNote: 'Initial settings created',
+        },
+      })
+    }
+
+    revalidatePath('/admin/shopify/settings')
+    return { success: true, message: 'Sync settings have been updated successfully.' }
+  } catch (err) {
+    console.error('[updateSyncSettings] Error:', err)
+    return { success: false, error: 'Sorry, there was an error updating sync settings.' }
+  }
+}
+
+/**
+ * Restore sync settings from a historical version.
+ */
+export async function restoreSyncSettings(
+  historyId: number,
+  userId?: string
+): Promise<ActionResult> {
+  try {
+    const historyRecord = await prisma.syncSettingsHistory.findUnique({
+      where: { id: historyId },
+    })
+
+    if (!historyRecord) {
+      return { success: false, error: 'History record not found' }
+    }
+
+    const snapshot = JSON.parse(historyRecord.snapshot) as Record<string, unknown>
+
+    // Remove non-editable fields from snapshot
+    const { id, version, updatedAt, ...editableFields } = snapshot
+
+    return updateSyncSettings(
+      editableFields as Partial<SyncSettingsEditableFields>,
+      userId,
+      `Restored from version ${historyRecord.version}`
+    )
+  } catch (err) {
+    console.error('[restoreSyncSettings] Error:', err)
+    return { success: false, error: 'Sorry, there was an error restoring settings.' }
+  }
+}
+
+// ============================================================================
+// Size Order Configuration
+// ============================================================================
+
+/**
+ * Update size order configuration.
+ * Validates for duplicates and empty list.
+ * Invalidates runtime cache after save.
+ */
+export async function updateSizeOrderConfig(
+  sizes: string[],
+  updatedBy?: string
+): Promise<ActionResult> {
+  try {
+    // Clean and normalize: trim, uppercase, filter empty
+    const cleaned = sizes
+      .map(s => s.trim().toUpperCase())
+      .filter(Boolean)
+
+    if (cleaned.length === 0) {
+      return { success: false, error: 'At least one size is required' }
+    }
+
+    // Check for duplicates
+    const unique = [...new Set(cleaned)]
+    if (unique.length !== cleaned.length) {
+      return { success: false, error: 'Duplicate sizes detected' }
+    }
+
+    const existing = await prisma.sizeOrderConfig.findFirst()
+    const data = {
+      Sizes: JSON.stringify(unique),
+      UpdatedBy: updatedBy || 'admin',
+    }
+
+    if (existing) {
+      await prisma.sizeOrderConfig.update({
+        where: { ID: existing.ID },
+        data,
+      })
+    } else {
+      await prisma.sizeOrderConfig.create({ data })
+    }
+
+    // Invalidate runtime cache so next sort uses new order
+    invalidateSizeOrderCache()
+    // Also pre-populate the cache with new values
+    setSizeOrderCache(unique)
+
+    revalidatePath('/admin/settings')
+    return { success: true, message: 'Size order updated successfully.' }
+  } catch (err) {
+    console.error('[updateSizeOrderConfig] Error:', err)
+    return { success: false, error: 'Sorry, there was an error updating size order.' }
   }
 }

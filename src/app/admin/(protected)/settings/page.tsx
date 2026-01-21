@@ -1,7 +1,13 @@
 import { auth } from '@/lib/auth/providers'
 import { redirect } from 'next/navigation'
-import { getInventorySettings, getCompanySettings, getEmailSettings } from '@/lib/data/queries/settings'
+import {
+  getInventorySettings,
+  getCompanySettings,
+  getEmailSettings,
+  getSizeOrderConfig,
+} from '@/lib/data/queries/settings'
 import { SettingsForm } from '@/components/admin/settings-form'
+import { SizeOrderConfig } from '@/components/admin/size-order-config'
 
 export const dynamic = 'force-dynamic'
 
@@ -11,10 +17,11 @@ export default async function SettingsPage() {
     redirect('/admin/login')
   }
 
-  const [settings, companySettings, emailSettings] = await Promise.all([
+  const [settings, companySettings, emailSettings, sizeOrderConfig] = await Promise.all([
     getInventorySettings(),
     getCompanySettings(),
     getEmailSettings(),
+    getSizeOrderConfig(),
   ])
 
   return (
@@ -27,6 +34,8 @@ export default async function SettingsPage() {
       </div>
 
       <SettingsForm initial={settings} companySettings={companySettings} emailSettings={emailSettings} />
+
+      <SizeOrderConfig initialSizes={sizeOrderConfig.Sizes} />
     </div>
   )
 }

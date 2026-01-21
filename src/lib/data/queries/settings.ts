@@ -1,5 +1,14 @@
 import { prisma } from '@/lib/prisma'
-import type { InventorySettingsRecord, CompanySettingsRecord, EmailSettingsRecord } from '@/lib/types/settings'
+import type {
+  InventorySettingsRecord,
+  CompanySettingsRecord,
+  EmailSettingsRecord,
+  SyncSettingsRecord,
+  SyncSettingsHistoryRecord,
+  SizeOrderConfigRecord,
+} from '@/lib/types/settings'
+import { SYNC_SETTINGS_DEFAULTS } from '@/lib/types/settings'
+import { DEFAULT_SIZE_ORDER } from '@/lib/utils/size-sort'
 
 /**
  * Fetch the single InventorySettings row.
@@ -157,5 +166,81 @@ export async function getEmailSettings(): Promise<EmailSettingsRecord> {
     SmtpUser: row.SmtpUser || process.env.SMTP_USER || null,
     SmtpPassword: row.SmtpPassword || process.env.SMTP_PASSWORD || null,
     SmtpSecure: row.SmtpSecure ?? (process.env.SMTP_SECURE === 'true'),
+  }
+}
+
+// ============================================================================
+// Sync Settings (Shopify sync, thumbnails, backups)
+// ============================================================================
+
+/**
+ * Get sync settings with fallback to defaults.
+ * Always returns a value - creates defaults if no record exists.
+ */
+export async function getSyncSettings(): Promise<SyncSettingsRecord> {
+  const existing = await prisma.syncSettings.findFirst()
+
+  if (existing) {
+    return existing
+  }
+
+  // Return default values (not persisted until first update)
+  return {
+    id: 0,
+    version: 0,
+    ...SYNC_SETTINGS_DEFAULTS,
+    updatedAt: new Date(),
+  }
+}
+
+/**
+ * Get sync settings history for audit trail.
+ * Returns most recent changes first.
+ */
+export async function getSyncSettingsHistory(
+  limit: number = 20
+): Promise<SyncSettingsHistoryRecord[]> {
+  return prisma.syncSettingsHistory.findMany({
+    orderBy: { changedAt: 'desc' },
+    take: limit,
+  })
+}
+
+/**
+ * Get a specific historical version of settings.
+ */
+export async function getSyncSettingsVersion(
+  version: number
+): Promise<SyncSettingsHistoryRecord | null> {
+  return prisma.syncSettingsHistory.findFirst({
+    where: { version },
+  })
+}
+
+// ============================================================================
+// Size Order Configuration
+// ============================================================================
+
+/**
+ * Fetch size order configuration.
+ * Returns default size order if no config exists in database.
+ */
+export async function getSizeOrderConfig(): Promise<SizeOrderConfigRecord> {
+  const row = await prisma.sizeOrderConfig.findFirst()
+
+  if (!row) {
+    return {
+      ID: 0,
+      Sizes: DEFAULT_SIZE_ORDER,
+      UpdatedAt: new Date(),
+      UpdatedBy: null,
+    }
+  }
+
+  return {
+    ID: row.ID,
+    Sizes: JSON.parse(row.Sizes) as string[],
+    UpdatedAt: row.UpdatedAt,
+    UpdatedBy: row.UpdatedBy,
   }
 }

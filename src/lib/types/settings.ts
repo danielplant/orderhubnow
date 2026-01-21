@@ -81,3 +81,97 @@ export type EmailSettingsEditableFields = Omit<EmailSettingsRecord, 'ID' | 'Upda
 export type ActionResult =
   | { success: true; message?: string }
   | { success: false; error: string }
+
+// ============================================================================
+// Size Order Configuration
+// ============================================================================
+
+/**
+ * Size order configuration record.
+ * Defines how sizes sort across product cards and reports.
+ * Single-row table pattern.
+ */
+export type SizeOrderConfigRecord = {
+  ID: number
+  Sizes: string[]
+  UpdatedAt: Date
+  UpdatedBy: string | null
+}
+
+// ============================================================================
+// Sync Settings (Shopify sync, thumbnails, backups)
+// ============================================================================
+
+/**
+ * Full record from SyncSettings table.
+ * Single-row table with versioning for audit trail.
+ */
+export type SyncSettingsRecord = {
+  id: number
+  version: number
+
+  // Thumbnail Configuration
+  thumbnailSettingsVersion: number
+  thumbnailSizeSm: number
+  thumbnailSizeMd: number
+  thumbnailSizeLg: number
+  thumbnailQuality: number
+  thumbnailFit: string
+  thumbnailBackground: string
+
+  // Thumbnail Processing
+  thumbnailFetchTimeoutMs: number
+  thumbnailBatchConcurrency: number
+  thumbnailEnabled: boolean
+
+  // Backup Settings
+  backupEnabled: boolean
+  backupRetentionDays: number
+  cleanupStaleBackups: boolean
+
+  // Sync Settings
+  syncMaxWaitMs: number
+  syncPollIntervalMs: number
+
+  updatedAt: Date
+}
+
+/**
+ * Fields editable via the Settings page.
+ */
+export type SyncSettingsEditableFields = Omit<SyncSettingsRecord, 'id' | 'version' | 'updatedAt'>
+
+/**
+ * History record for sync settings changes.
+ */
+export type SyncSettingsHistoryRecord = {
+  id: number
+  settingsId: number
+  version: number
+  snapshot: string // JSON string of SyncSettingsRecord
+  changedBy: string | null
+  changedAt: Date
+  changeNote: string | null
+}
+
+/**
+ * Default values for sync settings.
+ * Used when no settings exist in DB.
+ */
+export const SYNC_SETTINGS_DEFAULTS: SyncSettingsEditableFields = {
+  thumbnailSettingsVersion: 3,
+  thumbnailSizeSm: 120,
+  thumbnailSizeMd: 240,
+  thumbnailSizeLg: 480,
+  thumbnailQuality: 80,
+  thumbnailFit: 'contain',
+  thumbnailBackground: '#FFFFFF',
+  thumbnailFetchTimeoutMs: 15000,
+  thumbnailBatchConcurrency: 10,
+  thumbnailEnabled: true,
+  backupEnabled: true,
+  backupRetentionDays: 7,
+  cleanupStaleBackups: true,
+  syncMaxWaitMs: 600000,
+  syncPollIntervalMs: 3000,
+}
