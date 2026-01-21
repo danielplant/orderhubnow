@@ -34,7 +34,7 @@ export default async function MyOrderPage({ searchParams }: Props) {
   // Extract rep context for rep-created orders
   const repContext = params.repId ? { repId: params.repId } : null
 
-  // Fetch reps for dropdown and SKU data for cart items
+  // Fetch reps for dropdown and SKU data for cart items (includes category/ship window for order splitting)
   const [reps, skuList] = await Promise.all([
     getRepsForFilter(),
     prisma.sku.findMany({
@@ -44,11 +44,19 @@ export default async function MyOrderPage({ searchParams }: Props) {
         PriceCAD: true,
         PriceUSD: true,
         Description: true,
+        CategoryID: true,
+        SkuCategories: {
+          select: {
+            Name: true,
+            OnRouteAvailableDate: true,
+            OnRouteAvailableDateEnd: true,
+          },
+        },
       },
     }),
   ])
 
-  // Build SKU lookup map for the client
+  // Build SKU lookup map for the client (includes ship window for order splitting by delivery date)
   const skuMap = new Map(
     skuList.map((sku) => [
       sku.SkuID,
@@ -57,6 +65,10 @@ export default async function MyOrderPage({ searchParams }: Props) {
         priceCAD: parseFloat(sku.PriceCAD || '0'),
         priceUSD: parseFloat(sku.PriceUSD || '0'),
         description: sku.Description || '',
+        categoryId: sku.CategoryID ?? null,
+        categoryName: sku.SkuCategories?.Name ?? null,
+        shipWindowStart: sku.SkuCategories?.OnRouteAvailableDate?.toISOString() ?? null,
+        shipWindowEnd: sku.SkuCategories?.OnRouteAvailableDateEnd?.toISOString() ?? null,
       },
     ])
   )

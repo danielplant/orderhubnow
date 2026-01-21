@@ -325,6 +325,12 @@ export function OrderProvider({ children, initialDraftId }: OrderProviderProps) 
 
   // Sync current state to server
   const syncToServer = useCallback(async (id: string) => {
+    // Guard: skip if draft was cleared (draftId is null)
+    // This prevents "Failed to sync draft" errors after order submission
+    if (!draftId) {
+      return;
+    }
+    
     setSaveStatus('saving');
     
     try {
@@ -341,6 +347,12 @@ export function OrderProvider({ children, initialDraftId }: OrderProviderProps) 
         }),
       });
       
+      // Silently ignore 404 (draft was deleted) to prevent error noise after order submission
+      if (res.status === 404) {
+        setSaveStatus('idle');
+        return;
+      }
+      
       if (!res.ok) throw new Error('Failed to sync draft');
       
       setSaveStatus('saved');
@@ -349,12 +361,17 @@ export function OrderProvider({ children, initialDraftId }: OrderProviderProps) 
       console.error('Failed to sync to server:', err);
       setSaveStatus('error');
     }
-  }, [orders, priceMap, preOrderMetadata, orderLineMetadata, formData]);
+  }, [orders, priceMap, preOrderMetadata, orderLineMetadata, formData, draftId]);
 
-  // Debounced auto-save to server (skip in edit mode)
+  // Debounced auto-save to server (skip in edit mode or after draft cleared)
   const scheduleServerSync = useCallback(() => {
     // Skip server sync in edit mode - edit state is only stored locally
     if (editOrderId) return;
+    
+    // Skip if draft was already cleared (order was submitted)
+    if (!draftId && !pendingSaveRef.current) {
+      return;
+    }
 
     // Clear any pending timeout
     if (saveTimeoutRef.current) {
@@ -374,7 +391,7 @@ export function OrderProvider({ children, initialDraftId }: OrderProviderProps) 
         // Error already logged
       }
     }, DEBOUNCE_MS);
-  }, [ensureDraft, syncToServer, editOrderId]);
+  }, [ensureDraft, syncToServer, editOrderId, draftId]);
 
   // Load draft from server
   const loadDraft = useCallback(async (id: string): Promise<boolean> => {
@@ -420,6 +437,14 @@ export function OrderProvider({ children, initialDraftId }: OrderProviderProps) 
 
   // Clear draft (server + localStorage)
   const clearDraft = useCallback(async () => {
+    // IMPORTANT: Cancel any pending auto-save to prevent "Failed to sync draft" errors
+    // This must happen BEFORE deleting the draft from server
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = null;
+    }
+    pendingSaveRef.current = false;
+    
     // Clear server draft if exists
     if (draftId) {
       try {

@@ -23,6 +23,10 @@ interface SkuData {
   priceCAD: number
   priceUSD: number
   description: string
+  categoryId: number | null
+  categoryName: string | null
+  shipWindowStart: string | null
+  shipWindowEnd: string | null
 }
 
 interface MyOrderClientProps {
@@ -137,6 +141,7 @@ export function MyOrderClient({
   const effectiveCurrency = currency
 
   // Unified cart items from context - works for both new and edit mode
+  // Includes ship window metadata for order splitting by delivery date
   const cartItems = useMemo(() => {
     const items: Array<{
       productId: string
@@ -145,6 +150,10 @@ export function MyOrderClient({
       quantity: number
       price: number
       description: string
+      categoryId: number | null
+      categoryName: string | null
+      shipWindowStart: string | null
+      shipWindowEnd: string | null
     }> = []
 
     Object.entries(orders).forEach(([productId, skuQuantities]) => {
@@ -158,6 +167,10 @@ export function MyOrderClient({
             quantity,
             price: effectiveCurrency === 'CAD' ? skuData.priceCAD : skuData.priceUSD,
             description: skuData.description,
+            categoryId: skuData.categoryId,
+            categoryName: skuData.categoryName,
+            shipWindowStart: skuData.shipWindowStart,
+            shipWindowEnd: skuData.shipWindowEnd,
           })
         }
       })
@@ -165,6 +178,23 @@ export function MyOrderClient({
 
     return items
   }, [orders, skuMap, effectiveCurrency])
+
+  // Detect if order will be split by ship window (for UI warning)
+  const shipWindowGroups = useMemo(() => {
+    const groups = new Map<string, typeof cartItems>()
+    for (const item of cartItems) {
+      const key = item.categoryId
+        ? `cat-${item.categoryId}`
+        : item.shipWindowStart
+          ? `window-${item.shipWindowStart}-${item.shipWindowEnd}`
+          : 'default'
+      if (!groups.has(key)) groups.set(key, [])
+      groups.get(key)!.push(item)
+    }
+    return groups
+  }, [cartItems])
+
+  const willSplitOrder = shipWindowGroups.size > 1
 
   // Calculate totals
   const orderTotal = cartItems.reduce(
@@ -202,6 +232,9 @@ export function MyOrderClient({
   // Don't redirect while processing stale edit state
   useEffect(() => {
     if (!isEditMode && totalItems === 0 && !shouldShowEditError) {
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/a5fde547-ac60-4379-a83d-f48710b84ace',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'buyer-my-order-client.tsx:redirect',message:'Redirecting due to empty cart',data:{totalItems,isEditMode,shouldShowEditError},timestamp:Date.now(),sessionId:'debug-session',runId:'pre-fix',hypothesisId:'H5'})}).catch(()=>{});
+      // #endregion
       router.replace(`/buyer/select-journey${navigationQuery}`)
     }
   }, [totalItems, router, isEditMode, navigationQuery, shouldShowEditError])
@@ -326,6 +359,13 @@ export function MyOrderClient({
                   <span>{formatCurrency(orderTotal, effectiveCurrency)}</span>
                 </div>
               </div>
+
+              {/* Split order warning - only shown when items have different ship windows */}
+              {willSplitOrder && !isEditMode && (
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-md text-sm text-amber-800">
+                  <strong>Note:</strong> Your order will be split into {shipWindowGroups.size} separate orders based on delivery window.
+                </div>
+              )}
 
               {/* Continue Shopping - available in both modes */}
               <Button

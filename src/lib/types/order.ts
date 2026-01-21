@@ -73,8 +73,11 @@ export interface AdminOrderRow {
   varianceFormatted: string | null;
   trackingCount: number;
   trackingNumbers: string[];
+  // Order type - derived from SkuCategories.IsPreOrder at creation
+  isPreOrder: boolean;              // true = Pre-Order (P prefix), false = ATS (A prefix)
   // Enhanced fields for Orders Dashboard
-  collection: string | null;        // Derived collection from order items
+  collection: string | null;        // Derived OHN collection from order items (Sku.CollectionID)
+  shopifyCollectionRaw: string | null; // Raw Shopify collection value (from ShopifyValueMapping.rawValue)
   season: string | null;            // Derived from ship window (SS26, FW26)
   notes: string | null;             // Shipping notes / variance explanation (BrandNotes field)
   syncError: string | null;         // Error message if Shopify sync failed
@@ -111,11 +114,21 @@ export interface OrdersListInput {
 
 /**
  * Result shape from createOrder action.
+ * Supports single order (backwards compat) or multiple orders (when split by ship window).
  */
 export interface CreateOrderResult {
   success: boolean
+  // Single order (backwards compat - primary order when split)
   orderId?: string
   orderNumber?: string
+  // Multiple orders (when split by ship window)
+  orders?: Array<{
+    orderId: string
+    orderNumber: string
+    categoryName: string | null
+    shipWindowStart: string | null
+    shipWindowEnd: string | null
+  }>
   error?: string
 }
 

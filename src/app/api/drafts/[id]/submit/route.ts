@@ -43,6 +43,61 @@ async function getNextOrderNumber(isPreOrder: boolean): Promise<string> {
 }
 
 /**
+ * Derive order type (ATS vs Pre-Order) from SKU data.
+ * Master source: SkuCategories.IsPreOrder
+ */
+async function deriveIsPreOrderFromSkus(
+  skuVariantIds: bigint[]
+): Promise<Map<string, boolean>> {
+  if (skuVariantIds.length === 0) {
+    return new Map()
+  }
+
+  const skus = await prisma.sku.findMany({
+    where: { ID: { in: skuVariantIds } },
+    select: {
+      ID: true,
+      SkuCategories: {
+        select: { IsPreOrder: true },
+      },
+    },
+  })
+
+  const result = new Map<string, boolean>()
+  for (const sku of skus) {
+    const isPreOrder = sku.SkuCategories?.IsPreOrder ?? false
+    result.set(String(sku.ID), isPreOrder)
+  }
+
+  return result
+}
+
+/**
+ * Get order grouping key that includes both ship window AND order type.
+ * This ensures ATS and Pre-Order items are split into separate orders.
+ */
+function getOrderGroupKey(
+  item: {
+    categoryId?: number | null
+    shipWindowStart?: string | null
+    shipWindowEnd?: string | null
+    skuVariantId: bigint
+  },
+  skuPreOrderMap: Map<string, boolean>
+): string {
+  const isPreOrder = skuPreOrderMap.get(String(item.skuVariantId)) ?? false
+  const typePrefix = isPreOrder ? 'preorder' : 'ats'
+  
+  if (item.categoryId) {
+    return `${typePrefix}-cat-${item.categoryId}`
+  }
+  if (item.shipWindowStart || item.shipWindowEnd) {
+    return `${typePrefix}-window-${item.shipWindowStart || 'none'}-${item.shipWindowEnd || 'none'}`
+  }
+  return `${typePrefix}-default`
+}
+
+/**
  * POST /api/drafts/[id]/submit - Convert draft to real order
  * 
  * No authentication required - drafts are public/shareable.
@@ -125,11 +180,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       )
     }
 
-    // Determine if this is a pre-order
-    const isPreOrder = Object.keys(state.preOrderMeta || {}).length > 0
-
-    // Generate real order number
-    const orderNumber = await getNextOrderNumber(isPreOrder)
+    // NOTE: Order type will be derived from SKU data below, not preOrderMeta
 
     // Look up rep name
     const rep = await prisma.reps.findUnique({
@@ -157,110 +208,204 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       }
     }
 
-    // Build items for database
+    // Build items for database with category/ship window metadata
     const items: Array<{
       sku: string
       skuVariantId: bigint
       quantity: number
       price: number
+      categoryId: number | null
+      categoryName: string | null
+      shipWindowStart: string | null
+      shipWindowEnd: string | null
     }> = []
 
-    // Look up SKU variant IDs
+    // Look up SKU data including category, ship window, and IsPreOrder
     const allSkus = Object.values(state.orders).flatMap(skuQtys => Object.keys(skuQtys))
     const skuRecords = await prisma.sku.findMany({
       where: { SkuID: { in: allSkus } },
-      select: { ID: true, SkuID: true },
+      select: {
+        ID: true,
+        SkuID: true,
+        CategoryID: true,
+        SkuCategories: {
+          select: {
+            Name: true,
+            IsPreOrder: true,
+            OnRouteAvailableDate: true,
+            OnRouteAvailableDateEnd: true,
+          },
+        },
+      },
     })
-    const skuIdMap = new Map(skuRecords.map(s => [s.SkuID, s.ID]))
+    const skuDataMap = new Map(skuRecords.map(s => [s.SkuID, s]))
+    
+    // Build pre-order map from SKU category data
+    const skuPreOrderMap = new Map<string, boolean>()
+    for (const sku of skuRecords) {
+      skuPreOrderMap.set(String(sku.ID), sku.SkuCategories?.IsPreOrder ?? false)
+    }
 
     for (const [, skuQtys] of Object.entries(state.orders)) {
       for (const [sku, qty] of Object.entries(skuQtys as Record<string, number>)) {
         if (qty > 0) {
+          const skuData = skuDataMap.get(sku)
           items.push({
             sku,
-            skuVariantId: BigInt(skuIdMap.get(sku) || 0),
+            skuVariantId: BigInt(skuData?.ID || 0),
             quantity: qty,
             price: state.prices[sku] || 0,
+            categoryId: skuData?.CategoryID ?? null,
+            categoryName: skuData?.SkuCategories?.Name ?? null,
+            shipWindowStart: skuData?.SkuCategories?.OnRouteAvailableDate?.toISOString() ?? null,
+            shipWindowEnd: skuData?.SkuCategories?.OnRouteAvailableDateEnd?.toISOString() ?? null,
           })
         }
       }
     }
 
-    // Update draft to real order in transaction
+    // Group items by order type AND ship window (auto-split mixed ATS/Pre-Order)
+    const itemGroups = new Map<string, typeof items>()
+    for (const item of items) {
+      const key = getOrderGroupKey(item, skuPreOrderMap)
+      if (!itemGroups.has(key)) {
+        itemGroups.set(key, [])
+      }
+      itemGroups.get(key)!.push(item)
+    }
+
     const currency = formData.currency || 'CAD'
 
+    // Track created orders
+    const createdOrders: Array<{
+      orderId: string
+      orderNumber: string
+      categoryName: string | null
+      shipWindowStart: string | null
+      shipWindowEnd: string | null
+      orderAmount: number
+      items: typeof items
+    }> = []
+
     await prisma.$transaction(async (tx) => {
-      // Update order header
-      await tx.customerOrders.update({
+      // Delete the draft first (we'll create new orders)
+      await tx.customerOrdersItems.deleteMany({
+        where: { CustomerOrderID: draft.ID },
+      })
+      await tx.customerOrders.delete({
         where: { ID: draft.ID },
-        data: {
-          OrderNumber: orderNumber,
-          OrderStatus: 'Pending',
-          BuyerName: formData.buyerName,
-          StoreName: formData.storeName,
-          SalesRep: salesRepName,
-          CustomerEmail: formData.customerEmail,
-          CustomerPhone: formData.customerPhone,
-          Country: currency,
-          OrderAmount: orderAmount,
-          OrderNotes: formData.orderNotes || '',
-          CustomerPO: formData.customerPO || '',
-          ShipStartDate: new Date(formData.shipStartDate),
-          ShipEndDate: new Date(formData.shipEndDate),
-          OrderDate: new Date(),
-          Website: formData.website || '',
-          IsShipped: false,
-          IsTransferredToShopify: false,
-          RepID: parseInt(formData.salesRepId),
-          CustomerID: customerId,
-        },
       })
 
-      // Create order items
-      await tx.customerOrdersItems.createMany({
-        data: items.map(item => ({
-          CustomerOrderID: draft.ID,
-          OrderNumber: orderNumber,
-          SKU: item.sku,
-          SKUVariantID: item.skuVariantId,
-          Quantity: item.quantity,
-          Price: item.price,
-          PriceCurrency: currency,
-          Notes: '',
+      // Create one order per ship window group (and order type)
+      for (const [, groupItems] of itemGroups) {
+        // Derive order type from first item's SKU (all items in group have same type)
+        const firstItemVariantId = String(groupItems[0].skuVariantId)
+        const isPreOrder = skuPreOrderMap.get(firstItemVariantId) ?? false
+        const groupOrderNumber = await getNextOrderNumber(isPreOrder)
+        const groupAmount = groupItems.reduce((sum, item) => sum + item.price * item.quantity, 0)
+
+        // Use item's ship window if available, else form dates
+        const firstItem = groupItems[0]
+        const shipStart = firstItem.shipWindowStart
+          ? new Date(firstItem.shipWindowStart)
+          : new Date(formData.shipStartDate)
+        const shipEnd = firstItem.shipWindowEnd
+          ? new Date(firstItem.shipWindowEnd)
+          : new Date(formData.shipEndDate)
+
+        // Create order header
+        const newOrder = await tx.customerOrders.create({
+          data: {
+            OrderNumber: groupOrderNumber,
+            OrderStatus: 'Pending',
+            BuyerName: formData.buyerName,
+            StoreName: formData.storeName,
+            SalesRep: salesRepName,
+            CustomerEmail: formData.customerEmail,
+            CustomerPhone: formData.customerPhone,
+            Country: currency,
+            OrderAmount: groupAmount,
+            OrderNotes: formData.orderNotes || '',
+            CustomerPO: formData.customerPO || '',
+            ShipStartDate: shipStart,
+            ShipEndDate: shipEnd,
+            OrderDate: new Date(),
+            Website: formData.website || '',
+            IsShipped: false,
+            IsTransferredToShopify: false,
+            IsPreOrder: isPreOrder, // Derived from SKU category, not preOrderMeta
+            RepID: parseInt(formData.salesRepId),
+            CustomerID: customerId,
+          },
+        })
+
+        // Create order items for this group
+        await tx.customerOrdersItems.createMany({
+          data: groupItems.map(item => ({
+            CustomerOrderID: newOrder.ID,
+            OrderNumber: groupOrderNumber,
+            SKU: item.sku,
+            SKUVariantID: item.skuVariantId,
+            Quantity: item.quantity,
+            Price: item.price,
+            PriceCurrency: currency,
+            Notes: '',
+          })),
+        })
+
+        createdOrders.push({
+          orderId: String(newOrder.ID),
+          orderNumber: groupOrderNumber,
+          categoryName: firstItem.categoryName,
+          shipWindowStart: firstItem.shipWindowStart,
+          shipWindowEnd: firstItem.shipWindowEnd,
+          orderAmount: groupAmount,
+          items: groupItems,
+        })
+      }
+    })
+
+    // Send confirmation emails for each created order (non-blocking)
+    for (const order of createdOrders) {
+      sendOrderEmails({
+        orderId: order.orderId,
+        orderNumber: order.orderNumber,
+        storeName: formData.storeName,
+        buyerName: formData.buyerName,
+        salesRep: salesRepName,
+        customerEmail: formData.customerEmail,
+        customerPhone: formData.customerPhone,
+        shipStartDate: order.shipWindowStart ? new Date(order.shipWindowStart) : new Date(formData.shipStartDate),
+        shipEndDate: order.shipWindowEnd ? new Date(order.shipWindowEnd) : new Date(formData.shipEndDate),
+        orderDate: new Date(),
+        orderNotes: formData.orderNotes,
+        customerPO: formData.customerPO,
+        items: order.items.map(i => ({
+          sku: i.sku,
+          quantity: i.quantity,
+          price: i.price,
+          lineTotal: i.price * i.quantity,
         })),
+        currency,
+        orderAmount: order.orderAmount,
+      }).catch(err => {
+        console.error(`Failed to send order emails for ${order.orderNumber}:`, err)
       })
-    })
+    }
 
-    // Send confirmation emails (non-blocking)
-    sendOrderEmails({
-      orderId: String(draft.ID),
-      orderNumber,
-      storeName: formData.storeName,
-      buyerName: formData.buyerName,
-      salesRep: salesRepName,
-      customerEmail: formData.customerEmail,
-      customerPhone: formData.customerPhone,
-      shipStartDate: new Date(formData.shipStartDate),
-      shipEndDate: new Date(formData.shipEndDate),
-      orderDate: new Date(),
-      orderNotes: formData.orderNotes,
-      customerPO: formData.customerPO,
-      items: items.map(i => ({
-        sku: i.sku,
-        quantity: i.quantity,
-        price: i.price,
-        lineTotal: i.price * i.quantity,
-      })),
-      currency,
-      orderAmount,
-    }).catch(err => {
-      console.error('Failed to send order emails:', err)
-    })
-
+    // Return first order for backwards compatibility, plus full orders array
+    const primaryOrder = createdOrders[0]
     return NextResponse.json({
       success: true,
-      orderId: String(draft.ID),
-      orderNumber,
+      orderId: primaryOrder?.orderId,
+      orderNumber: primaryOrder?.orderNumber,
+      orders: createdOrders.map(o => ({
+        orderId: o.orderId,
+        orderNumber: o.orderNumber,
+        categoryName: o.categoryName,
+        shipWindowStart: o.shipWindowStart,
+        shipWindowEnd: o.shipWindowEnd,
+      })),
     })
   } catch (error) {
     console.error('Submit draft error:', error)

@@ -34,6 +34,7 @@ import { formatCurrency } from '@/lib/utils'
 import { isRepPortalReturn } from '@/lib/utils/rep-context'
 import type { Currency } from '@/lib/types'
 import type { OrderForEditing } from '@/lib/data/queries/orders'
+import { EmailConfirmationModal } from './email-confirmation-modal'
 
 interface OrderFormProps {
   currency: Currency
@@ -44,6 +45,11 @@ interface OrderFormProps {
     quantity: number
     price: number
     description?: string
+    // Ship window metadata for order splitting by delivery date
+    categoryId?: number | null
+    categoryName?: string | null
+    shipWindowStart?: string | null
+    shipWindowEnd?: string | null
   }>
   isPreOrder?: boolean
   editMode?: boolean
@@ -91,6 +97,11 @@ export function OrderForm({
   // Customer selection state
   const [selectedCustomerId, setSelectedCustomerId] = useState<number | null>(null)
   const [isRepLocked, setIsRepLocked] = useState(false)
+
+  // Email confirmation modal state
+  const [showEmailModal, setShowEmailModal] = useState(false)
+  const [submittedOrderId, setSubmittedOrderId] = useState<string | null>(null)
+  const [submittedOrderNumber, setSubmittedOrderNumber] = useState<string | null>(null)
 
   // Get pre-order ship window from cart metadata (if available)
   const preOrderWindow = isPreOrder ? getPreOrderShipWindow() : null
@@ -430,6 +441,8 @@ export function OrderForm({
           }
         } else {
           // Create new order with customerId for strong ownership
+          // Skip automatic email - show confirmation popup instead
+          // Includes ship window metadata for order splitting by delivery date
           const result = await createOrder({
             ...data,
             currency,
@@ -438,21 +451,30 @@ export function OrderForm({
               skuVariantId: item.skuVariantId,
               quantity: item.quantity,
               price: item.price,
+              categoryId: item.categoryId,
+              categoryName: item.categoryName,
+              shipWindowStart: item.shipWindowStart,
+              shipWindowEnd: item.shipWindowEnd,
             })),
             isPreOrder, // P prefix for pre-orders, A prefix for ATS
             customerId: selectedCustomerId, // Pass selected customer ID for strong ownership
+            skipEmail: true, // Emails will be sent via confirmation popup
           })
 
           if (result.success && result.orderId) {
-            await clearDraft() // Clear cart and draft completely
-            toast.success(`Order ${result.orderNumber} created successfully!`)
-            
-            // For rep-created orders, redirect back to rep portal if returnTo is valid
-            if (isRepPortalReturn(returnTo)) {
-              router.push(returnTo)
-            } else {
-              router.push(`/buyer/confirmation/${result.orderId}`)
+            // Check if order was split into multiple orders
+            const orderCount = result.orders?.length || 1
+            if (orderCount > 1) {
+              toast.info(`Order split into ${orderCount} orders by delivery window`)
             }
+            
+            // NOTE: Do NOT call clearDraft() here - it empties the cart and triggers redirect
+            // clearDraft() is called in handleEmailConfirm/handleEmailSkip after modal interaction
+            
+            // Show email confirmation popup instead of immediate redirect
+            setSubmittedOrderId(result.orderId)
+            setSubmittedOrderNumber(result.orderNumber || '')
+            setShowEmailModal(true)
           } else {
             toast.error(result.error || 'Failed to create order')
             setIsSubmitting(false)
@@ -471,7 +493,39 @@ export function OrderForm({
     0
   )
 
+  // Handle email confirmation modal actions
+  const handleEmailConfirm = async () => {
+    setShowEmailModal(false)
+    toast.success(`Order ${submittedOrderNumber} created successfully!`)
+    
+    // Clear cart/draft AFTER modal is closed (prevents premature redirect)
+    await clearDraft()
+    
+    // Redirect after email confirmation
+    if (isRepPortalReturn(returnTo)) {
+      router.push(returnTo)
+    } else if (submittedOrderId) {
+      router.push(`/buyer/confirmation/${submittedOrderId}`)
+    }
+  }
+
+  const handleEmailSkip = async () => {
+    setShowEmailModal(false)
+    toast.success(`Order ${submittedOrderNumber} created (emails skipped)`)
+    
+    // Clear cart/draft AFTER modal is closed (prevents premature redirect)
+    await clearDraft()
+    
+    // Redirect after skipping emails
+    if (isRepPortalReturn(returnTo)) {
+      router.push(returnTo)
+    } else if (submittedOrderId) {
+      router.push(`/buyer/confirmation/${submittedOrderId}`)
+    }
+  }
+
   return (
+    <>
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
       {/* Customer Information */}
       <Card>
@@ -900,5 +954,16 @@ export function OrderForm({
         </CardContent>
       </Card>
     </form>
+
+    {/* Email Confirmation Modal */}
+    <EmailConfirmationModal
+      open={showEmailModal}
+      onOpenChange={setShowEmailModal}
+      orderId={submittedOrderId || ''}
+      orderNumber={submittedOrderNumber || ''}
+      onConfirm={handleEmailConfirm}
+      onSkip={handleEmailSkip}
+    />
+    </>
   )
 }
