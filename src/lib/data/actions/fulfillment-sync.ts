@@ -12,6 +12,7 @@ import { revalidatePath } from 'next/cache'
 import { prisma } from '@/lib/prisma'
 import { shopify, type ShopifyFulfillmentDetails } from '@/lib/shopify/client'
 import type { Carrier } from '@/lib/types/shipment'
+import { syncShopifyOrderStatusInternal } from './shopify'
 
 // ============================================================================
 // Types
@@ -24,6 +25,12 @@ export interface FulfillmentSyncResult {
   shipmentsCreated: number
   shipmentsSkipped: number
   error?: string
+  /** Status sync outcome - success/failure tracked separately from shipment sync */
+  statusSync?: {
+    success: boolean
+    error?: string
+    fulfillmentStatus?: string | null
+  }
 }
 
 export interface BulkFulfillmentSyncResult {
@@ -31,6 +38,13 @@ export interface BulkFulfillmentSyncResult {
   ordersProcessed: number
   shipmentsCreated: number
   errors: Array<{ orderId: string; error: string }>
+  /** Status sync errors - separate from shipment sync errors */
+  statusSyncErrors?: Array<{ orderId: string; error: string }>
+}
+
+export interface FulfillmentSyncStatus {
+  lastSyncedAt: Date | null
+  pendingOrdersCount: number
 }
 
 interface OrderItemForMapping {
@@ -263,6 +277,9 @@ export async function syncFulfillmentsFromShopify(
     // Update order status if needed
     await updateOrderStatusAfterSync(orderId)
 
+    // Sync Shopify status (don't fail if this fails - tracked separately)
+    const statusSyncResult = await syncShopifyOrderStatusInternal(orderId, { revalidate: false })
+
     revalidatePath('/admin/orders')
     revalidatePath(`/admin/orders/${orderId}`)
 
@@ -272,6 +289,11 @@ export async function syncFulfillmentsFromShopify(
       orderNumber: order.OrderNumber,
       shipmentsCreated,
       shipmentsSkipped,
+      statusSync: {
+        success: statusSyncResult.success,
+        error: statusSyncResult.error,
+        fulfillmentStatus: statusSyncResult.fulfillmentStatus,
+      },
     }
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Failed to sync fulfillments'
@@ -337,6 +359,7 @@ export async function syncAllPendingFulfillments(options?: {
     let ordersProcessed = 0
     let totalShipmentsCreated = 0
     const errors: Array<{ orderId: string; error: string }> = []
+    const statusSyncErrors: Array<{ orderId: string; error: string }> = []
 
     for (const order of ordersToSync) {
       const result = await syncFulfillmentsFromShopify(String(order.ID))
@@ -348,6 +371,11 @@ export async function syncAllPendingFulfillments(options?: {
         errors.push({ orderId: String(order.ID), error: result.error })
       }
 
+      // Track status sync errors separately
+      if (result.statusSync && !result.statusSync.success && result.statusSync.error) {
+        statusSyncErrors.push({ orderId: String(order.ID), error: result.statusSync.error })
+      }
+
       // Small delay to avoid rate limiting
       await new Promise((resolve) => setTimeout(resolve, 200))
     }
@@ -357,6 +385,7 @@ export async function syncAllPendingFulfillments(options?: {
       ordersProcessed,
       shipmentsCreated: totalShipmentsCreated,
       errors,
+      statusSyncErrors: statusSyncErrors.length > 0 ? statusSyncErrors : undefined,
     }
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Failed to sync fulfillments'
@@ -366,6 +395,38 @@ export async function syncAllPendingFulfillments(options?: {
       shipmentsCreated: 0,
       errors: [{ orderId: 'bulk', error: message }],
     }
+  }
+}
+
+// ============================================================================
+// Sync Status
+// ============================================================================
+
+/**
+ * Get the current fulfillment sync status.
+ * Returns the last sync time and count of orders pending sync.
+ */
+export async function getFulfillmentSyncStatus(): Promise<FulfillmentSyncStatus> {
+  const [lastSyncedShipment, pendingOrdersCount] = await Promise.all([
+    // Get the most recent shipment created by Shopify Sync
+    prisma.shipments.findFirst({
+      where: { CreatedBy: 'Shopify Sync' },
+      orderBy: { CreatedAt: 'desc' },
+      select: { CreatedAt: true },
+    }),
+    // Count orders that could have fulfillments to sync
+    prisma.customerOrders.count({
+      where: {
+        IsTransferredToShopify: true,
+        ShopifyOrderID: { not: null },
+        OrderStatus: { notIn: ['Shipped', 'Invoiced', 'Cancelled'] },
+      },
+    }),
+  ])
+
+  return {
+    lastSyncedAt: lastSyncedShipment?.CreatedAt ?? null,
+    pendingOrdersCount,
   }
 }
 

@@ -79,11 +79,17 @@ export async function GET(request: Request) {
         `shipments=${result.shipmentsCreated}, errors=${result.errors.length}`
     )
 
+    // Log status sync errors server-side for diagnosis (not in response)
+    if (result.statusSyncErrors && result.statusSyncErrors.length > 0) {
+      console.warn('[fulfillment-sync] Status sync errors:', result.statusSyncErrors)
+    }
+
     return NextResponse.json({
       success: result.success,
       ordersProcessed: result.ordersProcessed,
       shipmentsCreated: result.shipmentsCreated,
       errors: result.errors.length > 0 ? result.errors.slice(0, 10) : undefined,
+      // statusSyncErrors intentionally omitted from response - check server logs
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error'
