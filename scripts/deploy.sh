@@ -120,8 +120,17 @@ echo "  Syncing source code..."
 ssh -i "$EC2_KEY" "$EC2_HOST" "cd $EC2_APP_DIR && git fetch origin main && git reset --hard origin/main"
 
 # Rsync the pre-built .next folder (much faster than rebuilding on EC2)
+# Exclude dev-only content:
+#   - dev/        = Turbopack dev server cache (~1GB+ of incremental build artifacts)
+#   - cache/      = Image optimization & fetch caches (regenerated on EC2 as needed)
+#   - trace*      = Build telemetry files (not needed for runtime)
 echo "  Uploading pre-built assets..."
-rsync -avz --delete -e "ssh -i $EC2_KEY" \
+rsync -avz --delete \
+    --exclude='dev/' \
+    --exclude='cache/' \
+    --exclude='trace' \
+    --exclude='trace-build' \
+    -e "ssh -i $EC2_KEY" \
     .next/ "$EC2_HOST:$EC2_APP_DIR/.next/"
 
 # Install production dependencies only and restart
