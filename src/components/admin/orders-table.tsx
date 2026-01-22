@@ -15,6 +15,7 @@ import {
   DateRangePopover,
   type DateRange,
   SearchInput,
+  FilterPill,
 } from '@/components/ui'
 import { BulkActionsBar } from '@/components/admin/bulk-actions-bar'
 import { OrderCommentsModal } from '@/components/admin/order-comments-modal'
@@ -30,7 +31,7 @@ import type { AdminOrderRow, OrderStatus, OrdersListResult } from '@/lib/types/o
 import type { ShopifyValidationResult, BulkTransferResult } from '@/lib/types/shopify'
 import { bulkUpdateStatus, updateOrderStatus } from '@/lib/data/actions/orders'
 import { validateOrderForShopify, transferOrderToShopify, bulkTransferOrdersToShopify } from '@/lib/data/actions/shopify'
-import { MoreHorizontal, AlertTriangle, RefreshCw } from 'lucide-react'
+import { MoreHorizontal, AlertTriangle, RefreshCw, SearchX } from 'lucide-react'
 
 // ============================================================================
 // Types
@@ -812,31 +813,25 @@ export function OrdersTable({ initialOrders, total, statusCounts, reps }: Orders
           <SearchInput
             value={q}
             onValueChange={(v) => setParam('q', v || null)}
-            placeholder="Search store name..."
+            placeholder="Search order #, store, rep, email..."
             className="h-10 w-full max-w-md"
           />
 
-          <select
-            value={rep}
-            onChange={(e) => setParam('rep', e.target.value || null)}
-            className="h-10 rounded-md border border-input bg-background px-3 text-sm"
-          >
-            <option value="">All reps</option>
-            {reps.map((r) => (
-              <option key={r.id} value={r.name}>
-                {r.name}
-              </option>
-            ))}
-          </select>
+          <FilterPill
+            label="Rep"
+            value={rep || null}
+            options={reps.map((r) => ({ value: r.name, label: r.name }))}
+            onChange={(v) => setParam('rep', v)}
+          />
 
-          <select
-            value={syncStatus}
-            onChange={(e) => setParam('syncStatus', e.target.value || null)}
-            className="h-10 rounded-md border border-input bg-background px-3 text-sm"
-          >
-            <option value="">All sync status</option>
-            <option value="pending">Pending sync</option>
-          </select>
+          <FilterPill
+            label="Sync"
+            value={syncStatus || null}
+            options={[
+              { value: 'pending', label: 'Pending sync' },
+            ]}
+            onChange={(v) => setParam('syncStatus', v)}
+          />
 
           <DateRangePopover value={dateRange} onChange={handleDateRangeChange} />
 
@@ -879,30 +874,51 @@ export function OrdersTable({ initialOrders, total, statusCounts, reps }: Orders
         <div className="text-sm text-muted-foreground">Updating...</div>
       )}
 
-      {/* Data Table */}
-      <DataTable
-        data={initialOrders}
-        columns={columns}
-        getRowId={(o) => o.id}
-        enableRowSelection
-        onSelectionChange={setSelectedIds}
-        pageSize={pageSize}
-        // Manual/server-side pagination
-        manualPagination
-        page={page}
-        totalCount={total}
-        onPageChange={setPageParam}
-        // Manual/server-side sorting
-        manualSorting
-        sort={{ columnId: sort, direction: dir }}
-        onSortChange={setSortParam}
-        // Sticky header and column resizing
-        stickyHeader
-        maxHeight="calc(100vh - 380px)"
-        enableColumnResizing
-        columnWidths={columnWidths}
-        onColumnWidthChange={handleColumnWidthChange}
-      />
+      {/* Data Table or Empty State */}
+      {initialOrders.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-16 text-center border rounded-md bg-background">
+          <SearchX className="h-12 w-12 text-muted-foreground/40 mb-4" />
+          <h3 className="text-lg font-medium mb-2">
+            {filterChips.length > 0 || status !== 'All'
+              ? 'No orders match your filters'
+              : 'No orders yet'}
+          </h3>
+          <p className="text-muted-foreground text-sm mb-4">
+            {filterChips.length > 0 || status !== 'All'
+              ? "Try adjusting your search or filters to find what you're looking for."
+              : 'Orders will appear here once they are created.'}
+          </p>
+          {(filterChips.length > 0 || status !== 'All') && (
+            <Button variant="outline" size="sm" onClick={clearAllFilters}>
+              Clear all filters
+            </Button>
+          )}
+        </div>
+      ) : (
+        <DataTable
+          data={initialOrders}
+          columns={columns}
+          getRowId={(o) => o.id}
+          enableRowSelection
+          onSelectionChange={setSelectedIds}
+          pageSize={pageSize}
+          // Manual/server-side pagination
+          manualPagination
+          page={page}
+          totalCount={total}
+          onPageChange={setPageParam}
+          // Manual/server-side sorting
+          manualSorting
+          sort={{ columnId: sort, direction: dir }}
+          onSortChange={setSortParam}
+          // Sticky header and column resizing
+          stickyHeader
+          maxHeight="calc(100vh - 380px)"
+          enableColumnResizing
+          columnWidths={columnWidths}
+          onColumnWidthChange={handleColumnWidthChange}
+        />
+      )}
 
       {/* Comments Modal */}
       <OrderCommentsModal

@@ -124,10 +124,20 @@ export async function getOrders(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const baseWhere: any = {};
 
-  // Store search - matches .NET: StoreName.ToLower().Contains(storeNameSearch)
+  // Multi-field search - matches OrderNumber, StoreName, SalesRep, CustomerEmail
   // Note: SQL Server collation is case-insensitive by default
   if (input.q) {
-    baseWhere.StoreName = { contains: input.q };
+    const searchConditions = {
+      OR: [
+        { OrderNumber: { contains: input.q } },
+        { StoreName: { contains: input.q } },
+        { SalesRep: { contains: input.q } },
+        { CustomerEmail: { contains: input.q } },
+      ],
+    };
+    baseWhere.AND = baseWhere.AND
+      ? [...baseWhere.AND, searchConditions]
+      : [searchConditions];
   }
 
   // Optional rep filter (enhancement; CustomerOrders.SalesRep is a string)
@@ -138,11 +148,17 @@ export async function getOrders(
 
   // CRITICAL: Pending sync filter must handle nullable boolean
   // IsTransferredToShopify = false OR null means "not synced"
+  // Uses AND pattern to combine with other filters
   if (input.syncStatus === 'pending') {
-    baseWhere.OR = [
-      { IsTransferredToShopify: false },
-      { IsTransferredToShopify: null },
-    ];
+    const syncConditions = {
+      OR: [
+        { IsTransferredToShopify: false },
+        { IsTransferredToShopify: null },
+      ],
+    };
+    baseWhere.AND = baseWhere.AND
+      ? [...baseWhere.AND, syncConditions]
+      : [syncConditions];
   }
 
   // Date range filter on OrderDate
@@ -743,10 +759,19 @@ export async function getOrdersByRep(
     ],
   };
 
-  // Store search filter (AND with the OR above)
+  // Multi-field search filter (AND with the OR above)
   // Note: SQL Server collation is case-insensitive by default
   if (input.q) {
-    baseWhere.StoreName = { contains: input.q };
+    const searchConditions = {
+      OR: [
+        { OrderNumber: { contains: input.q } },
+        { StoreName: { contains: input.q } },
+        { CustomerEmail: { contains: input.q } },
+      ],
+    };
+    baseWhere.AND = baseWhere.AND
+      ? [...baseWhere.AND, searchConditions]
+      : [searchConditions];
   }
 
   // 3. Build status-specific where

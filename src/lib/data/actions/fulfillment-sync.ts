@@ -227,33 +227,35 @@ export async function syncFulfillmentsFromShopify(
           })
         }
 
-        // Update line item statuses
-        for (const item of mappedItems) {
-          const orderItem = order.CustomerOrdersItems.find(
-            (oi) => String(oi.ID) === item.orderItemId
-          )
-          if (orderItem) {
-            // Get total shipped for this item (including this shipment)
-            const allShipmentItems = await tx.shipmentItems.findMany({
-              where: { OrderItemID: BigInt(item.orderItemId) },
-              select: { QuantityShipped: true },
-            })
-            const totalShipped = allShipmentItems.reduce(
-              (sum, si) => sum + si.QuantityShipped,
-              0
-            )
-            const remaining =
-              orderItem.Quantity - totalShipped - (orderItem.CancelledQty ?? 0)
-
-            await tx.customerOrdersItems.update({
-              where: { ID: BigInt(item.orderItemId) },
-              data: {
-                Status: remaining <= 0 ? 'Shipped' : 'Open',
-              },
-            })
-          }
-        }
       })
+
+      // Update line item statuses OUTSIDE transaction to avoid timeout
+      // We know what we just shipped from mappedItems
+      for (const item of mappedItems) {
+        const orderItem = order.CustomerOrdersItems.find(
+          (oi) => String(oi.ID) === item.orderItemId
+        )
+        if (orderItem) {
+          // Get total shipped for this item (all shipments)
+          const allShipmentItems = await prisma.shipmentItems.findMany({
+            where: { OrderItemID: BigInt(item.orderItemId) },
+            select: { QuantityShipped: true },
+          })
+          const totalShipped = allShipmentItems.reduce(
+            (sum, si) => sum + si.QuantityShipped,
+            0
+          )
+          const remaining =
+            orderItem.Quantity - totalShipped - (orderItem.CancelledQty ?? 0)
+
+          await prisma.customerOrdersItems.update({
+            where: { ID: BigInt(item.orderItemId) },
+            data: {
+              Status: remaining <= 0 ? 'Shipped' : 'Open',
+            },
+          })
+        }
+      }
 
       shipmentsCreated++
     }
@@ -444,17 +446,6 @@ async function updateOrderStatusAfterSync(orderId: string): Promise<void> {
           CancelledQty: true,
         },
       },
-      Shipments: {
-        where: { VoidedAt: null },
-        select: {
-          ShipmentItems: {
-            select: {
-              OrderItemID: true,
-              QuantityShipped: true,
-            },
-          },
-        },
-      },
     },
   })
 
@@ -465,13 +456,25 @@ async function updateOrderStatusAfterSync(orderId: string): Promise<void> {
     return
   }
 
+  // Query ShipmentItems directly (more reliable than nested include)
+  const shipmentItems = await prisma.shipmentItems.findMany({
+    where: {
+      Shipment: {
+        CustomerOrderID: BigInt(orderId),
+        VoidedAt: null,
+      },
+    },
+    select: {
+      OrderItemID: true,
+      QuantityShipped: true,
+    },
+  })
+
   // Calculate total shipped per item
   const shippedByItem = new Map<string, number>()
-  for (const shipment of order.Shipments) {
-    for (const si of shipment.ShipmentItems) {
-      const key = String(si.OrderItemID)
-      shippedByItem.set(key, (shippedByItem.get(key) ?? 0) + si.QuantityShipped)
-    }
+  for (const si of shipmentItems) {
+    const key = String(si.OrderItemID)
+    shippedByItem.set(key, (shippedByItem.get(key) ?? 0) + si.QuantityShipped)
   }
 
   // Check if fully shipped
@@ -484,6 +487,7 @@ async function updateOrderStatusAfterSync(orderId: string): Promise<void> {
 
     if (shipped < required) {
       fullyShipped = false
+      break // No need to continue checking
     }
   }
 
