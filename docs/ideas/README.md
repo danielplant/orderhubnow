@@ -34,6 +34,7 @@ Backlog of potential improvements to revisit once core functionality is stable.
 | Lightbox accessibility improvements | 🔵 Idea | 30 mins | Low | [lightbox-accessibility.md](./lightbox-accessibility.md) |
 | Color swatch fallback from SKU suffix | 🔵 Idea | 45 mins | Low | [color-from-sku-fallback.md](./color-from-sku-fallback.md) |
 | Fabric type visual indicator | 🔵 Idea | 1-2 hrs | Low | [fabric-type-indicator.md](./fabric-type-indicator.md) |
+| Orders table advanced features | 🔵 Idea | 4-8 hrs | Low | [orders-table-advanced-features.md](./orders-table-advanced-features.md) |
 
 ### Code Cleanup
 | Item | Status | Effort | Priority | Notes |
