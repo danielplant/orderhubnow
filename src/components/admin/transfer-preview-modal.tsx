@@ -63,16 +63,28 @@ export function TransferPreviewModal({
   const [customLastName, setCustomLastName] = React.useState('')
   const [updateShopifyRecord, setUpdateShopifyRecord] = React.useState(false)
 
-  // Track previous open state to detect modal opens
+  // Track whether we need to initialize state (set when modal opens, cleared after init)
+  const needsInitRef = React.useRef(false)
   const prevOpenRef = React.useRef(false)
 
+  // Set needsInit flag when modal opens
   React.useEffect(() => {
-    // Reset ALL state when modal opens (not just when orderId changes)
-    // This handles reopening the same order
     const justOpened = open && !prevOpenRef.current
     prevOpenRef.current = open
 
-    if (justOpened && validation) {
+    if (justOpened) {
+      needsInitRef.current = true
+    }
+    if (!open) {
+      needsInitRef.current = false
+    }
+  }, [open])
+
+  // Initialize state when validation becomes available and we need init
+  React.useEffect(() => {
+    if (open && needsInitRef.current && validation) {
+      needsInitRef.current = false
+
       // Reset tag states
       if (validation.tags) {
         const initialStates: Record<string, boolean> = {}

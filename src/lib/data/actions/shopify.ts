@@ -929,12 +929,16 @@ export async function batchValidateOrdersForShopify(
       const settled = batchResults[j]
       if (settled.status === 'fulfilled') {
         const { orderId, result } = settled.value
-        const needsReview = ['discrepancy', 'unknown', 'no_email'].includes(result.customerNameStatus)
+        // Flag for review if: status needs review OR OHN name is empty (would fail transfer)
+        const hasEmptyName = !result.ohnCustomerName.trim()
+        const needsReview = ['discrepancy', 'unknown', 'no_email'].includes(result.customerNameStatus) || hasEmptyName
 
         results.push({
           orderId,
           orderNumber: result.orderNumber,
-          customerNameStatus: result.customerNameStatus,
+          customerNameStatus: hasEmptyName && result.customerNameStatus === 'match'
+            ? 'discrepancy' // Treat empty OHN name as discrepancy for UI
+            : result.customerNameStatus,
         })
 
         if (needsReview) {
@@ -942,7 +946,7 @@ export async function batchValidateOrdersForShopify(
           discrepancyOrders.push({
             orderId,
             orderNumber: result.orderNumber,
-            ohnName: result.ohnCustomerName,
+            ohnName: result.ohnCustomerName || '(empty)',
             shopifyName: result.shopifyCustomerName,
           })
         }

@@ -154,6 +154,8 @@ export function OrdersTable({ initialOrders, total, statusCounts, facets }: Orde
   const [isTransferring, setIsTransferring] = React.useState(false)
   const [transferError, setTransferError] = React.useState<string | null>(null)
   const [transferWarning, setTransferWarning] = React.useState<string | null>(null)
+  // Track modal session to prevent stale timeouts from closing reopened modals
+  const modalSessionRef = React.useRef(0)
 
   // Bulk transfer modal state
   const [bulkModalOpen, setBulkModalOpen] = React.useState(false)
@@ -400,6 +402,7 @@ export function OrdersTable({ initialOrders, total, statusCounts, facets }: Orde
 
   // Transfer handlers
   const handleValidateOrder = React.useCallback(async (orderId: string) => {
+    modalSessionRef.current += 1 // New modal session
     setPreviewOrderId(orderId)
     setPreviewOpen(true)
     setValidationLoading(true)
@@ -429,7 +432,7 @@ export function OrdersTable({ initialOrders, total, statusCounts, facets }: Orde
   ) => {
     if (!previewOrderId) return
 
-    const transferringOrderId = previewOrderId // Capture for timeout closure
+    const transferSession = modalSessionRef.current // Capture for timeout closure
 
     setIsTransferring(true)
     setTransferError(null)
@@ -439,15 +442,12 @@ export function OrdersTable({ initialOrders, total, statusCounts, facets }: Orde
       if (result.success) {
         if (result.customerUpdateWarning) {
           setTransferWarning(result.customerUpdateWarning)
-          // Show warning briefly then close - but only if still viewing same order
+          // Show warning briefly then close - but only if still in same modal session
           setTimeout(() => {
-            setPreviewOrderId((currentId) => {
-              if (currentId === transferringOrderId) {
-                setPreviewOpen(false)
-                router.refresh()
-              }
-              return currentId
-            })
+            if (modalSessionRef.current === transferSession) {
+              setPreviewOpen(false)
+              router.refresh()
+            }
           }, 3000)
         } else {
           setPreviewOpen(false)
