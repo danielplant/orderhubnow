@@ -262,4 +262,6 @@ export interface BatchValidationResult {
     ohnName: string
     shopifyName: string | null
   }>
+  /** Number of orders skipped because selection exceeded validation cap */
+  skippedDueToCapCount: number
 }

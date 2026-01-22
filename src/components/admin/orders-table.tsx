@@ -403,6 +403,8 @@ export function OrdersTable({ initialOrders, total, statusCounts, facets }: Orde
   // Transfer handlers
   const handleValidateOrder = React.useCallback(async (orderId: string) => {
     modalSessionRef.current += 1 // New modal session
+    const validationSession = modalSessionRef.current // Capture for session-scoping
+
     setPreviewOrderId(orderId)
     setPreviewOpen(true)
     setValidationLoading(true)
@@ -413,11 +415,17 @@ export function OrdersTable({ initialOrders, total, statusCounts, facets }: Orde
 
     try {
       const result = await validateOrderForShopify(orderId)
-      setValidationResult(result)
+      // Only apply results if still in same modal session
+      if (modalSessionRef.current === validationSession) {
+        setValidationResult(result)
+      }
     } catch (error) {
       console.error('Validation failed:', error)
     } finally {
-      setValidationLoading(false)
+      // Only clear loading if still in same modal session
+      if (modalSessionRef.current === validationSession) {
+        setValidationLoading(false)
+      }
     }
   }, [])
 
@@ -869,6 +877,7 @@ export function OrdersTable({ initialOrders, total, statusCounts, facets }: Orde
                 ohnName: o.storeName,
                 shopifyName: null,
               })),
+              skippedDueToCapCount: 0,
             })
           } finally {
             setBulkValidating(false)
@@ -1085,6 +1094,7 @@ export function OrdersTable({ initialOrders, total, statusCounts, facets }: Orde
         isTransferring={isBulkTransferring}
         isValidating={bulkValidating}
         discrepancyOrders={bulkValidationResult?.discrepancyOrders}
+        skippedDueToCapCount={bulkValidationResult?.skippedDueToCapCount}
         onTransfer={handleBulkTransfer}
       />
     </div>

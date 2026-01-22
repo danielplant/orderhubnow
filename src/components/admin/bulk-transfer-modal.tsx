@@ -33,6 +33,8 @@ export interface BulkTransferModalProps {
     ohnName: string
     shopifyName: string | null
   }>
+  /** Number of orders skipped because selection exceeded validation cap */
+  skippedDueToCapCount?: number
   /** Callback to start the transfer */
   onTransfer: () => void
 }
@@ -51,11 +53,13 @@ export function BulkTransferModal({
   isTransferring,
   isValidating,
   discrepancyOrders,
+  skippedDueToCapCount,
   onTransfer,
 }: BulkTransferModalProps) {
   const ineligibleCount = selectedCount - eligibleCount
   const hasIneligible = ineligibleCount > 0
   const hasDiscrepancies = discrepancyOrders && discrepancyOrders.length > 0
+  const hasSkippedDueToCap = skippedDueToCapCount && skippedDueToCapCount > 0
   const actualEligibleCount = hasDiscrepancies
     ? eligibleCount - discrepancyOrders.length
     : eligibleCount
@@ -113,6 +117,23 @@ export function BulkTransferModal({
                             These orders will be skipped. Transfer them individually to review customer names.
                           </p>
                         </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Validation Cap Warning */}
+                {hasSkippedDueToCap && (
+                  <div className="p-3 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg">
+                    <div className="flex items-start gap-3">
+                      <AlertTriangle className="h-5 w-5 text-blue-600 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <p className="text-sm font-medium text-blue-800 dark:text-blue-200">
+                          {skippedDueToCapCount} order(s) not validated
+                        </p>
+                        <p className="text-xs text-blue-700 dark:text-blue-300">
+                          Selection exceeded the validation limit (50 orders). These orders will be skipped and should be transferred in smaller batches.
+                        </p>
                       </div>
                     </div>
                   </div>
