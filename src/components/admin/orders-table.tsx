@@ -409,6 +409,7 @@ export function OrdersTable({ initialOrders, total, statusCounts, facets }: Orde
     setValidationResult(null)
     setTransferError(null) // Clear any previous error
     setTransferWarning(null) // Clear any previous warning
+    setIsTransferring(false) // Clear any stale in-flight state
 
     try {
       const result = await validateOrderForShopify(orderId)
@@ -432,13 +433,19 @@ export function OrdersTable({ initialOrders, total, statusCounts, facets }: Orde
   ) => {
     if (!previewOrderId) return
 
-    const transferSession = modalSessionRef.current // Capture for timeout closure
+    const transferSession = modalSessionRef.current // Capture for session-scoping
 
     setIsTransferring(true)
     setTransferError(null)
     setTransferWarning(null)
     try {
       const result = await transferOrderToShopify(previewOrderId, { enabledTagIds, customerOverride })
+
+      // Guard all result updates - only apply if still in same modal session
+      if (modalSessionRef.current !== transferSession) {
+        return // User opened different order, discard results
+      }
+
       if (result.success) {
         if (result.customerUpdateWarning) {
           setTransferWarning(result.customerUpdateWarning)
@@ -471,11 +478,18 @@ export function OrdersTable({ initialOrders, total, statusCounts, facets }: Orde
         )
       }
     } catch (error) {
+      // Guard error updates too
+      if (modalSessionRef.current !== transferSession) {
+        return
+      }
       const errorMessage = error instanceof Error ? error.message : 'Transfer failed unexpectedly'
       setTransferError(errorMessage)
       console.error('Transfer failed:', error)
     } finally {
-      setIsTransferring(false)
+      // Only clear isTransferring if still in same session
+      if (modalSessionRef.current === transferSession) {
+        setIsTransferring(false)
+      }
     }
   }, [previewOrderId, router])
 

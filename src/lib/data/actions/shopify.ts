@@ -901,6 +901,7 @@ export async function validateOrderForShopify(
 /**
  * Validate multiple orders for Shopify transfer, specifically checking customer name discrepancies.
  * Processes orders in batches with rate limiting to avoid API throttling.
+ * Limited to MAX_VALIDATION_ORDERS to prevent long waits and timeouts.
  */
 export async function batchValidateOrdersForShopify(
   orderIds: string[]
@@ -911,12 +912,34 @@ export async function batchValidateOrdersForShopify(
   const discrepancyOrderIds: string[] = []
   const discrepancyOrders: BatchValidationResult['discrepancyOrders'] = []
 
-  // Process in batches of 3 with 200ms delay between batches
+  // Limits to prevent long waits and server-action timeouts
   const BATCH_SIZE = 3
   const BATCH_DELAY_MS = 200
+  const MAX_VALIDATION_ORDERS = 50
 
-  for (let i = 0; i < orderIds.length; i += BATCH_SIZE) {
-    const batch = orderIds.slice(i, i + BATCH_SIZE)
+  // If too many orders, only validate up to the cap
+  const ordersToValidate = orderIds.slice(0, MAX_VALIDATION_ORDERS)
+  const skippedOrders = orderIds.slice(MAX_VALIDATION_ORDERS)
+
+  // Mark skipped orders as needing review (too many to validate)
+  for (const orderId of skippedOrders) {
+    results.push({
+      orderId,
+      orderNumber: 'Unknown',
+      customerNameStatus: 'unknown',
+      error: 'Skipped: too many orders selected',
+    })
+    discrepancyOrderIds.push(orderId)
+    discrepancyOrders.push({
+      orderId,
+      orderNumber: '(not validated)',
+      ohnName: '',
+      shopifyName: null,
+    })
+  }
+
+  for (let i = 0; i < ordersToValidate.length; i += BATCH_SIZE) {
+    const batch = ordersToValidate.slice(i, i + BATCH_SIZE)
 
     const batchResults = await Promise.allSettled(
       batch.map(async (orderId) => {
@@ -970,7 +993,7 @@ export async function batchValidateOrdersForShopify(
     }
 
     // Delay between batches (except for last batch)
-    if (i + BATCH_SIZE < orderIds.length) {
+    if (i + BATCH_SIZE < ordersToValidate.length) {
       await new Promise(resolve => setTimeout(resolve, BATCH_DELAY_MS))
     }
   }
