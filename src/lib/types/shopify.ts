@@ -147,6 +147,17 @@ export interface ShopifyValidationResult {
   inactiveSkus: string[]
   customerEmail: string | null
   customerExists: boolean
+  // Shopify customer lookup result
+  shopifyCustomer?: {
+    id: number
+    firstName: string | null
+    lastName: string | null
+  }
+  shopifyCustomerLookupError?: string
+  // Derived name comparison
+  ohnCustomerName: string
+  shopifyCustomerName: string | null
+  customerNameStatus: 'new' | 'match' | 'discrepancy' | 'unknown' | 'no_email'
   inventoryStatus: InventoryStatusItem[]
   // Enhanced fields for Transfer Preview modal
   shipWindow: string | null          // Formatted "Jan 15 – Jan 22, 2026"
@@ -230,4 +241,25 @@ export interface BulkSyncResult {
   synced: number
   failed: number
   errors: Array<{ orderId: string; error: string }>
+}
+
+// ============================================================================
+// Batch Validation (for Bulk Transfer Customer Name Check)
+// ============================================================================
+
+export interface BatchValidationResult {
+  results: Array<{
+    orderId: string
+    orderNumber: string
+    customerNameStatus: ShopifyValidationResult['customerNameStatus']
+    error?: string
+  }>
+  hasDiscrepancies: boolean
+  discrepancyOrderIds: string[]
+  discrepancyOrders: Array<{
+    orderId: string
+    orderNumber: string
+    ohnName: string
+    shopifyName: string | null
+  }>
 }

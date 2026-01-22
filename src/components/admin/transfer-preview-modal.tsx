@@ -10,6 +10,8 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { StatusBadge } from '@/components/ui/status-badge'
 import {
   Tooltip,
@@ -26,10 +28,22 @@ export interface TransferPreviewModalProps {
   onOpenChange: (open: boolean) => void
   validation: ShopifyValidationResult | null
   isLoading: boolean
-  onTransfer: (enabledTagIds?: string[]) => void
+  onTransfer: (
+    enabledTagIds?: string[],
+    customerOverride?: {
+      firstName: string
+      lastName: string
+      updateShopifyRecord: boolean
+      shopifyCustomerId?: number
+      currentShopifyName?: string
+    }
+  ) => void
   isTransferring: boolean
   transferError?: string | null
+  transferWarning?: string | null
 }
+
+type CustomerNameSource = 'ohn' | 'shopify' | 'custom'
 
 export function TransferPreviewModal({
   open,
@@ -39,18 +53,40 @@ export function TransferPreviewModal({
   onTransfer,
   isTransferring,
   transferError,
+  transferWarning,
 }: TransferPreviewModalProps) {
   const [tagStates, setTagStates] = React.useState<Record<string, boolean>>({})
 
+  // Customer name selection state
+  const [customerNameSource, setCustomerNameSource] = React.useState<CustomerNameSource>('ohn')
+  const [customFirstName, setCustomFirstName] = React.useState('')
+  const [customLastName, setCustomLastName] = React.useState('')
+  const [updateShopifyRecord, setUpdateShopifyRecord] = React.useState(false)
+
+  // Track previous orderId to detect order changes
+  const prevOrderIdRef = React.useRef<string | null>(null)
+
   React.useEffect(() => {
-    if (validation?.tags) {
-      const initialStates: Record<string, boolean> = {}
-      for (const tag of validation.tags) {
-        initialStates[tag.id] = tag.enabled
+    // Reset ALL state when order changes
+    if (validation?.orderId && validation.orderId !== prevOrderIdRef.current) {
+      prevOrderIdRef.current = validation.orderId
+
+      // Reset tag states
+      if (validation.tags) {
+        const initialStates: Record<string, boolean> = {}
+        for (const tag of validation.tags) {
+          initialStates[tag.id] = tag.enabled
+        }
+        setTagStates(initialStates)
       }
-      setTagStates(initialStates)
+
+      // Reset customer selection
+      setCustomerNameSource('ohn')
+      setCustomFirstName('')
+      setCustomLastName('')
+      setUpdateShopifyRecord(validation.customerExists)
     }
-  }, [validation?.tags])
+  }, [validation?.orderId, validation?.tags, validation?.customerExists])
 
   if (!validation && !isLoading) return null
 
@@ -67,17 +103,50 @@ export function TransferPreviewModal({
   ) ?? []
   const hasInvalidEnabledTags = invalidEnabledTags.length > 0
 
-  const canTransfer = blockedCount === 0
+  // Get selected customer name based on source
+  const getSelectedCustomerName = (): { firstName: string; lastName: string; isValid: boolean } => {
+    if (customerNameSource === 'shopify' && validation?.shopifyCustomer) {
+      const firstName = validation.shopifyCustomer.firstName || ''
+      const lastName = validation.shopifyCustomer.lastName || ''
+      return { firstName, lastName, isValid: !!(firstName || lastName) }
+    }
+    if (customerNameSource === 'custom') {
+      const firstName = customFirstName.trim()
+      const lastName = customLastName.trim()
+      return { firstName, lastName, isValid: !!(firstName || lastName) }
+    }
+    // Default to OHN
+    const nameParts = (validation?.ohnCustomerName || '').trim().split(/\s+/)
+    const firstName = nameParts[0] || ''
+    const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : firstName
+    return { firstName, lastName, isValid: !!firstName }
+  }
+
+  const selectedName = getSelectedCustomerName()
+  const canTransfer = blockedCount === 0 && selectedName.isValid
 
   const toggleTag = (tagId: string) => {
     setTagStates((prev) => ({ ...prev, [tagId]: !prev[tagId] }))
   }
 
   const handleTransfer = () => {
+    const { firstName, lastName, isValid } = getSelectedCustomerName()
+
+    if (!isValid) return
+
     const enabledTagIds = Object.entries(tagStates)
       .filter(([, enabled]) => enabled)
       .map(([id]) => id)
-    onTransfer(enabledTagIds)
+
+    const customerOverride = {
+      firstName,
+      lastName,
+      updateShopifyRecord: updateShopifyRecord && validation?.customerExists === true,
+      shopifyCustomerId: validation?.shopifyCustomer?.id,
+      currentShopifyName: validation?.shopifyCustomerName || undefined,
+    }
+
+    onTransfer(enabledTagIds, customerOverride)
   }
 
   const getTagSourceLabel = (source: TransferTag['source']): string => {
@@ -123,11 +192,13 @@ export function TransferPreviewModal({
                 'flex items-center gap-4 p-4 rounded-lg border',
                 transferError
                   ? 'bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800'
-                  : hasInvalidEnabledTags
+                  : transferWarning
                     ? 'bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800'
-                    : canTransfer
-                      ? 'bg-green-50 dark:bg-green-950/30 border-green-200 dark:border-green-800'
-                      : 'bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800'
+                    : hasInvalidEnabledTags
+                      ? 'bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800'
+                      : canTransfer
+                        ? 'bg-green-50 dark:bg-green-950/30 border-green-200 dark:border-green-800'
+                        : 'bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800'
               )}
             >
               {transferError ? (
@@ -136,6 +207,14 @@ export function TransferPreviewModal({
                   <div className="flex-1 min-w-0">
                     <p className="font-semibold text-red-800 dark:text-red-200">Transfer Failed</p>
                     <p className="text-sm text-red-700 dark:text-red-300">{transferError}</p>
+                  </div>
+                </>
+              ) : transferWarning ? (
+                <>
+                  <AlertTriangle className="h-6 w-6 text-amber-600 flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-amber-800 dark:text-amber-200">Transfer Completed with Warning</p>
+                    <p className="text-sm text-amber-700 dark:text-amber-300">{transferWarning}</p>
                   </div>
                 </>
               ) : hasInvalidEnabledTags ? (
@@ -163,7 +242,11 @@ export function TransferPreviewModal({
                   <XCircle className="h-6 w-6 text-red-600 flex-shrink-0" />
                   <div>
                     <p className="font-semibold text-red-800 dark:text-red-200">Cannot Transfer</p>
-                    <p className="text-sm text-red-700 dark:text-red-300">{blockedCount} blocking SKU(s) must be resolved first</p>
+                    <p className="text-sm text-red-700 dark:text-red-300">
+                      {blockedCount > 0
+                        ? `${blockedCount} blocking SKU(s) must be resolved first`
+                        : 'Customer name cannot be empty'}
+                    </p>
                   </div>
                 </>
               )}
@@ -212,6 +295,169 @@ export function TransferPreviewModal({
                   <p className="text-xl font-semibold">${validation.orderAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
                 </div>
               </div>
+            </div>
+
+            {/* Customer Data Section */}
+            <div>
+              <div className="flex items-center justify-between mb-4">
+                <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
+                  Customer Data
+                </h4>
+                {validation.customerNameStatus === 'discrepancy' && (
+                  <span className="text-sm text-amber-600 flex items-center gap-1">
+                    <AlertTriangle className="h-4 w-4" />
+                    Discrepancy
+                  </span>
+                )}
+                {validation.customerNameStatus === 'unknown' && (
+                  <span className="text-sm text-red-600 flex items-center gap-1">
+                    <XCircle className="h-4 w-4" />
+                    Lookup Failed
+                  </span>
+                )}
+                {validation.customerNameStatus === 'no_email' && (
+                  <span className="text-sm text-amber-600 flex items-center gap-1">
+                    <AlertTriangle className="h-4 w-4" />
+                    No Email
+                  </span>
+                )}
+                {validation.customerNameStatus === 'match' && (
+                  <CheckCircle2 className="h-4 w-4 text-green-600" />
+                )}
+                {validation.customerNameStatus === 'new' && (
+                  <span className="text-xs text-muted-foreground">New customer</span>
+                )}
+              </div>
+
+              {/* Warning for no_email status */}
+              {validation.customerNameStatus === 'no_email' && (
+                <div className="mb-4 p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg">
+                  <p className="text-sm text-amber-700 dark:text-amber-300">
+                    This order has no customer email. Cannot verify against Shopify.
+                  </p>
+                  <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+                    Review the customer name carefully before proceeding.
+                  </p>
+                </div>
+              )}
+
+              {/* Error state for lookup failure */}
+              {validation.shopifyCustomerLookupError && (
+                <div className="mb-4 p-3 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg">
+                  <p className="text-sm text-red-700 dark:text-red-300">
+                    Could not verify existing customer: {validation.shopifyCustomerLookupError}
+                  </p>
+                  <p className="text-xs text-red-600 dark:text-red-400 mt-1">
+                    Proceeding will use OHN data. Review carefully.
+                  </p>
+                </div>
+              )}
+
+              {/* Name selection UI */}
+              <div className="space-y-3 border rounded-lg p-4">
+                {/* OHN Name Option */}
+                <label className={cn(
+                  'flex items-start gap-3 p-3 rounded-lg cursor-pointer transition-colors',
+                  customerNameSource === 'ohn' ? 'bg-primary/10 border border-primary/30' : 'hover:bg-muted/50'
+                )}>
+                  <input
+                    type="radio"
+                    name="customerNameSource"
+                    value="ohn"
+                    checked={customerNameSource === 'ohn'}
+                    onChange={() => setCustomerNameSource('ohn')}
+                    className="mt-1"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium">Use OHN Name</p>
+                    <p className="text-sm text-muted-foreground truncate">
+                      {validation.ohnCustomerName || '(empty)'}
+                    </p>
+                  </div>
+                </label>
+
+                {/* Shopify Name Option - only show if customer exists */}
+                {validation.customerExists && validation.shopifyCustomer && (
+                  <label className={cn(
+                    'flex items-start gap-3 p-3 rounded-lg cursor-pointer transition-colors',
+                    customerNameSource === 'shopify' ? 'bg-primary/10 border border-primary/30' : 'hover:bg-muted/50'
+                  )}>
+                    <input
+                      type="radio"
+                      name="customerNameSource"
+                      value="shopify"
+                      checked={customerNameSource === 'shopify'}
+                      onChange={() => setCustomerNameSource('shopify')}
+                      className="mt-1"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium">Use Shopify Name</p>
+                      <p className="text-sm text-muted-foreground truncate">
+                        {validation.shopifyCustomerName || '(empty)'}
+                      </p>
+                    </div>
+                  </label>
+                )}
+
+                {/* Custom Name Option */}
+                <label className={cn(
+                  'flex items-start gap-3 p-3 rounded-lg cursor-pointer transition-colors',
+                  customerNameSource === 'custom' ? 'bg-primary/10 border border-primary/30' : 'hover:bg-muted/50'
+                )}>
+                  <input
+                    type="radio"
+                    name="customerNameSource"
+                    value="custom"
+                    checked={customerNameSource === 'custom'}
+                    onChange={() => setCustomerNameSource('custom')}
+                    className="mt-1"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium">Enter Custom Name</p>
+                    {customerNameSource === 'custom' && (
+                      <div className="grid grid-cols-2 gap-3 mt-2">
+                        <div>
+                          <Label htmlFor="customFirstName" className="text-xs">First Name</Label>
+                          <Input
+                            id="customFirstName"
+                            value={customFirstName}
+                            onChange={(e) => setCustomFirstName(e.target.value)}
+                            placeholder="First name"
+                            className="mt-1"
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor="customLastName" className="text-xs">Last Name</Label>
+                          <Input
+                            id="customLastName"
+                            value={customLastName}
+                            onChange={(e) => setCustomLastName(e.target.value)}
+                            placeholder="Last name"
+                            className="mt-1"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </label>
+              </div>
+
+              {/* Update Shopify checkbox - only if customer actually exists */}
+              {validation.customerExists && validation.shopifyCustomer?.id && (
+                <label className="flex items-start gap-3 p-3 mt-3 bg-muted/30 rounded-lg cursor-pointer">
+                  <Checkbox
+                    checked={updateShopifyRecord}
+                    onCheckedChange={(checked) => setUpdateShopifyRecord(!!checked)}
+                    className="mt-0.5"
+                  />
+                  <div>
+                    <p className="text-sm font-medium">Also update this customer in Shopify</p>
+                    <p className="text-xs text-muted-foreground">
+                      Future orders for {validation.customerEmail} will use this name
+                    </p>
+                  </div>
+                </label>
+              )}
             </div>
 
             {/* Tags */}

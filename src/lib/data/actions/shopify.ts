@@ -15,6 +15,7 @@ import type {
   AddMissingSkuInput,
   ShopifyValidationResult,
   BulkTransferResult,
+  BatchValidationResult,
   InventoryStatusItem,
   SyncOrderStatusResult,
   BulkSyncResult,
@@ -266,8 +267,16 @@ export async function transferOrderToShopify(
   options?: {
     /** Tag IDs to include (if not provided, all tags are included) */
     enabledTagIds?: string[]
+    /** Customer name override */
+    customerOverride?: {
+      firstName: string
+      lastName: string
+      updateShopifyRecord: boolean
+      shopifyCustomerId?: number
+      currentShopifyName?: string
+    }
   }
-): Promise<ShopifyTransferResult> {
+): Promise<ShopifyTransferResult & { customerUpdateWarning?: string }> {
   try {
     await requireAdmin()
     const cascadeConfig = await getStatusCascadeConfig('Product')
@@ -368,7 +377,53 @@ export async function transferOrderToShopify(
     }
 
     // 6. Build Shopify order request
-    const { firstName, lastName } = splitName(order.StoreName)
+    // Determine customer name to use (override or default)
+    let firstName: string
+    let lastName: string
+
+    if (options?.customerOverride) {
+      const trimmedFirst = (options.customerOverride.firstName || '').trim()
+      const trimmedLast = (options.customerOverride.lastName || '').trim()
+
+      if (!trimmedFirst && !trimmedLast) {
+        return {
+          success: false,
+          error: 'Customer name cannot be empty',
+        }
+      }
+
+      firstName = trimmedFirst
+      lastName = trimmedLast || trimmedFirst
+    } else {
+      const splitResult = splitName(order.StoreName)
+      firstName = splitResult.firstName
+      lastName = splitResult.lastName
+    }
+
+    // Update Shopify customer record if requested (with short-circuit check)
+    let customerUpdateWarning: string | undefined
+
+    if (options?.customerOverride?.updateShopifyRecord && options.customerOverride.shopifyCustomerId) {
+      // Short-circuit: skip if selected name matches current Shopify name
+      const selectedFullName = normalizeName(`${firstName} ${lastName}`)
+      const currentFullName = normalizeName(options.customerOverride.currentShopifyName || '')
+
+      if (selectedFullName !== currentFullName) {
+        const { error: updateError } = await shopify.customers.update(
+          options.customerOverride.shopifyCustomerId,
+          {
+            first_name: firstName,
+            last_name: lastName,
+          }
+        )
+
+        if (updateError) {
+          customerUpdateWarning = `Customer record update failed: ${updateError}. Order will still be transferred.`
+          console.warn(customerUpdateWarning)
+        }
+      }
+      // If names match, no update needed - skip silently
+    }
 
     // Format ship window
     const shipWindowStart = formatDate(order.ShipStartDate)
@@ -556,6 +611,7 @@ export async function transferOrderToShopify(
         shopifyOrderId: String(retryResult.order.id),
         shopifyOrderNumber: retryResult.order.name,
         customerCreated: true,
+        customerUpdateWarning,
       }
     }
 
@@ -588,6 +644,7 @@ export async function transferOrderToShopify(
       shopifyOrderId: String(createdOrder.id),
       shopifyOrderNumber: createdOrder.name,
       customerCreated,
+      customerUpdateWarning,
     }
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Failed to transfer order to Shopify'
@@ -641,6 +698,11 @@ export async function validateOrderForShopify(
         inactiveSkus: [],
         customerEmail: null,
         customerExists: false,
+        shopifyCustomer: undefined,
+        shopifyCustomerLookupError: 'Order not found',
+        ohnCustomerName: '',
+        shopifyCustomerName: null,
+        customerNameStatus: 'unknown',
         inventoryStatus: [],
         shipWindow: null,
         shipWindowTag: null,
@@ -663,12 +725,46 @@ export async function validateOrderForShopify(
       },
     })
 
-    // Check customer exists in Shopify cache
+    // Derive OHN customer name from StoreName
+    const ohnCustomerName = (order.StoreName || '').trim()
+    const hasEmail = !!order.CustomerEmail?.trim()
+
+    // Check customer exists in Shopify and get their details
     let customerExists = false
-    if (order.CustomerEmail) {
-      const cachedCustomer = await findCachedShopifyCustomer(order.CustomerEmail)
-      customerExists = !!cachedCustomer
+    let shopifyCustomer: { id: number; firstName: string | null; lastName: string | null } | undefined
+    let shopifyCustomerLookupError: string | undefined
+    let shopifyCustomerName: string | null = null
+
+    if (hasEmail) {
+      try {
+        const { customer, error } = await shopify.customers.findByEmail(order.CustomerEmail!)
+
+        if (error) {
+          shopifyCustomerLookupError = error
+        } else if (customer) {
+          customerExists = true
+          shopifyCustomer = {
+            id: customer.id,
+            firstName: customer.first_name ?? null,
+            lastName: customer.last_name ?? null,
+          }
+          shopifyCustomerName = [customer.first_name, customer.last_name]
+            .filter(Boolean)
+            .join(' ')
+            .trim() || null
+        }
+        // If no customer found and no error, status will be 'new'
+      } catch (e) {
+        shopifyCustomerLookupError = e instanceof Error ? e.message : 'Unknown error'
+      }
     }
+
+    const customerNameStatus = determineNameStatus(
+      ohnCustomerName,
+      shopifyCustomerName,
+      hasEmail,
+      shopifyCustomerLookupError
+    )
 
     // Check each item for Shopify variant and inventory
     const missingSkus: string[] = []
@@ -746,6 +842,11 @@ export async function validateOrderForShopify(
       inactiveSkus,
       customerEmail: order.CustomerEmail,
       customerExists,
+      shopifyCustomer,
+      shopifyCustomerLookupError,
+      ohnCustomerName,
+      shopifyCustomerName,
+      customerNameStatus,
       inventoryStatus,
       shipWindow: formatShipWindowDisplay(order.ShipStartDate, order.ShipEndDate),
       shipWindowTag: formatShipWindowTag(order.ShipStartDate, order.ShipEndDate),
@@ -770,6 +871,11 @@ export async function validateOrderForShopify(
       inactiveSkus: [],
       customerEmail: null,
       customerExists: false,
+      shopifyCustomer: undefined,
+      shopifyCustomerLookupError: message,
+      ohnCustomerName: '',
+      shopifyCustomerName: null,
+      customerNameStatus: 'unknown',
       inventoryStatus: [],
       shipWindow: null,
       shipWindowTag: null,
@@ -780,6 +886,91 @@ export async function validateOrderForShopify(
       tags: [],
       hasInvalidTags: false,
     }
+  }
+}
+
+// ============================================================================
+// Batch Validation for Bulk Transfer
+// ============================================================================
+
+/**
+ * Validate multiple orders for Shopify transfer, specifically checking customer name discrepancies.
+ * Processes orders in batches with rate limiting to avoid API throttling.
+ */
+export async function batchValidateOrdersForShopify(
+  orderIds: string[]
+): Promise<BatchValidationResult> {
+  await requireAdmin()
+
+  const results: BatchValidationResult['results'] = []
+  const discrepancyOrderIds: string[] = []
+  const discrepancyOrders: BatchValidationResult['discrepancyOrders'] = []
+
+  // Process in batches of 3 with 200ms delay between batches
+  const BATCH_SIZE = 3
+  const BATCH_DELAY_MS = 200
+
+  for (let i = 0; i < orderIds.length; i += BATCH_SIZE) {
+    const batch = orderIds.slice(i, i + BATCH_SIZE)
+
+    const batchResults = await Promise.allSettled(
+      batch.map(async (orderId) => {
+        const result = await validateOrderForShopify(orderId)
+        return { orderId, result }
+      })
+    )
+
+    for (let j = 0; j < batchResults.length; j++) {
+      const settled = batchResults[j]
+      if (settled.status === 'fulfilled') {
+        const { orderId, result } = settled.value
+        const needsReview = ['discrepancy', 'unknown', 'no_email'].includes(result.customerNameStatus)
+
+        results.push({
+          orderId,
+          orderNumber: result.orderNumber,
+          customerNameStatus: result.customerNameStatus,
+        })
+
+        if (needsReview) {
+          discrepancyOrderIds.push(orderId)
+          discrepancyOrders.push({
+            orderId,
+            orderNumber: result.orderNumber,
+            ohnName: result.ohnCustomerName,
+            shopifyName: result.shopifyCustomerName,
+          })
+        }
+      } else {
+        // Validation threw an error - treat as needing review
+        const orderId = batch[j]
+        results.push({
+          orderId,
+          orderNumber: 'Unknown',
+          customerNameStatus: 'unknown',
+          error: settled.reason?.message || 'Validation failed',
+        })
+        discrepancyOrderIds.push(orderId)
+        discrepancyOrders.push({
+          orderId,
+          orderNumber: 'Unknown',
+          ohnName: '',
+          shopifyName: null,
+        })
+      }
+    }
+
+    // Delay between batches (except for last batch)
+    if (i + BATCH_SIZE < orderIds.length) {
+      await new Promise(resolve => setTimeout(resolve, BATCH_DELAY_MS))
+    }
+  }
+
+  return {
+    results,
+    hasDiscrepancies: discrepancyOrderIds.length > 0,
+    discrepancyOrderIds,
+    discrepancyOrders,
   }
 }
 
@@ -1099,6 +1290,54 @@ function splitName(fullName: string): { firstName: string; lastName: string } {
   const lastName = names.length === 1 ? names[0] : names.slice(1).join(' ')
 
   return { firstName, lastName }
+}
+
+/**
+ * Normalize a name for comparison (lowercase, trim, collapse whitespace).
+ */
+function normalizeName(name: string): string {
+  return name
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, ' ')
+}
+
+/**
+ * Determine the customer name status based on OHN and Shopify data.
+ */
+function determineNameStatus(
+  ohnName: string,
+  shopifyName: string | null,
+  hasEmail: boolean,
+  lookupError?: string
+): 'new' | 'match' | 'discrepancy' | 'unknown' | 'no_email' {
+  // No email = can't verify, needs manual review
+  if (!hasEmail) {
+    return 'no_email'
+  }
+
+  // Lookup failed = unknown, needs manual review
+  if (lookupError) {
+    return 'unknown'
+  }
+
+  // No Shopify customer found = new customer
+  if (shopifyName === null) {
+    return 'new'
+  }
+
+  const ohnNormalized = normalizeName(ohnName)
+  const shopifyNormalized = normalizeName(shopifyName)
+
+  // If either is empty but not both, it's a discrepancy
+  if (!ohnNormalized && shopifyNormalized) return 'discrepancy'
+  if (ohnNormalized && !shopifyNormalized) return 'discrepancy'
+
+  // Both empty = match (nothing to compare)
+  if (!ohnNormalized && !shopifyNormalized) return 'match'
+
+  // Compare normalized names
+  return ohnNormalized === shopifyNormalized ? 'match' : 'discrepancy'
 }
 
 /**

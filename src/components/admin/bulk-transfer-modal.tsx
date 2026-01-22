@@ -24,6 +24,15 @@ export interface BulkTransferModalProps {
   result: BulkTransferResult | null
   /** Whether transfer is in progress */
   isTransferring: boolean
+  /** Whether batch validation is in progress */
+  isValidating?: boolean
+  /** Orders with customer name discrepancies */
+  discrepancyOrders?: Array<{
+    orderId: string
+    orderNumber: string
+    ohnName: string
+    shopifyName: string | null
+  }>
   /** Callback to start the transfer */
   onTransfer: () => void
 }
@@ -40,10 +49,16 @@ export function BulkTransferModal({
   ineligibleReasons,
   result,
   isTransferring,
+  isValidating,
+  discrepancyOrders,
   onTransfer,
 }: BulkTransferModalProps) {
   const ineligibleCount = selectedCount - eligibleCount
   const hasIneligible = ineligibleCount > 0
+  const hasDiscrepancies = discrepancyOrders && discrepancyOrders.length > 0
+  const actualEligibleCount = hasDiscrepancies
+    ? eligibleCount - discrepancyOrders.length
+    : eligibleCount
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -56,33 +71,94 @@ export function BulkTransferModal({
 
         {!result ? (
           <div className="space-y-4">
-            {/* Eligibility Summary */}
-            {hasIneligible ? (
-              <div className="space-y-3">
-                <div className="flex items-start gap-3 p-3 bg-yellow-50 dark:bg-yellow-950/30 border border-yellow-200 dark:border-yellow-800 rounded-lg">
-                  <AlertTriangle className="h-5 w-5 text-yellow-600 flex-shrink-0 mt-0.5" />
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium text-yellow-800 dark:text-yellow-200">
-                      {eligibleCount} of {selectedCount} orders can be transferred
-                    </p>
-                    <p className="text-xs text-yellow-700 dark:text-yellow-300">
-                      {ineligibleCount} order(s) will be skipped:
-                    </p>
-                    {ineligibleReasons && ineligibleReasons.length > 0 && (
-                      <ul className="text-xs text-yellow-700 dark:text-yellow-300 list-disc list-inside">
-                        {ineligibleReasons.map((r, i) => (
-                          <li key={i}>{r.count} {r.reason}</li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                </div>
+            {/* Validating State */}
+            {isValidating ? (
+              <div className="flex items-center gap-3 py-4">
+                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                <span className="text-muted-foreground">Checking customer data...</span>
               </div>
             ) : (
-              <p className="text-sm text-muted-foreground">
-                You are about to transfer <strong>{eligibleCount}</strong> order(s) to Shopify.
-                This may take a moment.
-              </p>
+              <>
+                {/* Discrepancy Warning */}
+                {hasDiscrepancies && (
+                  <div className="space-y-3">
+                    <div className="p-3 bg-yellow-50 dark:bg-yellow-950/30 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+                      <div className="flex items-start gap-3">
+                        <AlertTriangle className="h-5 w-5 text-yellow-600 flex-shrink-0 mt-0.5" />
+                        <div className="space-y-2 flex-1">
+                          <p className="text-sm font-medium text-yellow-800 dark:text-yellow-200">
+                            {discrepancyOrders.length} order(s) need individual review:
+                          </p>
+                          <div className="max-h-32 overflow-y-auto">
+                            <table className="w-full text-xs">
+                              <thead>
+                                <tr className="text-left text-muted-foreground">
+                                  <th className="pb-1">Order</th>
+                                  <th className="pb-1">OHN Name</th>
+                                  <th className="pb-1">Shopify Name</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {discrepancyOrders.map((order) => (
+                                  <tr key={order.orderId} className="border-t border-border/50">
+                                    <td className="py-1 font-mono">{order.orderNumber}</td>
+                                    <td className="py-1">{order.ohnName || '(empty)'}</td>
+                                    <td className="py-1">{order.shopifyName || '(none)'}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                          <p className="text-xs text-yellow-700 dark:text-yellow-300">
+                            These orders will be skipped. Transfer them individually to review customer names.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Eligibility Summary */}
+                {hasIneligible ? (
+                  <div className="space-y-3">
+                    <div className="flex items-start gap-3 p-3 bg-yellow-50 dark:bg-yellow-950/30 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+                      <AlertTriangle className="h-5 w-5 text-yellow-600 flex-shrink-0 mt-0.5" />
+                      <div className="space-y-1">
+                        <p className="text-sm font-medium text-yellow-800 dark:text-yellow-200">
+                          {actualEligibleCount} of {selectedCount} orders can be transferred
+                        </p>
+                        <p className="text-xs text-yellow-700 dark:text-yellow-300">
+                          {ineligibleCount} order(s) will be skipped:
+                        </p>
+                        {ineligibleReasons && ineligibleReasons.length > 0 && (
+                          <ul className="text-xs text-yellow-700 dark:text-yellow-300 list-disc list-inside">
+                            {ineligibleReasons.map((r, i) => (
+                              <li key={i}>{r.count} {r.reason}</li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ) : actualEligibleCount > 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    You are about to transfer <strong>{actualEligibleCount}</strong> order(s) to Shopify.
+                    This may take a moment.
+                  </p>
+                ) : (
+                  <div className="flex items-start gap-3 p-3 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg">
+                    <XCircle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-medium text-red-800 dark:text-red-200">
+                        No orders can be transferred
+                      </p>
+                      <p className="text-xs text-red-700 dark:text-red-300">
+                        All selected orders either need individual review or are already in Shopify.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </>
             )}
 
             {isTransferring && (
@@ -96,17 +172,19 @@ export function BulkTransferModal({
               <Button
                 variant="outline"
                 onClick={() => onOpenChange(false)}
-                disabled={isTransferring}
+                disabled={isTransferring || isValidating}
               >
                 Cancel
               </Button>
               <Button
                 onClick={onTransfer}
-                disabled={isTransferring || eligibleCount === 0}
+                disabled={isTransferring || isValidating || actualEligibleCount === 0}
               >
                 {isTransferring
                   ? 'Transferring...'
-                  : `Transfer ${eligibleCount} Order${eligibleCount !== 1 ? 's' : ''}`}
+                  : isValidating
+                    ? 'Validating...'
+                    : `Transfer ${actualEligibleCount} Order${actualEligibleCount !== 1 ? 's' : ''}`}
               </Button>
             </div>
           </div>

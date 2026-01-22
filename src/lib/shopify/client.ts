@@ -265,6 +265,37 @@ export async function findCustomerByEmail(
   return { customer }
 }
 
+/**
+ * Get a customer by ID from Shopify.
+ */
+export async function getCustomer(
+  customerId: number
+): Promise<{ customer?: ShopifyCustomerResponse['customer']; error?: string }> {
+  const { data, error } = await shopifyFetch<ShopifyCustomerResponse>(
+    `/customers/${customerId}.json`
+  )
+  if (error) return { error }
+  return { customer: data?.customer }
+}
+
+/**
+ * Update a customer in Shopify.
+ */
+export async function updateCustomer(
+  customerId: number,
+  customerData: Partial<ShopifyCustomer>
+): Promise<{ customer?: ShopifyCustomerResponse['customer']; error?: string }> {
+  const { data, error } = await shopifyFetch<ShopifyCustomerResponse>(
+    `/customers/${customerId}.json`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({ customer: customerData }),
+    }
+  )
+  if (error) return { error }
+  return { customer: data?.customer }
+}
+
 // ============================================================================
 // Customer List API (for bulk import)
 // ============================================================================
@@ -516,6 +547,8 @@ export const shopify = {
   },
   customers: {
     create: createCustomer,
+    get: getCustomer,
+    update: updateCustomer,
     findByEmail: findCustomerByEmail,
     list: listCustomers,
     listAll: listAllCustomers,

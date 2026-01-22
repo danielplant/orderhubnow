@@ -28,9 +28,9 @@ import { TransferPreviewModal } from '@/components/admin/transfer-preview-modal'
 import { BulkTransferModal } from '@/components/admin/bulk-transfer-modal'
 import { cn } from '@/lib/utils'
 import type { AdminOrderRow, OrderFacets, OrderStatus, OrdersListResult } from '@/lib/types/order'
-import type { ShopifyValidationResult, BulkTransferResult } from '@/lib/types/shopify'
+import type { ShopifyValidationResult, BulkTransferResult, BatchValidationResult } from '@/lib/types/shopify'
 import { bulkUpdateStatus, updateOrderStatus } from '@/lib/data/actions/orders'
-import { validateOrderForShopify, transferOrderToShopify, bulkTransferOrdersToShopify } from '@/lib/data/actions/shopify'
+import { validateOrderForShopify, transferOrderToShopify, bulkTransferOrdersToShopify, batchValidateOrdersForShopify } from '@/lib/data/actions/shopify'
 import { MoreHorizontal, AlertTriangle, RefreshCw, SearchX } from 'lucide-react'
 
 // ============================================================================
@@ -153,11 +153,14 @@ export function OrdersTable({ initialOrders, total, statusCounts, facets }: Orde
   const [validationResult, setValidationResult] = React.useState<ShopifyValidationResult | null>(null)
   const [isTransferring, setIsTransferring] = React.useState(false)
   const [transferError, setTransferError] = React.useState<string | null>(null)
+  const [transferWarning, setTransferWarning] = React.useState<string | null>(null)
 
   // Bulk transfer modal state
   const [bulkModalOpen, setBulkModalOpen] = React.useState(false)
   const [bulkTransferResult, setBulkTransferResult] = React.useState<BulkTransferResult | null>(null)
   const [isBulkTransferring, setIsBulkTransferring] = React.useState(false)
+  const [bulkValidating, setBulkValidating] = React.useState(false)
+  const [bulkValidationResult, setBulkValidationResult] = React.useState<BatchValidationResult | null>(null)
 
   // Column visibility state (localStorage persisted)
   // Initialize with defaults to avoid hydration mismatch, then hydrate from localStorage
@@ -413,17 +416,36 @@ export function OrdersTable({ initialOrders, total, statusCounts, facets }: Orde
     }
   }, [])
 
-  const handleTransfer = React.useCallback(async (enabledTagIds?: string[]) => {
+  const handleTransfer = React.useCallback(async (
+    enabledTagIds?: string[],
+    customerOverride?: {
+      firstName: string
+      lastName: string
+      updateShopifyRecord: boolean
+      shopifyCustomerId?: number
+      currentShopifyName?: string
+    }
+  ) => {
     if (!previewOrderId) return
 
     setIsTransferring(true)
     setTransferError(null)
+    setTransferWarning(null)
     try {
-      const result = await transferOrderToShopify(previewOrderId, { enabledTagIds })
+      const result = await transferOrderToShopify(previewOrderId, { enabledTagIds, customerOverride })
       if (result.success) {
-        setPreviewOpen(false)
-        setTransferError(null)
-        router.refresh()
+        if (result.customerUpdateWarning) {
+          setTransferWarning(result.customerUpdateWarning)
+          // Show warning briefly then close
+          setTimeout(() => {
+            setPreviewOpen(false)
+            router.refresh()
+          }, 3000)
+        } else {
+          setPreviewOpen(false)
+          setTransferError(null)
+          router.refresh()
+        }
       } else {
         // Capture the actual error from Shopify
         const errorMessage = result.error || result.errors?.join(', ') || 'Transfer failed'
@@ -469,7 +491,12 @@ export function OrdersTable({ initialOrders, total, statusCounts, facets }: Orde
   }, [initialOrders, selectedIds])
 
   const handleBulkTransfer = React.useCallback(async () => {
-    const eligibleIds = eligibleForTransfer.map((o) => o.id)
+    // Filter out orders with discrepancies
+    const discrepancyIds = new Set(bulkValidationResult?.discrepancyOrderIds ?? [])
+    const eligibleIds = eligibleForTransfer
+      .map((o) => o.id)
+      .filter((id) => !discrepancyIds.has(id))
+
     if (eligibleIds.length === 0) return
 
     setIsBulkTransferring(true)
@@ -485,7 +512,7 @@ export function OrdersTable({ initialOrders, total, statusCounts, facets }: Orde
     } finally {
       setIsBulkTransferring(false)
     }
-  }, [eligibleForTransfer, router])
+  }, [eligibleForTransfer, bulkValidationResult, router])
 
   const doExport = React.useCallback(
     (format: 'detail' | 'summary' | 'qb') => {
@@ -797,9 +824,33 @@ export function OrdersTable({ initialOrders, total, statusCounts, facets }: Orde
           : `Transfer to Shopify (${eligibleForTransfer.length})`
       actions.push({
         label,
-        onClick: () => {
+        onClick: async () => {
           setBulkTransferResult(null)
+          setBulkValidationResult(null)
           setBulkModalOpen(true)
+          setBulkValidating(true)
+
+          try {
+            // Run batch validation to check for customer name discrepancies
+            const result = await batchValidateOrdersForShopify(eligibleForTransfer.map(o => o.id))
+            setBulkValidationResult(result)
+          } catch (e) {
+            // If batch validation fails entirely, show all orders as needing review
+            console.error('Batch validation failed:', e)
+            setBulkValidationResult({
+              results: [],
+              hasDiscrepancies: true,
+              discrepancyOrderIds: eligibleForTransfer.map(o => o.id),
+              discrepancyOrders: eligibleForTransfer.map(o => ({
+                orderId: o.id,
+                orderNumber: o.orderNumber,
+                ohnName: o.storeName,
+                shopifyName: null,
+              })),
+            })
+          } finally {
+            setBulkValidating(false)
+          }
         },
       })
     }
@@ -989,18 +1040,17 @@ export function OrdersTable({ initialOrders, total, statusCounts, facets }: Orde
         }}
       />
 
-      {/* Transfer Preview Modal - only render when open to avoid React dev static flag error */}
-      {previewOpen && (
-        <TransferPreviewModal
-          open={previewOpen}
-          onOpenChange={setPreviewOpen}
-          validation={validationResult}
-          isLoading={validationLoading}
-          onTransfer={handleTransfer}
-          isTransferring={isTransferring}
-          transferError={transferError}
-        />
-      )}
+      {/* Transfer Preview Modal */}
+      <TransferPreviewModal
+        open={previewOpen}
+        onOpenChange={setPreviewOpen}
+        validation={validationResult}
+        isLoading={validationLoading}
+        onTransfer={handleTransfer}
+        isTransferring={isTransferring}
+        transferError={transferError}
+        transferWarning={transferWarning}
+      />
 
       {/* Bulk Transfer Modal */}
       <BulkTransferModal
@@ -1011,6 +1061,8 @@ export function OrdersTable({ initialOrders, total, statusCounts, facets }: Orde
         ineligibleReasons={ineligibleReasons}
         result={bulkTransferResult}
         isTransferring={isBulkTransferring}
+        isValidating={bulkValidating}
+        discrepancyOrders={bulkValidationResult?.discrepancyOrders}
         onTransfer={handleBulkTransfer}
       />
     </div>
