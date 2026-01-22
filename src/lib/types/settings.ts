@@ -115,6 +115,7 @@ export type SyncSettingsRecord = {
   thumbnailSizeSm: number
   thumbnailSizeMd: number
   thumbnailSizeLg: number
+  thumbnailSizeXl: number
   thumbnailQuality: number
   thumbnailFit: string
   thumbnailBackground: string
@@ -159,10 +160,11 @@ export type SyncSettingsHistoryRecord = {
  * Used when no settings exist in DB.
  */
 export const SYNC_SETTINGS_DEFAULTS: SyncSettingsEditableFields = {
-  thumbnailSettingsVersion: 3,
+  thumbnailSettingsVersion: 5,
   thumbnailSizeSm: 120,
   thumbnailSizeMd: 240,
   thumbnailSizeLg: 480,
+  thumbnailSizeXl: 720,
   thumbnailQuality: 80,
   thumbnailFit: 'contain',
   thumbnailBackground: '#FFFFFF',

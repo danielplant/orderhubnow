@@ -20,13 +20,14 @@ import { uploadToS3 } from '@/lib/s3'
 // =============================================================================
 
 /**
- * Thumbnail settings version - INCREMENT THIS when any setting below changes.
- * This ensures all thumbnails are regenerated when settings change.
+ * Default thumbnail settings version - used when no DB settings available.
+ * This should match the default in SyncSettings table.
  */
 export const THUMBNAIL_SETTINGS_VERSION = 5
 
 /**
- * Available thumbnail sizes
+ * Default thumbnail sizes - used when no DB settings available.
+ * These should match the defaults in SyncSettings table.
  */
 export const THUMBNAIL_SIZES = {
   sm: 120,  // For exports (Excel, PDF)
@@ -38,15 +39,31 @@ export const THUMBNAIL_SIZES = {
 export type ThumbnailSize = keyof typeof THUMBNAIL_SIZES
 
 /**
- * Thumbnail generation settings
+ * Configuration for thumbnail generation - can come from DB settings or defaults
  */
-export const THUMBNAIL_CONFIG = {
+export interface ThumbnailGenerationConfig {
+  version: number
+  sizes: {
+    sm: number
+    md: number
+    lg: number
+    xl: number
+  }
+  quality: number
+  fit: 'contain' | 'cover' | 'fill'
+  background: { r: number; g: number; b: number; alpha: number }
+}
+
+/**
+ * Default thumbnail generation settings
+ */
+export const THUMBNAIL_CONFIG: ThumbnailGenerationConfig = {
+  version: THUMBNAIL_SETTINGS_VERSION,
   sizes: THUMBNAIL_SIZES,
-  quality: 80,      // PNG quality (1-100)
-  fit: 'contain' as const,
+  quality: 80,
+  fit: 'contain',
   background: { r: 255, g: 255, b: 255, alpha: 1 },
-  format: 'png' as const,
-} as const
+}
 
 // =============================================================================
 // Cache Key Generation
@@ -61,9 +78,12 @@ export const THUMBNAIL_CONFIG = {
  * - The settings version number
  *
  * This ensures automatic cache invalidation when either changes.
+ *
+ * @param imageUrl - The source image URL
+ * @param version - Settings version (defaults to THUMBNAIL_SETTINGS_VERSION)
  */
-export function generateThumbnailCacheKey(imageUrl: string): string {
-  const hashInput = `${imageUrl}|v${THUMBNAIL_SETTINGS_VERSION}`
+export function generateThumbnailCacheKey(imageUrl: string, version: number = THUMBNAIL_SETTINGS_VERSION): string {
+  const hashInput = `${imageUrl}|v${version}`
   const hash = crypto.createHash('sha256').update(hashInput).digest('hex')
   return hash.slice(0, 16)
 }
@@ -158,10 +178,15 @@ export function getSkuImageUrl(
  * This avoids expensive HEAD requests during sync.
  *
  * Returns { needsRegen: boolean, reason: string } for debugging.
+ *
+ * @param imageUrl - The source image URL
+ * @param currentThumbnailPath - Current thumbnail path from DB
+ * @param version - Settings version (defaults to THUMBNAIL_SETTINGS_VERSION)
  */
 export function checkThumbnailStatus(
   imageUrl: string | null,
-  currentThumbnailPath: string | null
+  currentThumbnailPath: string | null,
+  version: number = THUMBNAIL_SETTINGS_VERSION
 ): { needsRegen: boolean; reason: string; expectedCacheKey: string | null } {
   // No image URL = no thumbnail needed
   if (!imageUrl) {
@@ -172,7 +197,7 @@ export function checkThumbnailStatus(
     }
   }
 
-  const expectedCacheKey = generateThumbnailCacheKey(imageUrl)
+  const expectedCacheKey = generateThumbnailCacheKey(imageUrl, version)
   const currentCacheKey = extractCacheKey(currentThumbnailPath)
 
   // No current thumbnail
@@ -208,9 +233,13 @@ export function checkThumbnailStatus(
 /**
  * Fetch an image from URL and resize to all thumbnail sizes.
  * Returns a Map of size -> Buffer, or null if fetch fails.
+ *
+ * @param imageUrl - The source image URL
+ * @param config - Generation config (defaults to THUMBNAIL_CONFIG)
  */
 export async function generateThumbnailSizes(
-  imageUrl: string
+  imageUrl: string,
+  config: ThumbnailGenerationConfig = THUMBNAIL_CONFIG
 ): Promise<Map<ThumbnailSize, Buffer> | null> {
   if (!imageUrl) return null
 
@@ -229,17 +258,17 @@ export async function generateThumbnailSizes(
 
     const results = new Map<ThumbnailSize, Buffer>()
 
-    // Generate all sizes in parallel
-    const sizes: ThumbnailSize[] = ['sm', 'md', 'lg', 'xl']
+    // Generate all sizes in parallel using config
+    const sizeKeys: ThumbnailSize[] = ['sm', 'md', 'lg', 'xl']
     const buffers = await Promise.all(
-      sizes.map(async (size) => {
-        const px = THUMBNAIL_SIZES[size]
+      sizeKeys.map(async (size) => {
+        const px = config.sizes[size]
         const buffer = await sharp(sourceBuffer)
           .resize(px, px, {
-            fit: THUMBNAIL_CONFIG.fit,
-            background: THUMBNAIL_CONFIG.background,
+            fit: config.fit,
+            background: config.background,
           })
-          .png({ quality: THUMBNAIL_CONFIG.quality })
+          .png({ quality: config.quality })
           .toBuffer()
         return { size, buffer }
       })
@@ -284,15 +313,19 @@ export async function uploadThumbnailsToS3(
  * Generate and upload thumbnails for an image URL.
  * Returns the cache key if successful.
  *
- * This generates all size variants (120, 240, 480, 720) and uploads to S3.
+ * This generates all size variants and uploads to S3.
+ *
+ * @param imageUrl - The source image URL
+ * @param config - Generation config (defaults to THUMBNAIL_CONFIG)
  */
 export async function generateThumbnail(
-  imageUrl: string
+  imageUrl: string,
+  config: ThumbnailGenerationConfig = THUMBNAIL_CONFIG
 ): Promise<{ cacheKey: string; success: boolean }> {
-  const cacheKey = generateThumbnailCacheKey(imageUrl)
+  const cacheKey = generateThumbnailCacheKey(imageUrl, config.version)
 
   // Generate all sizes
-  const buffers = await generateThumbnailSizes(imageUrl)
+  const buffers = await generateThumbnailSizes(imageUrl, config)
   if (!buffers) {
     return { cacheKey, success: false }
   }
@@ -336,15 +369,19 @@ export interface ThumbnailSyncStats {
  * Only regenerates when necessary (URL changed, settings changed, or missing).
  *
  * Returns detailed results for each SKU and aggregate stats.
+ *
+ * @param items - SKUs to process
+ * @param options - Processing options including concurrency and config
  */
 export async function processThumbnailsBatch(
   items: ThumbnailSyncItem[],
   options: {
     concurrency?: number
+    config?: ThumbnailGenerationConfig
     onProgress?: (processed: number, total: number, stats: ThumbnailSyncStats) => void
   } = {}
 ): Promise<{ results: ThumbnailSyncResult[]; stats: ThumbnailSyncStats }> {
-  const { concurrency = 10, onProgress } = options
+  const { concurrency = 10, config = THUMBNAIL_CONFIG, onProgress } = options
 
   const results: ThumbnailSyncResult[] = []
   const stats: ThumbnailSyncStats = {
@@ -371,8 +408,8 @@ export async function processThumbnailsBatch(
           }
         }
 
-        // Check if regeneration needed
-        const status = checkThumbnailStatus(item.imageUrl, item.currentThumbnailPath)
+        // Check if regeneration needed (using config version)
+        const status = checkThumbnailStatus(item.imageUrl, item.currentThumbnailPath, config.version)
 
         if (!status.needsRegen) {
           return {
@@ -383,8 +420,8 @@ export async function processThumbnailsBatch(
           }
         }
 
-        // Generate new thumbnails and upload to S3
-        const result = await generateThumbnail(item.imageUrl)
+        // Generate new thumbnails and upload to S3 (using config)
+        const result = await generateThumbnail(item.imageUrl, config)
 
         return {
           skuId: item.skuId,

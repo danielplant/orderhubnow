@@ -14,7 +14,19 @@ import {
   processThumbnailsBatch,
   logThumbnailSyncSummary,
   type ThumbnailSyncItem,
+  type ThumbnailGenerationConfig,
 } from '@/lib/utils/thumbnails'
+
+/**
+ * Parse hex color string to RGBA object for sharp
+ */
+function parseBackgroundColor(hex: string): { r: number; g: number; b: number; alpha: number } {
+  const clean = hex.replace('#', '')
+  const r = parseInt(clean.substring(0, 2), 16) || 255
+  const g = parseInt(clean.substring(2, 4), 16) || 255
+  const b = parseInt(clean.substring(4, 6), 16) || 255
+  return { r, g, b, alpha: 1 }
+}
 
 /**
  * Post-sync hook that generates thumbnails for SKUs.
@@ -75,9 +87,26 @@ export const thumbnailHook: SyncHook = {
 
     logger.info(`Processing thumbnails for ${thumbnailItems.length} SKUs...`)
 
+    // Build config from DB settings
+    const config: ThumbnailGenerationConfig = {
+      version: settings.thumbnailSettingsVersion,
+      sizes: {
+        sm: settings.thumbnailSizeSm,
+        md: settings.thumbnailSizeMd,
+        lg: settings.thumbnailSizeLg,
+        xl: settings.thumbnailSizeXl,
+      },
+      quality: settings.thumbnailQuality,
+      fit: settings.thumbnailFit as 'contain' | 'cover' | 'fill',
+      background: parseBackgroundColor(settings.thumbnailBackground),
+    }
+
+    logger.info(`Using thumbnail config: version=${config.version}, sizes=${JSON.stringify(config.sizes)}`)
+
     // Process thumbnails with settings from DB
     const { results, stats } = await processThumbnailsBatch(thumbnailItems, {
       concurrency: settings.thumbnailBatchConcurrency,
+      config,
       onProgress: (processed, total, currentStats) => {
         if (processed % 100 === 0 || processed === total) {
           logger.info(

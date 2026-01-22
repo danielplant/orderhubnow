@@ -1128,10 +1128,11 @@ model SyncSettings {
   version                   Int      @default(1) @map("Version")
 
   // Thumbnail Configuration
-  thumbnailSettingsVersion  Int      @default(3) @map("ThumbnailSettingsVersion")
+  thumbnailSettingsVersion  Int      @default(5) @map("ThumbnailSettingsVersion")
   thumbnailSizeSm           Int      @default(120) @map("ThumbnailSizeSm")
   thumbnailSizeMd           Int      @default(240) @map("ThumbnailSizeMd")
   thumbnailSizeLg           Int      @default(480) @map("ThumbnailSizeLg")
+  thumbnailSizeXl           Int      @default(720) @map("ThumbnailSizeXl")
   thumbnailQuality          Int      @default(80) @map("ThumbnailQuality")
   thumbnailFit              String   @default("contain") @map("ThumbnailFit") @db.NVarChar(20)
   thumbnailBackground       String   @default("#FFFFFF") @map("ThumbnailBackground") @db.NVarChar(10)
