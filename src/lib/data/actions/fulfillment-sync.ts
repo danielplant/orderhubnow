@@ -145,12 +145,22 @@ export async function syncFulfillmentsFromShopify(
     }
 
     if (!fulfillments || fulfillments.length === 0) {
+      // Still sync Shopify status even if no fulfillments to process
+      const statusSyncResult = await syncShopifyOrderStatusInternal(orderId, { revalidate: false })
+      revalidatePath('/admin/orders')
+      revalidatePath(`/admin/orders/${orderId}`)
+
       return {
         success: true,
         orderId,
         orderNumber: order.OrderNumber,
         shipmentsCreated: 0,
         shipmentsSkipped: 0,
+        statusSync: {
+          success: statusSyncResult.success,
+          error: statusSyncResult.error,
+          fulfillmentStatus: statusSyncResult.fulfillmentStatus,
+        },
       }
     }
 
