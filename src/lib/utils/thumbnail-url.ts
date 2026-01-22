@@ -17,6 +17,7 @@ export const THUMBNAIL_SIZES = {
   sm: 120,  // For exports (Excel, PDF)
   md: 240,  // For UI display
   lg: 480,  // For high-DPI / zoom
+  xl: 720,  // For large product cards
 } as const
 
 export type ThumbnailSize = keyof typeof THUMBNAIL_SIZES
@@ -80,12 +81,64 @@ export function getThumbnailUrl(cacheKey: string, size: ThumbnailSize = 'sm'): s
   return `https://${bucket}.s3.${region}.amazonaws.com/${key}`
 }
 
+function appendWidthParam(url: string, width: number): string {
+  try {
+    const parsed = new URL(url)
+    parsed.searchParams.set('width', String(width))
+    return parsed.toString()
+  } catch {
+    const joiner = url.includes('?') ? '&' : '?'
+    return `${url}${joiner}width=${width}`
+  }
+}
+
+/**
+ * Get src/srcset for SKU images.
+ * Uses S3 thumbnails when available, otherwise Shopify CDN with width params.
+ */
+export function getSkuImageSrcSet(
+  thumbnailPath: string | null | undefined,
+  shopifyImageUrl: string | null | undefined,
+  options: { includeXl?: boolean } = {}
+): { src: string; srcSet: string } | null {
+  const includeXl = options.includeXl !== false
+  const candidates = includeXl
+    ? [
+        { size: 'sm' as const, width: THUMBNAIL_SIZES.sm },
+        { size: 'md' as const, width: THUMBNAIL_SIZES.md },
+        { size: 'lg' as const, width: THUMBNAIL_SIZES.lg },
+        { size: 'xl' as const, width: THUMBNAIL_SIZES.xl },
+      ]
+    : [
+        { size: 'sm' as const, width: THUMBNAIL_SIZES.sm },
+        { size: 'md' as const, width: THUMBNAIL_SIZES.md },
+        { size: 'lg' as const, width: THUMBNAIL_SIZES.lg },
+      ]
+
+  const cacheKey = extractCacheKey(thumbnailPath ?? null)
+  if (cacheKey) {
+    const srcSet = candidates
+      .map(({ size, width }) => `${getThumbnailUrl(cacheKey, size)} ${width}w`)
+      .join(', ')
+    return { src: getThumbnailUrl(cacheKey, 'md'), srcSet }
+  }
+
+  if (shopifyImageUrl) {
+    const srcSet = candidates
+      .map(({ width }) => `${appendWidthParam(shopifyImageUrl, width)} ${width}w`)
+      .join(', ')
+    return { src: appendWidthParam(shopifyImageUrl, THUMBNAIL_SIZES.md), srcSet }
+  }
+
+  return null
+}
+
 /**
  * Get the best image URL for a SKU - prefer S3 thumbnail, fallback to Shopify CDN
  *
  * @param thumbnailPath - The ThumbnailPath from the SKU (16-char cache key or legacy format)
  * @param shopifyImageUrl - The ShopifyImageURL fallback
- * @param size - Thumbnail size variant ('sm' = 120px, 'md' = 240px, 'lg' = 480px)
+ * @param size - Thumbnail size variant ('sm' = 120px, 'md' = 240px, 'lg' = 480px, 'xl' = 720px)
  * @returns S3 thumbnail URL if available, otherwise Shopify CDN URL, or null
  */
 export function getSkuImageUrl(

@@ -1,10 +1,10 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import Image from "next/image";
 import { motion } from "framer-motion";
 import type { Product, ProductVariant, Currency } from "@/lib/types";
 import { cn, formatPrice } from "@/lib/utils";
+import { getSkuImageSrcSet } from "@/lib/utils/thumbnail-url";
 import { STOCK_THRESHOLDS } from "@/lib/constants/inventory";
 import { FEATURES } from "@/lib/constants/features";
 import { ColorSwatch, FabricSwatch, Text } from "@/components/ui";
@@ -25,23 +25,52 @@ function getPrice(item: { priceCad: number; priceUsd: number }, currency: Curren
 }
 
 /** Product image with error fallback and lightbox on click */
-function ProductImage({ imageUrl, title }: { imageUrl?: string; title: string }) {
-  const [hasError, setHasError] = useState(false);
+function ProductImage({
+  thumbnailPath,
+  shopifyImageUrl,
+  fullsizeUrl,
+  title,
+}: {
+  thumbnailPath?: string | null;
+  shopifyImageUrl?: string | null;
+  fullsizeUrl?: string | null;
+  title: string;
+}) {
+  const [thumbError, setThumbError] = useState(false);
+  const [fullError, setFullError] = useState(false);
+  const [disableXl, setDisableXl] = useState(false);
 
-  const showPlaceholder = !imageUrl || hasError;
+  const imageData = useMemo(
+    () => getSkuImageSrcSet(thumbnailPath, shopifyImageUrl, { includeXl: !disableXl }),
+    [thumbnailPath, shopifyImageUrl, disableXl]
+  );
+
+  const lightboxSrc = fullsizeUrl || imageData?.src;
+  const gridSizes = "(max-width: 768px) 100vw, (max-width: 1280px) 50vw, 33vw";
+
+  const handleThumbError = () => {
+    if (!disableXl) {
+      setDisableXl(true);
+      return;
+    }
+    setThumbError(true);
+  };
 
   return (
     <Dialog>
       <DialogTrigger asChild>
         <div className="relative flex-1 min-h-0 bg-secondary overflow-hidden group cursor-zoom-in">
-          {!showPlaceholder ? (
-            <Image
-              src={imageUrl}
+          {imageData && !thumbError ? (
+            <img
+              key={disableXl ? "thumb-no-xl" : "thumb-xl"}
+              src={imageData.src}
+              srcSet={imageData.srcSet}
               alt={title}
-              fill
-              className="object-contain p-2 motion-slow transition-transform group-hover:scale-105"
-              sizes="(max-width: 768px) 100vw, 33vw"
-              onError={() => setHasError(true)}
+              sizes={gridSizes}
+              loading="lazy"
+              decoding="async"
+              className="absolute inset-0 w-full h-full object-contain p-2 motion-slow transition-transform group-hover:scale-105"
+              onError={handleThumbError}
             />
           ) : (
             <div className="absolute inset-0 flex items-center justify-center text-muted-foreground/40">
@@ -66,14 +95,12 @@ function ProductImage({ imageUrl, title }: { imageUrl?: string; title: string })
       {/* Lightbox Modal */}
       <DialogContent className="max-w-3xl p-0 overflow-hidden">
         <div className="relative aspect-square w-full bg-secondary">
-          {!showPlaceholder ? (
-            <Image
-              src={imageUrl}
+          {lightboxSrc && !fullError ? (
+            <img
+              src={lightboxSrc}
               alt={title}
-              fill
-              className="object-contain"
-              sizes="(max-width: 1024px) 100vw, 768px"
-              priority
+              className="absolute inset-0 w-full h-full object-contain"
+              onError={() => setFullError(true)}
             />
           ) : (
             <div className="absolute inset-0 flex items-center justify-center text-muted-foreground/40">
@@ -272,7 +299,12 @@ export function ProductOrderCard({ product, isPreOrder = false }: ProductOrderCa
       </div>
 
       {/* Product Image */}
-      <ProductImage imageUrl={product.imageUrl} title={product.title} />
+      <ProductImage
+        thumbnailPath={product.thumbnailPath}
+        shopifyImageUrl={product.imageUrl}
+        fullsizeUrl={product.imageUrl}
+        title={product.title}
+      />
 
       {/* Size Grid (direct order entry) */}
       <div className="border-t border-border shrink-0">

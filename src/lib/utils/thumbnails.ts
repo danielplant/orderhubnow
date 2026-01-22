@@ -6,7 +6,7 @@
  * 2. Automatically invalidate when thumbnail settings change
  * 3. Deduplicate identical images used by multiple SKUs
  *
- * Storage: S3 with multiple sizes (120px, 240px, 480px)
+ * Storage: S3 with multiple sizes (120px, 240px, 480px, 720px)
  * Cache key = sha256(imageUrl + THUMBNAIL_SETTINGS_VERSION).slice(0, 16)
  * S3 key = thumbnails/{size}/{cacheKey}.png
  */
@@ -23,7 +23,7 @@ import { uploadToS3 } from '@/lib/s3'
  * Thumbnail settings version - INCREMENT THIS when any setting below changes.
  * This ensures all thumbnails are regenerated when settings change.
  */
-export const THUMBNAIL_SETTINGS_VERSION = 3
+export const THUMBNAIL_SETTINGS_VERSION = 5
 
 /**
  * Available thumbnail sizes
@@ -32,6 +32,7 @@ export const THUMBNAIL_SIZES = {
   sm: 120,  // For exports (Excel, PDF)
   md: 240,  // For UI display
   lg: 480,  // For high-DPI / zoom
+  xl: 720,  // For large product cards
 } as const
 
 export type ThumbnailSize = keyof typeof THUMBNAIL_SIZES
@@ -127,7 +128,7 @@ export function getThumbnailUrl(cacheKey: string, size: ThumbnailSize = 'sm'): s
  *
  * @param thumbnailPath - The ThumbnailPath from the SKU (16-char cache key or legacy format)
  * @param shopifyImageUrl - The ShopifyImageURL fallback
- * @param size - Thumbnail size variant ('sm' = 120px, 'md' = 240px, 'lg' = 480px)
+ * @param size - Thumbnail size variant ('sm' = 120px, 'md' = 240px, 'lg' = 480px, 'xl' = 720px)
  * @returns S3 thumbnail URL if available, otherwise Shopify CDN URL, or null
  */
 export function getSkuImageUrl(
@@ -229,7 +230,7 @@ export async function generateThumbnailSizes(
     const results = new Map<ThumbnailSize, Buffer>()
 
     // Generate all sizes in parallel
-    const sizes: ThumbnailSize[] = ['sm', 'md', 'lg']
+    const sizes: ThumbnailSize[] = ['sm', 'md', 'lg', 'xl']
     const buffers = await Promise.all(
       sizes.map(async (size) => {
         const px = THUMBNAIL_SIZES[size]
@@ -283,7 +284,7 @@ export async function uploadThumbnailsToS3(
  * Generate and upload thumbnails for an image URL.
  * Returns the cache key if successful.
  *
- * This generates all size variants (120, 240, 480) and uploads to S3.
+ * This generates all size variants (120, 240, 480, 720) and uploads to S3.
  */
 export async function generateThumbnail(
   imageUrl: string

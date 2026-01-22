@@ -28,6 +28,7 @@ describe('THUMBNAIL_CONFIG', () => {
     expect(THUMBNAIL_SIZES.sm).toBe(120)
     expect(THUMBNAIL_SIZES.md).toBe(240)
     expect(THUMBNAIL_SIZES.lg).toBe(480)
+    expect(THUMBNAIL_SIZES.xl).toBe(720)
     expect(THUMBNAIL_CONFIG.quality).toBe(80)
     expect(THUMBNAIL_CONFIG.fit).toBe('contain')
     expect(THUMBNAIL_CONFIG.background).toEqual({ r: 255, g: 255, b: 255, alpha: 1 })
@@ -273,7 +274,7 @@ describe('Settings version changes', () => {
   it('should document current settings version', () => {
     // This test serves as documentation and will fail if version changes
     // Update this test when THUMBNAIL_SETTINGS_VERSION is bumped
-    expect(THUMBNAIL_SETTINGS_VERSION).toBe(3)
+    expect(THUMBNAIL_SETTINGS_VERSION).toBe(5)
   })
 
   it('should produce different keys when version would change', () => {
