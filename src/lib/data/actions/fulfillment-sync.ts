@@ -341,13 +341,18 @@ export async function syncAllPendingFulfillments(options?: {
     // Find orders that:
     // 1. Have been transferred to Shopify
     // 2. Are within the date range
-    // 3. Are not fully shipped in OHN yet (OrderStatus !== 'Shipped' && !== 'Invoiced')
+    // 3. Either: need fulfillment sync (not shipped) OR need status sync (never synced)
     const ordersToSync = await prisma.customerOrders.findMany({
       where: {
         IsTransferredToShopify: true,
         ShopifyOrderID: { not: null },
         OrderDate: { gte: oldestOrderDate },
-        OrderStatus: { notIn: ['Shipped', 'Invoiced', 'Cancelled'] },
+        OR: [
+          // Need fulfillment sync (not yet shipped/invoiced/cancelled)
+          { OrderStatus: { notIn: ['Shipped', 'Invoiced', 'Cancelled'] } },
+          // Need status sync (never synced from Shopify)
+          { ShopifyStatusSyncedAt: null },
+        ],
       },
       select: {
         ID: true,
