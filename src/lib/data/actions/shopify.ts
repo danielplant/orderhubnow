@@ -385,19 +385,20 @@ export async function transferOrderToShopify(
       const trimmedFirst = (options.customerOverride.firstName || '').trim()
       const trimmedLast = (options.customerOverride.lastName || '').trim()
 
-      if (!trimmedFirst && !trimmedLast) {
-        return {
-          success: false,
-          error: 'Customer name cannot be empty',
-        }
-      }
-
       firstName = trimmedFirst
       lastName = trimmedLast || trimmedFirst
     } else {
       const splitResult = splitName(order.StoreName)
       firstName = splitResult.firstName
       lastName = splitResult.lastName
+    }
+
+    // Validate customer name is not empty (applies to both single and bulk transfers)
+    if (!firstName && !lastName) {
+      return {
+        success: false,
+        error: 'Customer name cannot be empty',
+      }
     }
 
     // Update Shopify customer record if requested (with short-circuit check)
@@ -733,6 +734,7 @@ export async function validateOrderForShopify(
     let customerExists = false
     let shopifyCustomer: { id: number; firstName: string | null; lastName: string | null } | undefined
     let shopifyCustomerLookupError: string | undefined
+    // null = customer doesn't exist, empty string = customer exists with empty name
     let shopifyCustomerName: string | null = null
 
     if (hasEmail) {
@@ -748,10 +750,12 @@ export async function validateOrderForShopify(
             firstName: customer.first_name ?? null,
             lastName: customer.last_name ?? null,
           }
+          // Use empty string (not null) when customer exists but has empty name
+          // This distinguishes "customer exists with empty name" from "no customer"
           shopifyCustomerName = [customer.first_name, customer.last_name]
             .filter(Boolean)
             .join(' ')
-            .trim() || null
+            .trim()
         }
         // If no customer found and no error, status will be 'new'
       } catch (e) {
@@ -763,6 +767,7 @@ export async function validateOrderForShopify(
       ohnCustomerName,
       shopifyCustomerName,
       hasEmail,
+      customerExists,
       shopifyCustomerLookupError
     )
 
@@ -1304,11 +1309,13 @@ function normalizeName(name: string): string {
 
 /**
  * Determine the customer name status based on OHN and Shopify data.
+ * @param customerExists - Whether a Shopify customer was found (separate from shopifyName being empty)
  */
 function determineNameStatus(
   ohnName: string,
   shopifyName: string | null,
   hasEmail: boolean,
+  customerExists: boolean,
   lookupError?: string
 ): 'new' | 'match' | 'discrepancy' | 'unknown' | 'no_email' {
   // No email = can't verify, needs manual review
@@ -1322,12 +1329,13 @@ function determineNameStatus(
   }
 
   // No Shopify customer found = new customer
-  if (shopifyName === null) {
+  if (!customerExists) {
     return 'new'
   }
 
+  // Customer exists - compare names (shopifyName can be empty string for existing customer)
   const ohnNormalized = normalizeName(ohnName)
-  const shopifyNormalized = normalizeName(shopifyName)
+  const shopifyNormalized = normalizeName(shopifyName || '')
 
   // If either is empty but not both, it's a discrepancy
   if (!ohnNormalized && shopifyNormalized) return 'discrepancy'

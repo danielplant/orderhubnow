@@ -405,6 +405,7 @@ export function OrdersTable({ initialOrders, total, statusCounts, facets }: Orde
     setValidationLoading(true)
     setValidationResult(null)
     setTransferError(null) // Clear any previous error
+    setTransferWarning(null) // Clear any previous warning
 
     try {
       const result = await validateOrderForShopify(orderId)
@@ -428,6 +429,8 @@ export function OrdersTable({ initialOrders, total, statusCounts, facets }: Orde
   ) => {
     if (!previewOrderId) return
 
+    const transferringOrderId = previewOrderId // Capture for timeout closure
+
     setIsTransferring(true)
     setTransferError(null)
     setTransferWarning(null)
@@ -436,10 +439,15 @@ export function OrdersTable({ initialOrders, total, statusCounts, facets }: Orde
       if (result.success) {
         if (result.customerUpdateWarning) {
           setTransferWarning(result.customerUpdateWarning)
-          // Show warning briefly then close
+          // Show warning briefly then close - but only if still viewing same order
           setTimeout(() => {
-            setPreviewOpen(false)
-            router.refresh()
+            setPreviewOrderId((currentId) => {
+              if (currentId === transferringOrderId) {
+                setPreviewOpen(false)
+                router.refresh()
+              }
+              return currentId
+            })
           }, 3000)
         } else {
           setPreviewOpen(false)

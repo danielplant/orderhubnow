@@ -63,14 +63,16 @@ export function TransferPreviewModal({
   const [customLastName, setCustomLastName] = React.useState('')
   const [updateShopifyRecord, setUpdateShopifyRecord] = React.useState(false)
 
-  // Track previous orderId to detect order changes
-  const prevOrderIdRef = React.useRef<string | null>(null)
+  // Track previous open state to detect modal opens
+  const prevOpenRef = React.useRef(false)
 
   React.useEffect(() => {
-    // Reset ALL state when order changes
-    if (validation?.orderId && validation.orderId !== prevOrderIdRef.current) {
-      prevOrderIdRef.current = validation.orderId
+    // Reset ALL state when modal opens (not just when orderId changes)
+    // This handles reopening the same order
+    const justOpened = open && !prevOpenRef.current
+    prevOpenRef.current = open
 
+    if (justOpened && validation) {
       // Reset tag states
       if (validation.tags) {
         const initialStates: Record<string, boolean> = {}
@@ -86,7 +88,7 @@ export function TransferPreviewModal({
       setCustomLastName('')
       setUpdateShopifyRecord(validation.customerExists)
     }
-  }, [validation?.orderId, validation?.tags, validation?.customerExists])
+  }, [open, validation])
 
   if (!validation && !isLoading) return null
 
@@ -668,13 +670,18 @@ export function TransferPreviewModal({
           <div className="flex-1" />
           <Button
             onClick={handleTransfer}
-            disabled={!canTransfer || isTransferring}
+            disabled={!canTransfer || isTransferring || !!transferWarning}
             size="lg"
           >
             {isTransferring ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                 Transferring...
+              </>
+            ) : transferWarning ? (
+              <>
+                <CheckCircle2 className="h-4 w-4 mr-2" />
+                Transferred
               </>
             ) : transferError ? (
               <>
