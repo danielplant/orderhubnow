@@ -6,7 +6,7 @@
  * UI for discovering and enabling metafield definitions from Shopify.
  */
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { ChevronDown, ChevronRight, RefreshCw, Loader2 } from 'lucide-react'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -135,7 +135,7 @@ export function MetafieldsPanel({
   const [error, setError] = useState<string | null>(null)
   const [expandedNamespaces, setExpandedNamespaces] = useState<Set<string>>(new Set())
 
-  const fetchDefinitions = async () => {
+  const fetchDefinitions = useCallback(async () => {
     setLoading(true)
     setError(null)
 
@@ -161,11 +161,11 @@ export function MetafieldsPanel({
     } finally {
       setLoading(false)
     }
-  }
+  }, [entityType])
 
   useEffect(() => {
     fetchDefinitions()
-  }, [entityType])
+  }, [fetchDefinitions])
 
   const toggleNamespace = (namespace: string) => {
     setExpandedNamespaces((prev) => {

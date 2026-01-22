@@ -202,7 +202,7 @@ export function CustomersTable({
     return chips
   }, [country, state, repFilter, q, setParam])
 
-  const openModal = (mode: ModalMode, customer?: Customer) => {
+  const openModal = React.useCallback((mode: ModalMode, customer?: Customer) => {
     setModalMode(mode)
     setSelectedCustomer(customer ?? null)
     setError(null)
@@ -238,7 +238,7 @@ export function CustomersTable({
         website: '',
       })
     }
-  }
+  }, [findRepByCodeOrName])
 
   const closeModal = () => {
     setModalMode(null)

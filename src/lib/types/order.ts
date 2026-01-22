@@ -100,12 +100,26 @@ export interface OrdersListInput {
   q?: string;
   rep?: string;
   syncStatus?: 'pending';
+  orderType?: 'ATS' | 'Pre-Order';
+  season?: string;      // e.g., 'SS26', 'FW25'
+  collection?: string;  // Collection name
   dateFrom?: string; // ISO date string (YYYY-MM-DD)
   dateTo?: string;   // ISO date string (YYYY-MM-DD)
   sort?: OrdersSortColumn;
   dir?: SortDirection;
   page?: number;
   pageSize?: number;
+}
+
+/**
+ * Facet counts for filter dropdowns.
+ * Static counts from unfiltered totals (excluding Draft orders).
+ */
+export interface OrderFacets {
+  types: Array<{ value: 'ATS' | 'Pre-Order'; count: number }>;
+  seasons: Array<{ value: string; count: number }>;
+  collections: Array<{ value: string; count: number }>;
+  reps: Array<{ value: string; count: number }>;
 }
 
 // ============================================================================

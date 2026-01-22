@@ -104,11 +104,6 @@ export default function DiscoveryPage() {
     fetchBothSchemas()
   }, [])
 
-  // Fetch mapping info when entity changes
-  useEffect(() => {
-    fetchMappingInfo()
-  }, [selectedEntity])
-
   const fetchBothSchemas = async () => {
     setLoading('both')
     setError(null)
@@ -158,6 +153,11 @@ export default function DiscoveryPage() {
       console.error('Failed to fetch mapping info:', err)
     }
   }, [selectedEntity])
+
+  // Fetch mapping info when entity changes
+  useEffect(() => {
+    fetchMappingInfo()
+  }, [fetchMappingInfo])
 
   const fetchSampleData = async () => {
     setLoadingSample(true)

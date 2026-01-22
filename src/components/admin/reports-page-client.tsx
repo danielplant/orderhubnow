@@ -282,10 +282,12 @@ export function ReportsPageClient({ initialType }: ReportsPageClientProps) {
   const page = Number(searchParams.get('page')) || 1;
   const pageSize = Number(searchParams.get('pageSize')) || 25;
   const layout = (searchParams.get('layout') as LayoutMode) || 'flat';
-  const dateRange: DateRange = {
-    from: searchParams.get('from'),
-    to: searchParams.get('to'),
-  };
+  const dateFrom = searchParams.get('from');
+  const dateTo = searchParams.get('to');
+  const dateRange: DateRange = React.useMemo(() => ({
+    from: dateFrom,
+    to: dateTo,
+  }), [dateFrom, dateTo]);
 
   // Build URL update function
   const updateUrl = React.useCallback(

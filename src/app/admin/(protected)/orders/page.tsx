@@ -1,4 +1,4 @@
-import { getOrders, getRepsForFilter } from '@/lib/data/queries/orders'
+import { getOrders, getOrderFacets } from '@/lib/data/queries/orders'
 import { OrdersTable } from '@/components/admin/orders-table'
 
 export const dynamic = 'force-dynamic'
@@ -12,9 +12,9 @@ export default async function OrdersPage({ searchParams }: OrdersPageProps) {
   const params = await searchParams
 
   // Fetch data in parallel
-  const [ordersData, reps] = await Promise.all([
+  const [ordersData, facets] = await Promise.all([
     getOrders(params),
-    getRepsForFilter(),
+    getOrderFacets(),
   ])
 
   return (
@@ -27,7 +27,7 @@ export default async function OrdersPage({ searchParams }: OrdersPageProps) {
         initialOrders={ordersData.orders}
         total={ordersData.total}
         statusCounts={ordersData.statusCounts}
-        reps={reps}
+        facets={facets}
       />
     </main>
   )

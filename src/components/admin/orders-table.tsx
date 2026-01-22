@@ -27,7 +27,7 @@ import { ColumnVisibilityToggle, type ColumnConfig } from '@/components/admin/co
 import { TransferPreviewModal } from '@/components/admin/transfer-preview-modal'
 import { BulkTransferModal } from '@/components/admin/bulk-transfer-modal'
 import { cn } from '@/lib/utils'
-import type { AdminOrderRow, OrderStatus, OrdersListResult } from '@/lib/types/order'
+import type { AdminOrderRow, OrderFacets, OrderStatus, OrdersListResult } from '@/lib/types/order'
 import type { ShopifyValidationResult, BulkTransferResult } from '@/lib/types/shopify'
 import { bulkUpdateStatus, updateOrderStatus } from '@/lib/data/actions/orders'
 import { validateOrderForShopify, transferOrderToShopify, bulkTransferOrdersToShopify } from '@/lib/data/actions/shopify'
@@ -41,7 +41,7 @@ interface OrdersTableProps {
   initialOrders: AdminOrderRow[]
   total: number
   statusCounts: OrdersListResult['statusCounts']
-  reps: Array<{ id: string; name: string }>
+  facets: OrderFacets
 }
 
 // ============================================================================
@@ -137,7 +137,7 @@ function formatShopifyStatus(s: string | null) {
 // Component
 // ============================================================================
 
-export function OrdersTable({ initialOrders, total, statusCounts, reps }: OrdersTableProps) {
+export function OrdersTable({ initialOrders, total, statusCounts, facets }: OrdersTableProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
 
@@ -202,6 +202,9 @@ export function OrdersTable({ initialOrders, total, statusCounts, reps }: Orders
   const syncStatus = searchParams.get('syncStatus') || ''
   const q = searchParams.get('q') || ''
   const rep = searchParams.get('rep') || ''
+  const orderType = searchParams.get('orderType') || ''
+  const season = searchParams.get('season') || ''
+  const collection = searchParams.get('collection') || ''
   const dateFrom = searchParams.get('dateFrom') || ''
   const dateTo = searchParams.get('dateTo') || ''
   const page = Number(searchParams.get('page') || '1')
@@ -294,6 +297,30 @@ export function OrdersTable({ initialOrders, total, statusCounts, reps }: Orders
         onRemove: () => setParam('rep', null),
       })
     }
+    if (orderType) {
+      chips.push({
+        key: 'orderType',
+        label: 'Type',
+        value: orderType,
+        onRemove: () => setParam('orderType', null),
+      })
+    }
+    if (collection) {
+      chips.push({
+        key: 'collection',
+        label: 'Collection',
+        value: collection,
+        onRemove: () => setParam('collection', null),
+      })
+    }
+    if (season) {
+      chips.push({
+        key: 'season',
+        label: 'Season',
+        value: season,
+        onRemove: () => setParam('season', null),
+      })
+    }
     if (syncStatus) {
       chips.push({
         key: 'syncStatus',
@@ -325,7 +352,7 @@ export function OrdersTable({ initialOrders, total, statusCounts, reps }: Orders
       })
     }
     return chips
-  }, [status, rep, syncStatus, dateFrom, dateTo, q, setParam, searchParams, router])
+  }, [status, rep, orderType, collection, season, syncStatus, dateFrom, dateTo, q, setParam, searchParams, router])
 
   // Column visibility config
   const columnConfig = React.useMemo<ColumnConfig[]>(
@@ -820,8 +847,29 @@ export function OrdersTable({ initialOrders, total, statusCounts, reps }: Orders
           <FilterPill
             label="Rep"
             value={rep || null}
-            options={reps.map((r) => ({ value: r.name, label: r.name }))}
+            options={facets.reps.map((r) => ({ value: r.value, label: r.value, count: r.count }))}
             onChange={(v) => setParam('rep', v)}
+          />
+
+          <FilterPill
+            label="Type"
+            value={orderType || null}
+            options={facets.types.map((t) => ({ value: t.value, label: t.value, count: t.count }))}
+            onChange={(v) => setParam('orderType', v)}
+          />
+
+          <FilterPill
+            label="Collection"
+            value={collection || null}
+            options={facets.collections.map((c) => ({ value: c.value, label: c.value, count: c.count }))}
+            onChange={(v) => setParam('collection', v)}
+          />
+
+          <FilterPill
+            label="Season"
+            value={season || null}
+            options={facets.seasons.map((s) => ({ value: s.value, label: s.value, count: s.count }))}
+            onChange={(v) => setParam('season', v)}
           />
 
           <FilterPill

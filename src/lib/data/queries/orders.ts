@@ -7,6 +7,7 @@ import { prisma } from '@/lib/prisma';
 import { formatCurrency } from '@/lib/utils';
 import type {
   AdminOrderRow,
+  OrderFacets,
   OrdersListInput,
   OrdersListResult,
   OrderStatus,
@@ -67,6 +68,9 @@ export function parseOrdersListInput(
   const q = getString(getParam('q'));
   const rep = getString(getParam('rep'));
   const syncStatus = getString(getParam('syncStatus'));
+  const orderType = getString(getParam('orderType'));
+  const season = getString(getParam('season'));
+  const collection = getString(getParam('collection'));
   const dateFrom = getString(getParam('dateFrom'));
   const dateTo = getString(getParam('dateTo'));
   const sort = (getString(getParam('sort')) as OrdersSortColumn | undefined) ?? 'orderDate';
@@ -79,6 +83,9 @@ export function parseOrdersListInput(
     q,
     rep,
     syncStatus: syncStatus === 'pending' ? 'pending' : undefined,
+    orderType: orderType === 'ATS' || orderType === 'Pre-Order' ? orderType : undefined,
+    season,
+    collection,
     dateFrom,
     dateTo,
     sort,
@@ -171,6 +178,60 @@ export async function getOrders(
     if (input.dateTo) {
       // End of the day in local timezone (23:59:59.999)
       baseWhere.OrderDate.lte = new Date(input.dateTo + 'T23:59:59.999');
+    }
+  }
+
+  // Type filter (ATS vs Pre-Order)
+  if (input.orderType) {
+    const typeCondition = {
+      IsPreOrder: input.orderType === 'Pre-Order',
+    };
+    baseWhere.AND = baseWhere.AND
+      ? [...baseWhere.AND, typeCondition]
+      : [typeCondition];
+  }
+
+  // Season filter - derives date range from season code (SS26 = Jan-Jun 2026, FW25 = Jul-Dec 2025)
+  if (input.season) {
+    const match = input.season.match(/^(SS|FW)(\d{2})$/);
+    if (match) {
+      const [, prefix, yearShort] = match;
+      const year = 2000 + parseInt(yearShort);
+      const startMonth = prefix === 'SS' ? 1 : 7;
+      const endMonth = prefix === 'SS' ? 6 : 12;
+      const seasonCondition = {
+        ShipStartDate: {
+          gte: new Date(year, startMonth - 1, 1),
+          lte: new Date(year, endMonth, 0), // Last day of end month
+        },
+      };
+      baseWhere.AND = baseWhere.AND
+        ? [...baseWhere.AND, seasonCondition]
+        : [seasonCondition];
+    }
+  }
+
+  // Collection filter - requires raw SQL subquery since CustomerOrdersItems.SKU is a string, not a relation
+  // Finds order IDs that have at least one item from the specified collection
+  if (input.collection) {
+    const orderIdsWithCollection = await prisma.$queryRaw<Array<{ ID: bigint }>>`
+      SELECT DISTINCT o.ID
+      FROM CustomerOrders o
+      JOIN CustomerOrdersItems i ON o.ID = i.CustomerOrderID
+      JOIN Sku s ON i.SKU = s.SkuID
+      JOIN Collection c ON s.CollectionID = c.ID
+      WHERE c.Name = ${input.collection}
+    `;
+    const ids = orderIdsWithCollection.map(r => r.ID);
+    if (ids.length > 0) {
+      baseWhere.AND = baseWhere.AND
+        ? [...baseWhere.AND, { ID: { in: ids } }]
+        : [{ ID: { in: ids } }];
+    } else {
+      // No orders match this collection - force empty result
+      baseWhere.AND = baseWhere.AND
+        ? [...baseWhere.AND, { ID: { equals: BigInt(-1) } }]
+        : [{ ID: { equals: BigInt(-1) } }];
     }
   }
 
@@ -707,6 +768,112 @@ function deriveSeasonFromShipDate(shipStartDate: Date | null): string | null {
   const year = shipStartDate.getFullYear().toString().slice(-2); // "26"
   return month >= 1 && month <= 6 ? `SS${year}` : `FW${year}`;
 }
+
+// ============================================================================
+// Order Facets (Filter Counts)
+// ============================================================================
+
+/**
+ * Get season facet counts using raw SQL.
+ * Season is derived from ShipStartDate, not stored - SQL grouping is efficient.
+ * Excludes Draft orders.
+ */
+async function getSeasonFacets(): Promise<Array<{ value: string; count: number }>> {
+  const results = await prisma.$queryRaw<Array<{ season: string; count: bigint }>>`
+    SELECT
+      CASE
+        WHEN MONTH(ShipStartDate) BETWEEN 1 AND 6
+        THEN CONCAT('SS', RIGHT(YEAR(ShipStartDate), 2))
+        ELSE CONCAT('FW', RIGHT(YEAR(ShipStartDate), 2))
+      END as season,
+      COUNT(*) as count
+    FROM CustomerOrders
+    WHERE ShipStartDate IS NOT NULL
+      AND OrderStatus NOT IN ('Draft')
+    GROUP BY
+      CASE
+        WHEN MONTH(ShipStartDate) BETWEEN 1 AND 6
+        THEN CONCAT('SS', RIGHT(YEAR(ShipStartDate), 2))
+        ELSE CONCAT('FW', RIGHT(YEAR(ShipStartDate), 2))
+      END
+    ORDER BY season DESC
+  `;
+  return results
+    .map((r) => ({ value: r.season, count: Number(r.count) }))
+    .filter((r) => r.count > 0);
+}
+
+/**
+ * Get collection facet counts using raw SQL.
+ * Requires 3-table join (Orders → OrderItems → Sku → Collection).
+ * Uses COUNT DISTINCT to get accurate order counts (not item counts).
+ * Excludes Draft orders.
+ */
+async function getCollectionFacets(): Promise<Array<{ value: string; count: number }>> {
+  const results = await prisma.$queryRaw<Array<{ collection: string; count: bigint }>>`
+    SELECT c.Name as collection, COUNT(DISTINCT o.ID) as count
+    FROM CustomerOrders o
+    JOIN CustomerOrdersItems i ON o.ID = i.CustomerOrderID
+    JOIN Sku s ON i.SKU = s.SkuID
+    JOIN Collection c ON s.CollectionID = c.ID
+    WHERE o.OrderStatus NOT IN ('Draft')
+    GROUP BY c.Name
+    ORDER BY c.Name
+  `;
+  return results
+    .map((r) => ({ value: r.collection, count: Number(r.count) }))
+    .filter((r) => r.count > 0);
+}
+
+/**
+ * Get all order facets for filter dropdowns.
+ * Returns static counts from unfiltered totals (excluding Draft orders).
+ * Uses parallel queries for performance.
+ */
+export async function getOrderFacets(): Promise<OrderFacets> {
+  const [typeCounts, seasonCounts, collectionCounts, repCounts] = await Promise.all([
+    // Type facets (ATS vs Pre-Order) using Prisma groupBy
+    prisma.customerOrders.groupBy({
+      by: ['IsPreOrder'],
+      _count: { _all: true },
+      where: { OrderStatus: { notIn: ['Draft'] } },
+    }),
+    // Season facets (raw SQL for derived field)
+    getSeasonFacets(),
+    // Collection facets (raw SQL for 3-table join)
+    getCollectionFacets(),
+    // Rep facets using Prisma groupBy
+    prisma.customerOrders.groupBy({
+      by: ['SalesRep'],
+      _count: { _all: true },
+      where: {
+        SalesRep: { not: '' },
+        OrderStatus: { notIn: ['Draft'] },
+      },
+      orderBy: { SalesRep: 'asc' },
+    }),
+  ]);
+
+  // Build type facets - map IsPreOrder boolean to user-friendly labels
+  const atsCount = typeCounts.find((t) => t.IsPreOrder === false)?._count?._all ?? 0;
+  const preOrderCount = typeCounts.find((t) => t.IsPreOrder === true)?._count?._all ?? 0;
+
+  return {
+    types: [
+      { value: 'ATS' as const, count: atsCount },
+      { value: 'Pre-Order' as const, count: preOrderCount },
+    ].filter((t) => t.count > 0),
+    seasons: seasonCounts,
+    collections: collectionCounts,
+    reps: repCounts
+      .filter((r) => r.SalesRep && r._count?._all && r._count._all > 0)
+      .map((r) => ({ value: r.SalesRep!, count: r._count!._all! })),
+  };
+}
+
+// ============================================================================
+// Rep Orders Query
+// ============================================================================
 
 /**
  * Get paginated, filtered, sorted orders for rep list view.
