@@ -15,7 +15,7 @@
  * - TransformEngine: Main orchestrator
  */
 
-import { Parser, Expression } from 'expr-eval';
+import { create, all, MathNode, MathJsInstance } from 'mathjs';
 import type { DatabaseConnector } from '../connectors/database';
 import type {
   MappingConfig,
@@ -265,7 +265,7 @@ export class TemplateEngine {
 // ============================================================================
 
 export interface CompiledExpression {
-  expression: Expression;
+  node: MathNode;
   variables: string[];
   formula: string;
 }
@@ -277,93 +277,70 @@ export interface EvaluationResult {
 }
 
 export class ExpressionEvaluator {
-  private parser: Parser;
+  private math: MathJsInstance;
   private maxLength: number;
 
   constructor(maxLength: number = 500) {
     this.maxLength = maxLength;
-    this.parser = new Parser({
-      operators: {
-        logical: true,
-        comparison: true,
-        concatenate: true,
-        conditional: true,
-        add: true,
-        multiply: true,
-        divide: true,
-        factorial: false,
-        power: true,
-        remainder: true,
-        in: false,
-        assignment: false,
-      },
-    });
-
+    this.math = create(all);
     this.registerCustomFunctions();
   }
 
   private registerCustomFunctions(): void {
-    this.parser.functions.toUpperCase = (s: unknown) => s != null ? String(s).toUpperCase() : '';
-    this.parser.functions.toLowerCase = (s: unknown) => s != null ? String(s).toLowerCase() : '';
-    this.parser.functions.trim = (s: unknown) => s != null ? String(s).trim() : '';
-    this.parser.functions.substring = (s: unknown, start: number, length?: number) => {
-      if (s == null) return '';
-      const str = String(s);
-      if (length !== undefined) return str.substring(start, start + length);
-      return str.substring(start);
-    };
-    this.parser.functions.length = (s: unknown) => s != null ? String(s).length : 0;
-    this.parser.functions.replace = (s: unknown, search: string, replacement: string) =>
-      s != null ? String(s).replace(search, replacement) : '';
-    this.parser.functions.split = (s: unknown, delimiter: string, index: number) => {
-      if (s == null) return '';
-      const parts = String(s).split(delimiter);
-      return parts[index] ?? '';
-    };
-    this.parser.functions.startsWith = (s: unknown, prefix: string) => s != null ? String(s).startsWith(prefix) : false;
-    this.parser.functions.endsWith = (s: unknown, suffix: string) => s != null ? String(s).endsWith(suffix) : false;
-    this.parser.functions.contains = (s: unknown, search: string) => s != null ? String(s).includes(search) : false;
-    this.parser.functions.parseNumber = (s: unknown) => {
-      if (s == null) return 0;
-      const parsed = parseFloat(String(s));
-      return Number.isNaN(parsed) ? 0 : parsed;
-    };
-    this.parser.functions.parseInt = (s: unknown) => {
-      if (s == null) return 0;
-      const parsed = parseInt(String(s), 10);
-      return Number.isNaN(parsed) ? 0 : parsed;
-    };
-    this.parser.functions.round = (n: number, decimals?: number) => {
-      if (decimals === undefined) return Math.round(n);
-      const factor = Math.pow(10, decimals);
-      return Math.round(n * factor) / factor;
-    };
-    this.parser.functions.floor = (n: number) => Math.floor(n);
-    this.parser.functions.ceil = (n: number) => Math.ceil(n);
-    this.parser.functions.abs = (n: number) => Math.abs(n);
-    this.parser.functions.min = Math.min;
-    this.parser.functions.max = Math.max;
-    this.parser.functions.parseUnits = (sku: unknown) => {
-      if (sku == null) return 1;
-      const str = String(sku).toUpperCase();
-      const match = str.match(/^(\d+)PC-/);
-      return match && match[1] ? parseInt(match[1], 10) : 1;
-    };
-    this.parser.functions.ifNull = (value: unknown, defaultValue: unknown) => value == null ? defaultValue : value;
-    this.parser.functions.ifEmpty = (value: unknown, defaultValue: unknown) => {
-      if (value == null) return defaultValue;
-      if (typeof value === 'string' && value.trim() === '') return defaultValue;
-      return value;
-    };
-    this.parser.functions.coalesce = (...args: unknown[]) => {
-      for (const arg of args) {
-        if (arg != null) return arg;
-      }
-      return null;
-    };
-    this.parser.functions.isNull = (value: unknown) => value == null;
-    this.parser.functions.isNumber = (value: unknown) => typeof value === 'number' && Number.isFinite(value);
-    this.parser.functions.isString = (value: unknown) => typeof value === 'string';
+    // Import custom string and utility functions
+    this.math.import({
+      toUpperCase: (s: unknown) => s != null ? String(s).toUpperCase() : '',
+      toLowerCase: (s: unknown) => s != null ? String(s).toLowerCase() : '',
+      trim: (s: unknown) => s != null ? String(s).trim() : '',
+      substring: (s: unknown, start: number, length?: number) => {
+        if (s == null) return '';
+        const str = String(s);
+        if (length !== undefined) return str.substring(start, start + length);
+        return str.substring(start);
+      },
+      length: (s: unknown) => s != null ? String(s).length : 0,
+      replace: (s: unknown, search: string, replacement: string) =>
+        s != null ? String(s).replace(search, replacement) : '',
+      split: (s: unknown, delimiter: string, index: number) => {
+        if (s == null) return '';
+        const parts = String(s).split(delimiter);
+        return parts[index] ?? '';
+      },
+      startsWith: (s: unknown, prefix: string) => s != null ? String(s).startsWith(prefix) : false,
+      endsWith: (s: unknown, suffix: string) => s != null ? String(s).endsWith(suffix) : false,
+      contains: (s: unknown, search: string) => s != null ? String(s).includes(search) : false,
+      parseNumber: (s: unknown) => {
+        if (s == null) return 0;
+        const parsed = parseFloat(String(s));
+        return Number.isNaN(parsed) ? 0 : parsed;
+      },
+      parseInt: (s: unknown) => {
+        if (s == null) return 0;
+        const parsed = parseInt(String(s), 10);
+        return Number.isNaN(parsed) ? 0 : parsed;
+      },
+      parseUnits: (sku: unknown) => {
+        if (sku == null) return 1;
+        const str = String(sku).toUpperCase();
+        const match = str.match(/^(\d+)PC-/);
+        return match && match[1] ? parseInt(match[1], 10) : 1;
+      },
+      ifNull: (value: unknown, defaultValue: unknown) => value == null ? defaultValue : value,
+      ifEmpty: (value: unknown, defaultValue: unknown) => {
+        if (value == null) return defaultValue;
+        if (typeof value === 'string' && value.trim() === '') return defaultValue;
+        return value;
+      },
+      coalesce: (...args: unknown[]) => {
+        for (const arg of args) {
+          if (arg != null) return arg;
+        }
+        return null;
+      },
+      isNull: (value: unknown) => value == null,
+      isNumber: (value: unknown) => typeof value === 'number' && Number.isFinite(value),
+      isString: (value: unknown) => typeof value === 'string',
+    }, { override: true });
   }
 
   compile(formula: string): CompiledExpression {
@@ -372,11 +349,31 @@ export class ExpressionEvaluator {
     }
 
     try {
-      const expression = this.parser.parse(formula);
-      const variables = expression.variables();
-      return { expression, variables, formula };
+      const node = this.math.parse(formula);
+      // Extract variable names from the parsed expression
+      const variables: string[] = [];
+      node.traverse((n: MathNode) => {
+        // Check if this is a SymbolNode (variable reference)
+        if (n.type === 'SymbolNode') {
+          const name = (n as MathNode & { name: string }).name;
+          if (!this.isBuiltinSymbol(name) && !variables.includes(name)) {
+            variables.push(name);
+          }
+        }
+      });
+      return { node, variables, formula };
     } catch (err) {
       throw new Error(`Failed to compile expression: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  private isBuiltinSymbol(name: string): boolean {
+    // Check if it's a registered function or constant
+    try {
+      const val = this.math.evaluate(name);
+      return typeof val === 'function' || name === 'pi' || name === 'e' || name === 'true' || name === 'false';
+    } catch {
+      return false;
     }
   }
 
@@ -389,8 +386,7 @@ export class ExpressionEvaluator {
         evalContext[varName] = value ?? null;
       }
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const value = compiled.expression.evaluate(evalContext as any);
+      const value = compiled.node.evaluate(evalContext);
       return { success: true, value };
     } catch (err) {
       return {
