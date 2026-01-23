@@ -365,6 +365,99 @@ export async function uploadThumbnailsToS3(
   }
 }
 
+// =============================================================================
+// Pixel-Based Functions (no sm/md/lg/xl mapping)
+// =============================================================================
+
+export interface PixelSizeConfig {
+  pixelSize: number
+  quality: number
+  fit: 'contain' | 'cover' | 'fill'
+  background: { r: number; g: number; b: number; alpha: number }
+}
+
+/**
+ * Get S3 key for a thumbnail using pixel size directly
+ */
+export function getThumbnailS3KeyByPixel(cacheKey: string, pixelSize: number): string {
+  return `thumbnails/${pixelSize}/${cacheKey}.png`
+}
+
+/**
+ * Generate thumbnails for specified pixel sizes with per-size configs
+ * @param imageUrl - Source image URL
+ * @param sizeConfigs - Array of size configurations
+ * @returns Map of pixelSize -> Buffer, or null if fetch fails
+ */
+export async function generateThumbnailsByPixelSize(
+  imageUrl: string,
+  sizeConfigs: PixelSizeConfig[]
+): Promise<Map<number, Buffer> | null> {
+  if (!imageUrl || sizeConfigs.length === 0) return null
+
+  try {
+    const response = await fetch(imageUrl, {
+      signal: AbortSignal.timeout(15000),
+    })
+
+    if (!response.ok) {
+      console.warn(`[Thumbnail] HTTP ${response.status} fetching ${imageUrl}`)
+      return null
+    }
+
+    const arrayBuffer = await response.arrayBuffer()
+    const sourceBuffer = Buffer.from(arrayBuffer)
+
+    const results = new Map<number, Buffer>()
+
+    const buffers = await Promise.all(
+      sizeConfigs.map(async (config) => {
+        const buffer = await sharp(sourceBuffer)
+          .resize(config.pixelSize, config.pixelSize, {
+            fit: config.fit,
+            background: config.background,
+          })
+          .png({ quality: config.quality })
+          .toBuffer()
+        return { pixelSize: config.pixelSize, buffer }
+      })
+    )
+
+    for (const { pixelSize, buffer } of buffers) {
+      results.set(pixelSize, buffer)
+    }
+
+    return results
+  } catch (error) {
+    console.warn(`[Thumbnail] Failed to generate sizes for ${imageUrl}:`, error)
+    return null
+  }
+}
+
+/**
+ * Upload thumbnails to S3 using pixel sizes directly
+ * @param cacheKey - 16-char cache key
+ * @param buffers - Map of pixelSize -> Buffer
+ * @returns true if all uploads succeeded
+ */
+export async function uploadThumbnailsByPixelSize(
+  cacheKey: string,
+  buffers: Map<number, Buffer>
+): Promise<boolean> {
+  try {
+    const uploads = Array.from(buffers.entries()).map(([pixelSize, buffer]) => {
+      const key = getThumbnailS3KeyByPixel(cacheKey, pixelSize)
+      return uploadToS3(buffer, key, 'image/png')
+    })
+
+    await Promise.all(uploads)
+    return true
+  } catch (error) {
+    console.error(`[Thumbnail] S3 upload failed for ${cacheKey}:`, error)
+    return false
+  }
+}
+
 /**
  * Generate and upload thumbnails for an image URL.
  * Returns the cache key if successful.

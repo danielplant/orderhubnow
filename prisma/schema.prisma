@@ -442,6 +442,20 @@ model SkuImageConfig {
   @@map("SkuImageConfig")
 }
 
+// Available thumbnail sizes that can be generated
+model ThumbnailSize {
+  pixelSize   Int      @id                        // e.g., 120, 240, 480, 720
+  quality     Int      @default(80)               // 1-100, compression quality
+  fit         String   @default("contain") @db.VarChar(20)  // contain | cover | fill
+  background  String   @default("#FFFFFF") @db.VarChar(10)  // Background color for padding
+  enabled     Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now()) @updatedAt
+
+  @@map("ThumbnailSize")
+}
+
 /// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
 model Sku_ForTransformationOnly {
   ID                      BigInt    @default(autoincrement())

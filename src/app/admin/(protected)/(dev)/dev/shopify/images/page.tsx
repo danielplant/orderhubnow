@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
-import { Image as ImageIcon, RefreshCw, BarChart3, CheckCircle, XCircle, Edit2, Save, ArrowRight, Plug } from 'lucide-react'
+import React, { useState, useEffect, useCallback } from 'react'
+import { Image as ImageIcon, RefreshCw, BarChart3, CheckCircle, XCircle, Edit2, Save, ArrowRight, Plug, Plus, Trash2 } from 'lucide-react'
 
 // Locations that have been wired to use ImageConfigProvider context
 const WIRED_LOCATIONS = new Set([
@@ -20,6 +20,15 @@ interface SkuImageConfig {
   useSrcSet: boolean
   primary: string
   fallback: string | null
+  enabled: boolean
+  sortOrder: number
+}
+
+interface ThumbnailSize {
+  pixelSize: number
+  quality: number
+  fit: string
+  background: string
   enabled: boolean
   sortOrder: number
 }
@@ -101,6 +110,13 @@ export default function ImagesPage() {
   const [editingConfig, setEditingConfig] = useState<string | null>(null)
   const [editForm, setEditForm] = useState<Partial<SkuImageConfig>>({})
 
+  // Thumbnail sizes state
+  const [thumbnailSizes, setThumbnailSizes] = useState<ThumbnailSize[]>([])
+  const [editingSize, setEditingSize] = useState<number | null>(null)
+  const [sizeEditForm, setSizeEditForm] = useState<Partial<ThumbnailSize>>({})
+  const [showAddSize, setShowAddSize] = useState(false)
+  const [newSizeForm, setNewSizeForm] = useState({ pixelSize: '', quality: 80, fit: 'contain', background: '#FFFFFF' })
+
   // Thumbnail analysis state
   const [sizeStats, setSizeStats] = useState<ThumbnailSizeStats[]>([])
   const [selectedSizes, setSelectedSizes] = useState<Set<number>>(new Set())
@@ -117,6 +133,7 @@ export default function ImagesPage() {
   useEffect(() => {
     Promise.all([
       fetchDisplayConfigs(),
+      fetchThumbnailSizes(),
       fetchThumbnailStatus(),
     ]).finally(() => setLoading(false))
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -129,6 +146,17 @@ export default function ImagesPage() {
     return () => clearInterval(interval)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isGenerating, generationStatus?.inProgress])
+
+  async function fetchThumbnailSizes() {
+    try {
+      const res = await fetch('/api/admin/shopify/images/sizes')
+      if (!res.ok) throw new Error('Failed to fetch thumbnail sizes')
+      const data = await res.json()
+      setThumbnailSizes(data.sizes || [])
+    } catch (err) {
+      console.error('Failed to fetch thumbnail sizes:', err)
+    }
+  }
 
   async function fetchDisplayConfigs() {
     try {
@@ -259,6 +287,83 @@ export default function ImagesPage() {
     })
   }
 
+  // Thumbnail size CRUD
+  function startEditingSize(size: ThumbnailSize) {
+    setEditingSize(size.pixelSize)
+    setSizeEditForm({
+      quality: size.quality,
+      fit: size.fit,
+      background: size.background,
+      enabled: size.enabled,
+    })
+  }
+
+  async function saveThumbnailSize(pixelSize: number) {
+    try {
+      const res = await fetch(`/api/admin/shopify/images/sizes/${pixelSize}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(sizeEditForm),
+      })
+      if (!res.ok) throw new Error('Failed to save size')
+
+      setSuccess('Size saved')
+      setEditingSize(null)
+      fetchThumbnailSizes()
+      setTimeout(() => setSuccess(null), 3000)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save size')
+    }
+  }
+
+  async function addThumbnailSize() {
+    const pixelSize = parseInt(newSizeForm.pixelSize, 10)
+    if (isNaN(pixelSize) || pixelSize < 16 || pixelSize > 2048) {
+      setError('Pixel size must be between 16 and 2048')
+      return
+    }
+
+    try {
+      const res = await fetch('/api/admin/shopify/images/sizes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...newSizeForm, pixelSize }),
+      })
+      if (!res.ok) {
+        const data = await res.json()
+        throw new Error(data.error || 'Failed to add size')
+      }
+
+      setSuccess(`Added ${pixelSize}px`)
+      setShowAddSize(false)
+      setNewSizeForm({ pixelSize: '', quality: 80, fit: 'contain', background: '#FFFFFF' })
+      fetchThumbnailSizes()
+      setTimeout(() => setSuccess(null), 3000)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to add size')
+    }
+  }
+
+  async function deleteThumbnailSize(pixelSize: number) {
+    if (!confirm(`Delete ${pixelSize}px thumbnail size?`)) return
+
+    try {
+      const res = await fetch(`/api/admin/shopify/images/sizes/${pixelSize}`, {
+        method: 'DELETE',
+      })
+      if (!res.ok) {
+        const data = await res.json()
+        throw new Error(data.error || 'Failed to delete size')
+      }
+
+      setSuccess(`Deleted ${pixelSize}px`)
+      fetchThumbnailSizes()
+      setTimeout(() => setSuccess(null), 3000)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete size')
+    }
+  }
+
   if (loading) {
     return (
       <main className="p-6">
@@ -352,9 +457,9 @@ export default function ImagesPage() {
             <tbody>
               {(['buyer', 'admin', 'export'] as const).map(area => (
                 configsByArea[area]?.length > 0 && (
-                  <>
+                  <React.Fragment key={area}>
                     {/* Area header */}
-                    <tr key={`header-${area}`} className="bg-muted/30">
+                    <tr className="bg-muted/30">
                       <td colSpan={8} className="py-2 px-4">
                         <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                           {getAreaLabel(area)}
@@ -390,13 +495,16 @@ export default function ImagesPage() {
                         </td>
                         <td className="py-3 px-4 text-center">
                           {editingConfig === config.id ? (
-                            <input
-                              type="number"
+                            <select
                               value={editForm.pixelSize ?? ''}
-                              onChange={e => setEditForm({ ...editForm, pixelSize: parseInt(e.target.value) || null })}
-                              className="w-16 px-2 py-1 rounded border border-border bg-background text-sm text-center"
-                              placeholder="—"
-                            />
+                              onChange={e => setEditForm({ ...editForm, pixelSize: e.target.value ? parseInt(e.target.value) : null })}
+                              className="px-2 py-1 rounded border border-border bg-background text-xs"
+                            >
+                              <option value="">— (srcSet/direct)</option>
+                              {thumbnailSizes.filter(s => s.enabled).map(size => (
+                                <option key={size.pixelSize} value={size.pixelSize}>{size.pixelSize}px</option>
+                              ))}
+                            </select>
                           ) : config.useSrcSet ? (
                             <span className="text-xs font-medium px-2 py-1 rounded bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300">
                               srcSet
@@ -484,7 +592,7 @@ export default function ImagesPage() {
                         </td>
                       </tr>
                     ))}
-                  </>
+                  </React.Fragment>
                 )
               ))}
             </tbody>
@@ -512,7 +620,209 @@ export default function ImagesPage() {
         </div>
       </div>
 
-      {/* Section 2: Thumbnail Generation */}
+      {/* Section 2: Thumbnail Sizes */}
+      <div className="rounded-lg border border-border bg-card mb-6">
+        <div className="p-4 border-b border-border flex items-center justify-between">
+          <div>
+            <h2 className="font-semibold">Thumbnail Sizes</h2>
+            <p className="text-sm text-muted-foreground mt-1">
+              Define available S3 thumbnail sizes and their generation settings
+            </p>
+          </div>
+          <button
+            onClick={() => setShowAddSize(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-primary text-primary-foreground hover:bg-primary/90"
+          >
+            <Plus className="h-4 w-4" />
+            Add Size
+          </button>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border bg-muted/50">
+                <th className="text-left py-3 px-4 font-medium">Size</th>
+                <th className="text-center py-3 px-4 font-medium">Quality</th>
+                <th className="text-center py-3 px-4 font-medium">Fit</th>
+                <th className="text-center py-3 px-4 font-medium">Background</th>
+                <th className="text-center py-3 px-4 font-medium">Enabled</th>
+                <th className="text-center py-3 px-4 font-medium w-24">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {/* Add new size row */}
+              {showAddSize && (
+                <tr className="border-b border-border bg-emerald-50/50 dark:bg-emerald-900/10">
+                  <td className="py-3 px-4">
+                    <input
+                      type="number"
+                      placeholder="e.g., 800"
+                      value={newSizeForm.pixelSize}
+                      onChange={e => setNewSizeForm({ ...newSizeForm, pixelSize: e.target.value })}
+                      className="w-20 px-2 py-1 rounded border border-border bg-background text-sm"
+                    />
+                    <span className="ml-1 text-muted-foreground">px</span>
+                  </td>
+                  <td className="py-3 px-4 text-center">
+                    <input
+                      type="number"
+                      min="1"
+                      max="100"
+                      value={newSizeForm.quality}
+                      onChange={e => setNewSizeForm({ ...newSizeForm, quality: parseInt(e.target.value) || 80 })}
+                      className="w-16 px-2 py-1 rounded border border-border bg-background text-sm text-center"
+                    />
+                  </td>
+                  <td className="py-3 px-4 text-center">
+                    <select
+                      value={newSizeForm.fit}
+                      onChange={e => setNewSizeForm({ ...newSizeForm, fit: e.target.value })}
+                      className="px-2 py-1 rounded border border-border bg-background text-xs"
+                    >
+                      <option value="contain">contain</option>
+                      <option value="cover">cover</option>
+                      <option value="fill">fill</option>
+                    </select>
+                  </td>
+                  <td className="py-3 px-4 text-center">
+                    <input
+                      type="text"
+                      value={newSizeForm.background}
+                      onChange={e => setNewSizeForm({ ...newSizeForm, background: e.target.value })}
+                      className="w-20 px-2 py-1 rounded border border-border bg-background text-sm text-center font-mono"
+                    />
+                  </td>
+                  <td className="py-3 px-4 text-center">
+                    <span className="text-muted-foreground text-xs">Yes</span>
+                  </td>
+                  <td className="py-3 px-4 text-center">
+                    <div className="flex items-center justify-center gap-1">
+                      <button
+                        onClick={addThumbnailSize}
+                        className="p-1.5 rounded hover:bg-accent text-primary"
+                        title="Save"
+                      >
+                        <Save className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={() => setShowAddSize(false)}
+                        className="p-1.5 rounded hover:bg-accent text-muted-foreground"
+                        title="Cancel"
+                      >
+                        <XCircle className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              )}
+              {thumbnailSizes.map(size => (
+                <tr key={size.pixelSize} className="border-b border-border/50 hover:bg-muted/20">
+                  <td className="py-3 px-4">
+                    <span className="font-mono font-medium">{size.pixelSize}px</span>
+                  </td>
+                  <td className="py-3 px-4 text-center">
+                    {editingSize === size.pixelSize ? (
+                      <input
+                        type="number"
+                        min="1"
+                        max="100"
+                        value={sizeEditForm.quality ?? size.quality}
+                        onChange={e => setSizeEditForm({ ...sizeEditForm, quality: parseInt(e.target.value) || 80 })}
+                        className="w-16 px-2 py-1 rounded border border-border bg-background text-sm text-center"
+                      />
+                    ) : (
+                      <span className="text-muted-foreground">{size.quality}</span>
+                    )}
+                  </td>
+                  <td className="py-3 px-4 text-center">
+                    {editingSize === size.pixelSize ? (
+                      <select
+                        value={sizeEditForm.fit ?? size.fit}
+                        onChange={e => setSizeEditForm({ ...sizeEditForm, fit: e.target.value })}
+                        className="px-2 py-1 rounded border border-border bg-background text-xs"
+                      >
+                        <option value="contain">contain</option>
+                        <option value="cover">cover</option>
+                        <option value="fill">fill</option>
+                      </select>
+                    ) : (
+                      <span className="text-xs font-mono">{size.fit}</span>
+                    )}
+                  </td>
+                  <td className="py-3 px-4 text-center">
+                    {editingSize === size.pixelSize ? (
+                      <input
+                        type="text"
+                        value={sizeEditForm.background ?? size.background}
+                        onChange={e => setSizeEditForm({ ...sizeEditForm, background: e.target.value })}
+                        className="w-20 px-2 py-1 rounded border border-border bg-background text-sm text-center font-mono"
+                      />
+                    ) : (
+                      <span className="font-mono text-xs">{size.background}</span>
+                    )}
+                  </td>
+                  <td className="py-3 px-4 text-center">
+                    {editingSize === size.pixelSize ? (
+                      <input
+                        type="checkbox"
+                        checked={sizeEditForm.enabled ?? size.enabled}
+                        onChange={e => setSizeEditForm({ ...sizeEditForm, enabled: e.target.checked })}
+                        className="rounded border-border"
+                      />
+                    ) : size.enabled ? (
+                      <CheckCircle className="h-4 w-4 text-green-500 mx-auto" />
+                    ) : (
+                      <XCircle className="h-4 w-4 text-muted-foreground mx-auto" />
+                    )}
+                  </td>
+                  <td className="py-3 px-4 text-center">
+                    <div className="flex items-center justify-center gap-1">
+                      {editingSize === size.pixelSize ? (
+                        <>
+                          <button
+                            onClick={() => saveThumbnailSize(size.pixelSize)}
+                            className="p-1.5 rounded hover:bg-accent text-primary"
+                            title="Save"
+                          >
+                            <Save className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={() => setEditingSize(null)}
+                            className="p-1.5 rounded hover:bg-accent text-muted-foreground"
+                            title="Cancel"
+                          >
+                            <XCircle className="h-4 w-4" />
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => startEditingSize(size)}
+                            className="p-1.5 rounded hover:bg-accent text-muted-foreground hover:text-foreground"
+                            title="Edit"
+                          >
+                            <Edit2 className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={() => deleteThumbnailSize(size.pixelSize)}
+                            className="p-1.5 rounded hover:bg-accent text-muted-foreground hover:text-red-500"
+                            title="Delete"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Section 3: Thumbnail Generation */}
       <div className="rounded-lg border border-border bg-card p-6 mb-6">
         <h2 className="font-semibold mb-4">S3 Thumbnail Cache Status</h2>
         <p className="text-sm text-muted-foreground mb-4">
