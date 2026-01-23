@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Play, RefreshCw, CheckCircle, XCircle, Clock, Zap, Database, Image, ArrowRight } from 'lucide-react';
+import { Play, RefreshCw, CheckCircle, XCircle, Clock, Zap, Database, Image, ArrowRight, BarChart3 } from 'lucide-react';
 import Link from 'next/link';
 import { formatDate } from '@/lib/utils/format';
 
@@ -38,6 +38,40 @@ interface SyncResult {
   variantsProcessed?: number;
   skusCreated?: number;
   error?: string;
+}
+
+interface ThumbnailStatus {
+  inProgress: boolean;
+  lastRun: {
+    id: string;
+    status: string;
+    startedAt: string;
+    completedAt: string | null;
+    currentStep: string | null;
+    currentStepDetail: string | null;
+    progressPercent: number | null;
+    totalImages: number | null;
+    processedCount: number | null;
+    skippedCount: number | null;
+    failedCount: number | null;
+    enabledSizes: string[] | null;
+    errorMessage: string | null;
+  } | null;
+}
+
+interface ThumbnailAnalysis {
+  totalSkus: number;
+  skusWithImages: number;
+  needsGenerationCount: number;
+  cachedCount: number;
+  bySize: {
+    sm: { cached: number; needed: number };
+    md: { cached: number; needed: number };
+    lg: { cached: number; needed: number };
+    xl: { cached: number; needed: number };
+  };
+  enabledSizes: string[];
+  estimatedTimeMinutes: number;
 }
 
 // Pipeline steps for visualization
@@ -94,6 +128,13 @@ export default function SyncDashboardPage() {
   const [result, setResult] = useState<SyncResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Thumbnail generation state
+  const [thumbStatus, setThumbStatus] = useState<ThumbnailStatus | null>(null);
+  const [thumbAnalysis, setThumbAnalysis] = useState<ThumbnailAnalysis | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [thumbError, setThumbError] = useState<string | null>(null);
+
   // Fetch current status
   const fetchStatus = useCallback(async () => {
     try {
@@ -119,6 +160,82 @@ export default function SyncDashboardPage() {
     const interval = setInterval(fetchStatus, 2000);
     return () => clearInterval(interval);
   }, [status?.syncInProgress, isStarting, fetchStatus]);
+
+  // Fetch thumbnail status
+  const fetchThumbStatus = useCallback(async () => {
+    try {
+      const res = await fetch('/api/admin/shopify/thumbnails/status');
+      if (res.ok) {
+        const data = await res.json();
+        setThumbStatus(data);
+      }
+    } catch (err) {
+      console.error('Failed to fetch thumbnail status:', err);
+    }
+  }, []);
+
+  // Initial thumbnail status fetch
+  useEffect(() => {
+    fetchThumbStatus();
+  }, [fetchThumbStatus]);
+
+  // Poll thumbnail status when generation is in progress
+  useEffect(() => {
+    if (!thumbStatus?.inProgress && !isGenerating) return;
+
+    const interval = setInterval(fetchThumbStatus, 2000);
+    return () => clearInterval(interval);
+  }, [thumbStatus?.inProgress, isGenerating, fetchThumbStatus]);
+
+  // Analyze thumbnails
+  const analyzeThumbnails = async () => {
+    setIsAnalyzing(true);
+    setThumbError(null);
+
+    try {
+      const res = await fetch('/api/admin/shopify/thumbnails/analyze');
+      const data = await res.json();
+
+      if (!res.ok) throw new Error(data.error || 'Failed to analyze');
+
+      setThumbAnalysis(data.analysis);
+    } catch (err) {
+      setThumbError(err instanceof Error ? err.message : 'Failed to analyze');
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  // Generate thumbnails
+  const generateThumbnails = async () => {
+    setIsGenerating(true);
+    setThumbError(null);
+
+    try {
+      const res = await fetch('/api/admin/shopify/thumbnails/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) throw new Error(data.error || 'Failed to start generation');
+
+      // Immediately fetch status to show progress
+      await fetchThumbStatus();
+    } catch (err) {
+      setThumbError(err instanceof Error ? err.message : 'Failed to generate');
+      setIsGenerating(false);
+    }
+  };
+
+  // Clear isGenerating when thumbnail generation completes
+  useEffect(() => {
+    if (thumbStatus && !thumbStatus.inProgress && isGenerating) {
+      setIsGenerating(false);
+    }
+  }, [thumbStatus, isGenerating]);
 
   // Start sync
   const startSync = async () => {
@@ -473,6 +590,137 @@ export default function SyncDashboardPage() {
             </div>
           )}
         </div>
+      </div>
+
+      {/* Thumbnail Generation Section */}
+      <div className="mt-6 rounded-2xl border bg-card p-6">
+        <div className="flex items-center gap-2 mb-4">
+          <Image className="h-5 w-5 text-muted-foreground" />
+          <h2 className="text-lg font-semibold">Thumbnail Generation</h2>
+        </div>
+
+        {/* Progress when generating */}
+        {(thumbStatus?.inProgress || isGenerating) && thumbStatus?.lastRun && (
+          <div className="mb-4 p-4 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm font-medium text-amber-700 dark:text-amber-300">
+                {thumbStatus.lastRun.currentStepDetail || 'Starting...'}
+              </span>
+              <span className="text-sm font-bold text-amber-700 dark:text-amber-300">
+                {thumbStatus.lastRun.progressPercent ?? 0}%
+              </span>
+            </div>
+            <div className="w-full h-2 bg-amber-200 dark:bg-amber-800 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-amber-500 transition-all duration-300"
+                style={{ width: `${thumbStatus.lastRun.progressPercent ?? 0}%` }}
+              />
+            </div>
+            <p className="text-xs text-amber-600 dark:text-amber-400 mt-2">
+              {thumbStatus.lastRun.processedCount?.toLocaleString() ?? 0} of {thumbStatus.lastRun.totalImages?.toLocaleString() ?? 0} images
+            </p>
+          </div>
+        )}
+
+        {/* Last run result */}
+        {thumbStatus?.lastRun && !thumbStatus.inProgress && !isGenerating && (
+          <div className={`mb-4 p-4 rounded-xl ${thumbStatus.lastRun.status === 'completed' ? 'bg-emerald-50 dark:bg-emerald-900/20' : 'bg-red-50 dark:bg-red-900/20'}`}>
+            <div className="flex items-center gap-2">
+              {thumbStatus.lastRun.status === 'completed' ? (
+                <CheckCircle className="h-5 w-5 text-emerald-500" />
+              ) : (
+                <XCircle className="h-5 w-5 text-red-500" />
+              )}
+              <span className={`text-sm font-medium ${thumbStatus.lastRun.status === 'completed' ? 'text-emerald-700 dark:text-emerald-300' : 'text-red-700 dark:text-red-300'}`}>
+                {thumbStatus.lastRun.status === 'completed'
+                  ? `Generated ${thumbStatus.lastRun.processedCount?.toLocaleString() ?? 0} thumbnails`
+                  : `Failed: ${thumbStatus.lastRun.errorMessage}`}
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* Analysis results */}
+        {thumbAnalysis && !thumbStatus?.inProgress && !isGenerating && (
+          <div className="mb-4 p-4 rounded-xl bg-muted">
+            <div className="flex items-center gap-2 mb-3">
+              <BarChart3 className="h-4 w-4 text-muted-foreground" />
+              <span className="text-sm font-medium">Thumbnails Needed</span>
+            </div>
+            <div className="grid grid-cols-4 gap-3 text-sm">
+              {(['sm', 'md', 'lg', 'xl'] as const).map((size) => {
+                const data = thumbAnalysis.bySize[size];
+                const enabled = thumbAnalysis.enabledSizes.includes(size);
+                return (
+                  <div key={size} className={enabled ? '' : 'opacity-50'}>
+                    <p className="text-xs text-muted-foreground uppercase">{size}</p>
+                    <p className="font-semibold">{data.needed.toLocaleString()}</p>
+                    <div className="w-full h-1.5 bg-muted-foreground/20 rounded-full mt-1">
+                      <div
+                        className="h-full bg-primary rounded-full"
+                        style={{ width: `${Math.min(100, (data.needed / (data.needed + data.cached || 1)) * 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <p className="text-xs text-muted-foreground mt-3">
+              {thumbAnalysis.needsGenerationCount.toLocaleString()} images need thumbnails
+              {thumbAnalysis.estimatedTimeMinutes > 0 && ` (~${thumbAnalysis.estimatedTimeMinutes} min)`}
+            </p>
+          </div>
+        )}
+
+        {/* Error */}
+        {thumbError && (
+          <div className="mb-4 p-3 rounded-lg border border-red-200 bg-red-50 dark:bg-red-900/20 dark:border-red-800">
+            <p className="text-sm text-red-600 dark:text-red-400">{thumbError}</p>
+          </div>
+        )}
+
+        {/* Buttons */}
+        <div className="flex gap-3">
+          <button
+            onClick={analyzeThumbnails}
+            disabled={isAnalyzing || thumbStatus?.inProgress || isGenerating || inProgress}
+            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border border-border hover:bg-accent disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {isAnalyzing ? (
+              <>
+                <RefreshCw className="h-4 w-4 animate-spin" />
+                Analyzing...
+              </>
+            ) : (
+              <>
+                <BarChart3 className="h-4 w-4" />
+                Analyze
+              </>
+            )}
+          </button>
+          <button
+            onClick={generateThumbnails}
+            disabled={thumbStatus?.inProgress || isGenerating || inProgress}
+            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {thumbStatus?.inProgress || isGenerating ? (
+              <>
+                <RefreshCw className="h-4 w-4 animate-spin" />
+                Generating...
+              </>
+            ) : (
+              <>
+                <Image className="h-4 w-4" />
+                Generate Thumbnails
+              </>
+            )}
+          </button>
+        </div>
+
+        <p className="text-xs text-muted-foreground mt-3">
+          Generate thumbnails separately from sync for faster sync times.
+          Click Analyze first to see how many images need processing.
+        </p>
       </div>
     </main>
   );

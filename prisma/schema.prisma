@@ -1142,6 +1142,15 @@ model SyncSettings {
   thumbnailBatchConcurrency Int      @default(10) @map("ThumbnailBatchConcurrency")
   thumbnailEnabled          Boolean  @default(true) @map("ThumbnailEnabled")
 
+  // Per-size enable toggles
+  thumbnailSizeSmEnabled    Boolean  @default(true) @map("ThumbnailSizeSmEnabled")
+  thumbnailSizeMdEnabled    Boolean  @default(true) @map("ThumbnailSizeMdEnabled")
+  thumbnailSizeLgEnabled    Boolean  @default(true) @map("ThumbnailSizeLgEnabled")
+  thumbnailSizeXlEnabled    Boolean  @default(true) @map("ThumbnailSizeXlEnabled")
+
+  // Control whether thumbnails run during sync (OFF by default - generate separately)
+  thumbnailDuringSync       Boolean  @default(false) @map("ThumbnailDuringSync")
+
   // Backup Settings
   backupEnabled             Boolean  @default(true) @map("BackupEnabled")
   backupRetentionDays       Int      @default(7) @map("BackupRetentionDays")
@@ -1173,6 +1182,26 @@ model SyncSettingsHistory {
 
   @@index([settingsId])
   @@map("SyncSettingsHistory")
+}
+
+/// Tracks standalone thumbnail generation runs (separate from sync)
+model ThumbnailGenerationRun {
+  id                BigInt    @id @default(autoincrement()) @map("ID")
+  status            String    @db.NVarChar(20) @map("Status") // started | completed | failed
+  startedAt         DateTime  @map("StartedAt")
+  completedAt       DateTime? @map("CompletedAt")
+  currentStep       String?   @db.NVarChar(50) @map("CurrentStep")
+  currentStepDetail String?   @db.NVarChar(500) @map("CurrentStepDetail")
+  progressPercent   Int?      @map("ProgressPercent")
+  totalImages       Int?      @map("TotalImages")
+  processedCount    Int?      @default(0) @map("ProcessedCount")
+  skippedCount      Int?      @default(0) @map("SkippedCount")
+  failedCount       Int?      @default(0) @map("FailedCount")
+  enabledSizes      String?   @db.NVarChar(50) @map("EnabledSizes") // JSON array
+  errorMessage      String?   @db.NVarChar(Max) @map("ErrorMessage")
+
+  @@index([status, startedAt], map: "IX_ThumbnailGenerationRun_Status_StartedAt")
+  @@map("ThumbnailGenerationRun")
 }
 
 // ============================================================================

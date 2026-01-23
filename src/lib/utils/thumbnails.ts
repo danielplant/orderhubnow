@@ -286,6 +286,62 @@ export async function generateThumbnailSizes(
 }
 
 /**
+ * Fetch an image from URL and resize to only specified thumbnail sizes.
+ * Returns a Map of size -> Buffer, or null if fetch fails.
+ *
+ * @param imageUrl - The source image URL
+ * @param enabledSizes - Array of sizes to generate (e.g., ['sm', 'md'])
+ * @param config - Generation config (defaults to THUMBNAIL_CONFIG)
+ */
+export async function generateThumbnailSizesSelective(
+  imageUrl: string,
+  enabledSizes: ThumbnailSize[],
+  config: ThumbnailGenerationConfig = THUMBNAIL_CONFIG
+): Promise<Map<ThumbnailSize, Buffer> | null> {
+  if (!imageUrl || enabledSizes.length === 0) return null
+
+  try {
+    const response = await fetch(imageUrl, {
+      signal: AbortSignal.timeout(15000), // 15 second timeout
+    })
+
+    if (!response.ok) {
+      console.warn(`[Thumbnail] HTTP ${response.status} fetching ${imageUrl}`)
+      return null
+    }
+
+    const arrayBuffer = await response.arrayBuffer()
+    const sourceBuffer = Buffer.from(arrayBuffer)
+
+    const results = new Map<ThumbnailSize, Buffer>()
+
+    // Generate only enabled sizes in parallel
+    const buffers = await Promise.all(
+      enabledSizes.map(async (size) => {
+        const px = config.sizes[size]
+        const buffer = await sharp(sourceBuffer)
+          .resize(px, px, {
+            fit: config.fit,
+            background: config.background,
+          })
+          .png({ quality: config.quality })
+          .toBuffer()
+        return { size, buffer }
+      })
+    )
+
+    for (const { size, buffer } of buffers) {
+      results.set(size, buffer)
+    }
+
+    return results
+  } catch (error) {
+    console.warn(`[Thumbnail] Failed to generate sizes for ${imageUrl}:`, error)
+    return null
+  }
+}
+
+/**
  * Upload all thumbnail sizes to S3
  * @param cacheKey - 16-char cache key
  * @param buffers - Map of size -> Buffer

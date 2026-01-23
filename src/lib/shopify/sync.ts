@@ -6,6 +6,7 @@
 
 import { prisma } from '@/lib/prisma'
 import { getStatusCascadeConfig } from '@/lib/data/queries/sync-config'
+import { getSyncSettings } from '@/lib/data/queries/settings'
 import {
   processThumbnailsBatch,
   logThumbnailSyncSummary,
@@ -1476,78 +1477,91 @@ export async function runFullSync(options?: {
       recordsProcessed: transformResult.processed,
     })
 
-    // Step 5: Generate thumbnails with smart caching
-    // Only regenerates when: URL changed, settings changed, or file missing
-    onProgress('Step 5/5', 'Processing thumbnails (smart cache)')
-    await updateSyncProgress(operationId, {
-      step: 'Step 5/5',
-      detail: 'Loading SKUs for thumbnail processing...',
-      percent: 86,
-      recordsProcessed: transformResult.processed,
-    })
-    const skusWithImages = await prisma.sku.findMany({
-      where: { ShopifyImageURL: { not: null } },
-      select: { SkuID: true, ShopifyImageURL: true, ThumbnailPath: true },
-    })
+    // Step 5: Generate thumbnails (conditional based on settings)
+    // Check if thumbnails should run during sync
+    const syncSettings = await getSyncSettings()
 
-    const thumbnailItems: ThumbnailSyncItem[] = skusWithImages.map(s => ({
-      skuId: s.SkuID,
-      imageUrl: s.ShopifyImageURL,
-      currentThumbnailPath: s.ThumbnailPath,
-    }))
-
-    if (thumbnailItems.length > 0) {
-      const { results, stats } = await processThumbnailsBatch(thumbnailItems, {
-        concurrency: 10,
-        onProgress: async (processed, total, currentStats) => {
-          const pct = Math.round((processed / total) * 100)
-          onProgress(
-            'Step 5/5',
-            `Thumbnails: ${pct}% (${currentStats.generated} new, ${currentStats.skipped} cached)`
-          )
-          // Update progress: 86-99% range during thumbnail processing
-          const thumbPercent = Math.min(99, 86 + Math.floor((processed / total) * 13))
-          await updateSyncProgress(operationId!, {
-            step: 'Step 5/5',
-            detail: `Thumbnails: ${pct}% (${currentStats.generated} new, ${currentStats.skipped} cached)`,
-            percent: thumbPercent,
-            recordsProcessed: processed,
-            totalRecords: total,
-          })
-        },
+    if (syncSettings.thumbnailDuringSync && syncSettings.thumbnailEnabled) {
+      // Generate thumbnails during sync (original behavior)
+      onProgress('Step 5/5', 'Processing thumbnails (smart cache)')
+      await updateSyncProgress(operationId, {
+        step: 'Step 5/5',
+        detail: 'Loading SKUs for thumbnail processing...',
+        percent: 86,
+        recordsProcessed: transformResult.processed,
+      })
+      const skusWithImages = await prisma.sku.findMany({
+        where: { ShopifyImageURL: { not: null } },
+        select: { SkuID: true, ShopifyImageURL: true, ThumbnailPath: true },
       })
 
-      // Log summary for debugging
-      logThumbnailSyncSummary(stats)
+      const thumbnailItems: ThumbnailSyncItem[] = skusWithImages.map(s => ({
+        skuId: s.SkuID,
+        imageUrl: s.ShopifyImageURL,
+        currentThumbnailPath: s.ThumbnailPath,
+      }))
 
-      // Update SKUs that got new thumbnails - store cache key only (not full path)
-      const updates = results.filter(
-        r => r.status === 'generated' && r.cacheKey
-      )
+      if (thumbnailItems.length > 0) {
+        const { results, stats } = await processThumbnailsBatch(thumbnailItems, {
+          concurrency: syncSettings.thumbnailBatchConcurrency,
+          onProgress: async (processed, total, currentStats) => {
+            const pct = Math.round((processed / total) * 100)
+            onProgress(
+              'Step 5/5',
+              `Thumbnails: ${pct}% (${currentStats.generated} new, ${currentStats.skipped} cached)`
+            )
+            // Update progress: 86-99% range during thumbnail processing
+            const thumbPercent = Math.min(99, 86 + Math.floor((processed / total) * 13))
+            await updateSyncProgress(operationId!, {
+              step: 'Step 5/5',
+              detail: `Thumbnails: ${pct}% (${currentStats.generated} new, ${currentStats.skipped} cached)`,
+              percent: thumbPercent,
+              recordsProcessed: processed,
+              totalRecords: total,
+            })
+          },
+        })
 
-      for (const update of updates) {
-        await prisma.sku.updateMany({
-          where: { SkuID: update.skuId },
-          data: { ThumbnailPath: update.cacheKey },  // Store just the 16-char cache key
+        // Log summary for debugging
+        logThumbnailSyncSummary(stats)
+
+        // Update SKUs that got new thumbnails - store cache key only (not full path)
+        const updates = results.filter(
+          r => r.status === 'generated' && r.cacheKey
+        )
+
+        for (const update of updates) {
+          await prisma.sku.updateMany({
+            where: { SkuID: update.skuId },
+            data: { ThumbnailPath: update.cacheKey },  // Store just the 16-char cache key
+          })
+        }
+
+        onProgress(
+          'Step 5/5',
+          `Complete - ${stats.generated} generated, ${stats.skipped} cached, ${stats.failed} failed`
+        )
+        await updateSyncProgress(operationId, {
+          step: 'Step 5/5',
+          detail: `Complete - ${stats.generated} new, ${stats.skipped} cached, ${stats.failed} failed`,
+          percent: 99,
+          recordsProcessed: thumbnailItems.length,
+          totalRecords: thumbnailItems.length,
+        })
+      } else {
+        onProgress('Step 5/5', 'Complete - No images to process')
+        await updateSyncProgress(operationId, {
+          step: 'Step 5/5',
+          detail: 'Complete - No images to process',
+          percent: 99,
         })
       }
-
-      onProgress(
-        'Step 5/5',
-        `Complete - ${stats.generated} generated, ${stats.skipped} cached, ${stats.failed} failed`
-      )
-      await updateSyncProgress(operationId, {
-        step: 'Step 5/5',
-        detail: `Complete - ${stats.generated} new, ${stats.skipped} cached, ${stats.failed} failed`,
-        percent: 99,
-        recordsProcessed: thumbnailItems.length,
-        totalRecords: thumbnailItems.length,
-      })
     } else {
-      onProgress('Step 5/5', 'Complete - No images to process')
+      // Thumbnails disabled during sync - skip this step
+      onProgress('Step 5/5', 'Skipped - Generate thumbnails separately')
       await updateSyncProgress(operationId, {
         step: 'Step 5/5',
-        detail: 'Complete - No images to process',
+        detail: 'Skipped - Use "Generate Thumbnails" on dashboard',
         percent: 99,
       })
     }

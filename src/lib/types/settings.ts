@@ -125,6 +125,15 @@ export type SyncSettingsRecord = {
   thumbnailBatchConcurrency: number
   thumbnailEnabled: boolean
 
+  // Per-size enable toggles
+  thumbnailSizeSmEnabled: boolean
+  thumbnailSizeMdEnabled: boolean
+  thumbnailSizeLgEnabled: boolean
+  thumbnailSizeXlEnabled: boolean
+
+  // Control whether thumbnails run during sync
+  thumbnailDuringSync: boolean
+
   // Backup Settings
   backupEnabled: boolean
   backupRetentionDays: number
@@ -171,9 +180,38 @@ export const SYNC_SETTINGS_DEFAULTS: SyncSettingsEditableFields = {
   thumbnailFetchTimeoutMs: 15000,
   thumbnailBatchConcurrency: 10,
   thumbnailEnabled: true,
+  thumbnailSizeSmEnabled: true,
+  thumbnailSizeMdEnabled: true,
+  thumbnailSizeLgEnabled: true,
+  thumbnailSizeXlEnabled: true,
+  thumbnailDuringSync: false, // Off by default - generate separately
   backupEnabled: true,
   backupRetentionDays: 7,
   cleanupStaleBackups: true,
   syncMaxWaitMs: 600000,
   syncPollIntervalMs: 3000,
+}
+
+// ============================================================================
+// Thumbnail Generation Run
+// ============================================================================
+
+/**
+ * Record from ThumbnailGenerationRun table.
+ * Tracks standalone thumbnail generation progress.
+ */
+export type ThumbnailGenerationRunRecord = {
+  id: bigint
+  status: string
+  startedAt: Date
+  completedAt: Date | null
+  currentStep: string | null
+  currentStepDetail: string | null
+  progressPercent: number | null
+  totalImages: number | null
+  processedCount: number | null
+  skippedCount: number | null
+  failedCount: number | null
+  enabledSizes: string | null // JSON array
+  errorMessage: string | null
 }

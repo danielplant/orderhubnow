@@ -18,6 +18,11 @@ interface SyncSettings {
   thumbnailFetchTimeoutMs: number
   thumbnailBatchConcurrency: number
   thumbnailEnabled: boolean
+  thumbnailSizeSmEnabled: boolean
+  thumbnailSizeMdEnabled: boolean
+  thumbnailSizeLgEnabled: boolean
+  thumbnailSizeXlEnabled: boolean
+  thumbnailDuringSync: boolean
   backupEnabled: boolean
   backupRetentionDays: number
   cleanupStaleBackups: boolean
@@ -281,6 +286,65 @@ export default function SyncSettingsPage() {
                   className="w-full px-3 py-2 rounded-md border border-border bg-background text-sm"
                 />
               </div>
+            </div>
+
+            {/* Per-size enable toggles */}
+            <div className="pt-4 border-t border-border">
+              <label className="block text-xs text-muted-foreground mb-2">Sizes to Generate</label>
+              <div className="grid grid-cols-4 gap-2">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={formData.thumbnailSizeSmEnabled ?? true}
+                    onChange={e => updateForm('thumbnailSizeSmEnabled', e.target.checked)}
+                    className="rounded border-border"
+                  />
+                  <span className="text-sm">sm ({formData.thumbnailSizeSm ?? 120}px)</span>
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={formData.thumbnailSizeMdEnabled ?? true}
+                    onChange={e => updateForm('thumbnailSizeMdEnabled', e.target.checked)}
+                    className="rounded border-border"
+                  />
+                  <span className="text-sm">md ({formData.thumbnailSizeMd ?? 240}px)</span>
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={formData.thumbnailSizeLgEnabled ?? true}
+                    onChange={e => updateForm('thumbnailSizeLgEnabled', e.target.checked)}
+                    className="rounded border-border"
+                  />
+                  <span className="text-sm">lg ({formData.thumbnailSizeLg ?? 480}px)</span>
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={formData.thumbnailSizeXlEnabled ?? true}
+                    onChange={e => updateForm('thumbnailSizeXlEnabled', e.target.checked)}
+                    className="rounded border-border"
+                  />
+                  <span className="text-sm">xl ({formData.thumbnailSizeXl ?? 720}px)</span>
+                </label>
+              </div>
+            </div>
+
+            {/* Thumbnail during sync toggle */}
+            <div className="pt-4 border-t border-border">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={formData.thumbnailDuringSync ?? false}
+                  onChange={e => updateForm('thumbnailDuringSync', e.target.checked)}
+                  className="rounded border-border"
+                />
+                <span className="text-sm">Generate thumbnails during sync</span>
+              </label>
+              <p className="text-xs text-muted-foreground mt-1 ml-6">
+                When disabled, use the &quot;Generate Thumbnails&quot; button on the sync dashboard (faster syncs)
+              </p>
             </div>
 
             <p className="text-xs text-muted-foreground">
