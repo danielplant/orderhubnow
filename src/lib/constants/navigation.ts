@@ -32,6 +32,9 @@ export const adminNav: NavItem[] = [
   { name: 'Customers', path: '/admin/customers' },
   { name: 'Reps', path: '/admin/reps' },
 
+  { name: 'EMAIL', section: true },
+  { name: 'Email Management', path: '/admin/email' },
+
   { name: 'SYSTEM', section: true },
   { name: 'Settings', path: '/admin/settings' },
   { name: 'Feature Interest', path: '/admin/feature-interest' },
@@ -57,6 +60,7 @@ export const devNav: NavItem[] = [
   },
   { name: 'Configuration', path: '/admin/dev/shopify/config' },
   { name: 'Sync Settings', path: '/admin/dev/shopify/settings' },
+  { name: 'Images', path: '/admin/dev/shopify/images' },
 ]
 
 export const repNav: NavItem[] = [

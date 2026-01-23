@@ -118,30 +118,37 @@ export async function upsertCompanySettings(
 
 /**
  * Default email settings (used when no record exists).
- * Falls back to environment variables for backward compatibility.
+ * All settings must be configured via Admin UI.
  */
 const DEFAULT_EMAIL_SETTINGS: EmailSettingsRecord = {
   ID: 0,
-  FromEmail: process.env.EMAIL_FROM || 'orders@limeapple.com',
-  FromName: 'Limeapple Orders',
-  SalesTeamEmails: process.env.EMAIL_SALES || 'orders@limeapple.com',
-  CCEmails: process.env.EMAIL_CC || null,
+  FromEmail: null,
+  FromName: null,
+  SalesTeamEmails: null,
+  CCEmails: null,
+  // Order toggles
   NotifyOnNewOrder: true,
   NotifyOnOrderUpdate: false,
   SendCustomerConfirmation: true,
+  SendRepOrderCopy: true,
+  // Shipment toggles
+  SendShipmentConfirmation: true,
+  SendShipmentRepNotify: true,
+  SendTrackingUpdates: true,
+  AttachInvoicePdf: true,
+  AttachPackingSlipPdf: true,
   UpdatedAt: new Date(),
-  // SMTP defaults from environment
-  SmtpHost: process.env.SMTP_HOST || null,
-  SmtpPort: process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT, 10) : null,
-  SmtpUser: process.env.SMTP_USER || null,
-  SmtpPassword: process.env.SMTP_PASSWORD || null,
-  SmtpSecure: process.env.SMTP_SECURE === 'true',
+  SmtpHost: null,
+  SmtpPort: null,
+  SmtpUser: null,
+  SmtpPassword: null,
+  SmtpSecure: false,
 }
 
 /**
  * Fetch email notification settings.
- * Returns defaults (from env vars) if no record exists.
- * SMTP fields fall back to .env if not set in database.
+ * Returns defaults if no record exists.
+ * All settings come from database only (configured via Admin UI).
  */
 export async function getEmailSettings(): Promise<EmailSettingsRecord> {
   const row = await prisma.emailSettings.findFirst()
@@ -156,16 +163,23 @@ export async function getEmailSettings(): Promise<EmailSettingsRecord> {
     FromName: row.FromName,
     SalesTeamEmails: row.SalesTeamEmails,
     CCEmails: row.CCEmails,
+    // Order toggles
     NotifyOnNewOrder: row.NotifyOnNewOrder,
     NotifyOnOrderUpdate: row.NotifyOnOrderUpdate,
     SendCustomerConfirmation: row.SendCustomerConfirmation,
+    SendRepOrderCopy: row.SendRepOrderCopy ?? true,
+    // Shipment toggles
+    SendShipmentConfirmation: row.SendShipmentConfirmation ?? true,
+    SendShipmentRepNotify: row.SendShipmentRepNotify ?? true,
+    SendTrackingUpdates: row.SendTrackingUpdates ?? true,
+    AttachInvoicePdf: row.AttachInvoicePdf ?? true,
+    AttachPackingSlipPdf: row.AttachPackingSlipPdf ?? true,
     UpdatedAt: row.UpdatedAt,
-    // SMTP with env fallback for backward compatibility
-    SmtpHost: row.SmtpHost || process.env.SMTP_HOST || null,
-    SmtpPort: row.SmtpPort || (process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT, 10) : null),
-    SmtpUser: row.SmtpUser || process.env.SMTP_USER || null,
-    SmtpPassword: row.SmtpPassword || process.env.SMTP_PASSWORD || null,
-    SmtpSecure: row.SmtpSecure ?? (process.env.SMTP_SECURE === 'true'),
+    SmtpHost: row.SmtpHost,
+    SmtpPort: row.SmtpPort,
+    SmtpUser: row.SmtpUser,
+    SmtpPassword: row.SmtpPassword,
+    SmtpSecure: row.SmtpSecure ?? false,
   }
 }
 

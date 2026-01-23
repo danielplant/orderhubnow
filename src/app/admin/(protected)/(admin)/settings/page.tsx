@@ -3,7 +3,6 @@ import { redirect } from 'next/navigation'
 import {
   getInventorySettings,
   getCompanySettings,
-  getEmailSettings,
   getSizeOrderConfig,
 } from '@/lib/data/queries/settings'
 import { SettingsForm } from '@/components/admin/settings-form'
@@ -17,10 +16,9 @@ export default async function SettingsPage() {
     redirect('/admin/login')
   }
 
-  const [settings, companySettings, emailSettings, sizeOrderConfig] = await Promise.all([
+  const [settings, companySettings, sizeOrderConfig] = await Promise.all([
     getInventorySettings(),
     getCompanySettings(),
-    getEmailSettings(),
     getSizeOrderConfig(),
   ])
 
@@ -33,7 +31,7 @@ export default async function SettingsPage() {
         </p>
       </div>
 
-      <SettingsForm initial={settings} companySettings={companySettings} emailSettings={emailSettings} />
+      <SettingsForm initial={settings} companySettings={companySettings} />
 
       <SizeOrderConfig initialSizes={sizeOrderConfig.Sizes} />
     </div>

@@ -44,8 +44,16 @@ export async function POST(request: NextRequest) {
       })
     }
 
+    // Validate required config (DB only)
+    if (!config.FromEmail) {
+      return NextResponse.json({
+        success: false,
+        error: 'From email not configured. Set in Admin → Settings → Email.',
+      })
+    }
+
     // Send test email
-    const fromEmail = config.FromEmail || process.env.EMAIL_FROM || 'orders@orderhub.com'
+    const fromEmail = config.FromEmail
     const fromName = config.FromName || 'MyOrderHub'
     const fromAddress = `"${fromName}" <${fromEmail}>`
 
@@ -60,7 +68,7 @@ export async function POST(request: NextRequest) {
           <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
           <p style="color: #666; font-size: 14px;">
             Sent from: ${fromAddress}<br>
-            SMTP Host: ${config.SmtpHost || process.env.SMTP_HOST || 'Not configured'}<br>
+            SMTP Host: ${config.SmtpHost || 'Not configured'}<br>
             Time: ${new Date().toISOString()}
           </p>
         </div>

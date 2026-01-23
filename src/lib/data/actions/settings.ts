@@ -197,9 +197,17 @@ export async function updateEmailSettings(
       FromName: input.FromName?.trim() || null,
       SalesTeamEmails: salesTeamEmails,
       CCEmails: ccEmails,
+      // Order email toggles
       NotifyOnNewOrder: input.NotifyOnNewOrder,
       NotifyOnOrderUpdate: input.NotifyOnOrderUpdate,
       SendCustomerConfirmation: input.SendCustomerConfirmation,
+      SendRepOrderCopy: input.SendRepOrderCopy,
+      // Shipment email toggles
+      SendShipmentConfirmation: input.SendShipmentConfirmation,
+      SendShipmentRepNotify: input.SendShipmentRepNotify,
+      SendTrackingUpdates: input.SendTrackingUpdates,
+      AttachInvoicePdf: input.AttachInvoicePdf,
+      AttachPackingSlipPdf: input.AttachPackingSlipPdf,
     }
 
     if (existing) {
@@ -212,8 +220,10 @@ export async function updateEmailSettings(
     }
 
     revalidatePath('/admin/settings')
+    revalidatePath('/admin/email')
     return { success: true, message: 'Email settings have been updated successfully.' }
-  } catch {
+  } catch (err) {
+    console.error('[updateEmailSettings] Error:', err)
     return { success: false, error: 'Sorry, there was an error, please try again.' }
   }
 }
@@ -268,10 +278,13 @@ export async function updateSmtpSettings(
         data,
       })
     } else {
-      // Create new record with SMTP settings and defaults for other fields
+      // Create new record with SMTP settings - FromEmail is required
+      if (!data.SmtpHost) {
+        return { success: false, error: 'SMTP host is required when creating new email settings' }
+      }
       await prisma.emailSettings.create({
         data: {
-          FromEmail: process.env.EMAIL_FROM || 'orders@example.com',
+          FromEmail: data.SmtpUser || 'orders@example.com', // Use SMTP user as default from
           NotifyOnNewOrder: true,
           NotifyOnOrderUpdate: false,
           SendCustomerConfirmation: true,
@@ -282,6 +295,7 @@ export async function updateSmtpSettings(
 
     // Clear cached transporter so next email uses new settings
     revalidatePath('/admin/settings')
+    revalidatePath('/admin/email')
     return { success: true, message: 'SMTP settings have been updated successfully.' }
   } catch {
     return { success: false, error: 'Sorry, there was an error, please try again.' }

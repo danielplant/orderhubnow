@@ -7,7 +7,8 @@
  * - Tracking updates
  */
 
-import { transporter, EMAIL_FROM, EMAIL_SALES } from './client'
+import { sendMailWithConfig } from './client'
+import { getEmailSettings } from '@/lib/data/queries/settings'
 import {
   shipmentConfirmationHtml,
   repShipmentNotificationHtml,
@@ -99,6 +100,13 @@ export async function sendShipmentEmails(
     errors: [],
   }
 
+  // Get email config from DB
+  const emailConfig = await getEmailSettings()
+  if (!emailConfig.FromEmail) {
+    result.errors.push('From email not configured. Set in Admin → Settings → Email.')
+    return result
+  }
+
   // Build tracking URL if tracking provided
   const trackingUrl = options.trackingNumber && options.carrier
     ? getTrackingUrl(options.carrier, options.trackingNumber) || undefined
@@ -171,8 +179,8 @@ export async function sendShipmentEmails(
         ? `Your order ${options.orderNumber} has shipped! (Shipment ${options.shipmentNumber} of ${options.totalShipments})`
         : `Your order ${options.orderNumber} has shipped!`
 
-      await transporter.sendMail({
-        from: EMAIL_FROM,
+      await sendMailWithConfig(emailConfig, {
+        from: emailConfig.FromEmail!,
         to: options.customerEmail,
         subject,
         html: customerHtml,
@@ -188,13 +196,13 @@ export async function sendShipmentEmails(
 
   // 2. Send rep notification email
   if (options.notifyRep) {
-    const repEmail = options.salesRepEmail || EMAIL_SALES
-    
+    const repEmail = options.salesRepEmail || emailConfig.SalesTeamEmails
+
     if (repEmail) {
       try {
         const appUrl = process.env.APP_URL || process.env.NEXTAUTH_URL || 'http://localhost:3000'
         const adminOrderUrl = `${appUrl}/admin/orders/${options.orderId}`
-        
+
         const repHtml = repShipmentNotificationHtml({
           ...emailData,
           adminOrderUrl,
@@ -202,8 +210,8 @@ export async function sendShipmentEmails(
 
         const subject = `Shipment created: ${options.orderNumber} - ${options.storeName}`
 
-        await transporter.sendMail({
-          from: EMAIL_FROM,
+        await sendMailWithConfig(emailConfig, {
+          from: emailConfig.FromEmail!,
           to: repEmail,
           subject,
           html: repHtml,
@@ -239,6 +247,12 @@ export async function sendTrackingUpdateEmail(
   options: SendTrackingUpdateOptions
 ): Promise<{ sent: boolean; error?: string }> {
   try {
+    // Get email config from DB
+    const emailConfig = await getEmailSettings()
+    if (!emailConfig.FromEmail) {
+      return { sent: false, error: 'From email not configured. Set in Admin → Settings → Email.' }
+    }
+
     const trackingUrl = getTrackingUrl(options.carrier, options.trackingNumber) || undefined
 
     const updateData: TrackingUpdateData = {
@@ -252,8 +266,8 @@ export async function sendTrackingUpdateEmail(
 
     const html = trackingUpdateHtml(updateData)
 
-    await transporter.sendMail({
-      from: EMAIL_FROM,
+    await sendMailWithConfig(emailConfig, {
+      from: emailConfig.FromEmail,
       to: options.customerEmail,
       subject: `Tracking update for order ${options.orderNumber}`,
       html,

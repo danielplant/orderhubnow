@@ -58,9 +58,13 @@ export async function POST(request: Request) {
     const rawToken = await createAuthToken(user.ID, 'password_reset')
     const resetUrl = buildTokenUrl(rawToken, 'password_reset')
 
-    // Fetch email settings
+    // Fetch email settings (DB only)
     const emailSettings = await getEmailSettings()
-    const fromEmail = emailSettings.FromEmail || process.env.EMAIL_FROM || 'noreply@example.com'
+    if (!emailSettings.FromEmail) {
+      console.error('Password reset email skipped: FromEmail not configured in database')
+      return NextResponse.json({ success: true }) // Don't reveal config issues
+    }
+    const fromEmail = emailSettings.FromEmail
     const fromAddress = emailSettings.FromName
       ? `"${emailSettings.FromName}" <${fromEmail}>`
       : fromEmail

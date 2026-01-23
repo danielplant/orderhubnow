@@ -49,19 +49,28 @@ export type CompanySettingsEditableFields = Omit<CompanySettingsRecord, 'ID'>
 
 /**
  * Email notification settings.
+ * All fields configured via Admin UI (no .env fallback).
  */
 export type EmailSettingsRecord = {
   ID: number
-  FromEmail: string
+  FromEmail: string | null
   FromName: string | null
   SalesTeamEmails: string | null
   CCEmails: string | null
+  // Order email toggles
   NotifyOnNewOrder: boolean
   NotifyOnOrderUpdate: boolean
   SendCustomerConfirmation: boolean
+  SendRepOrderCopy: boolean
+  // Shipment email toggles
+  SendShipmentConfirmation: boolean
+  SendShipmentRepNotify: boolean
+  SendTrackingUpdates: boolean
+  AttachInvoicePdf: boolean
+  AttachPackingSlipPdf: boolean
   UpdatedAt: Date
 
-  // SMTP Configuration - falls back to .env if not set in DB
+  // SMTP Configuration (DB only)
   SmtpHost: string | null
   SmtpPort: number | null
   SmtpUser: string | null

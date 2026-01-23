@@ -203,12 +203,20 @@ model EmailSettings {
   FromName                 String?  @db.NVarChar(200)
   SalesTeamEmails          String?  @db.NVarChar(500)
   CCEmails                 String?  @db.NVarChar(500)
+  // Order email toggles
   NotifyOnNewOrder         Boolean  @default(true)
   NotifyOnOrderUpdate      Boolean  @default(false)
   SendCustomerConfirmation Boolean  @default(true)
+  SendRepOrderCopy         Boolean  @default(true)
+  // Shipment email toggles
+  SendShipmentConfirmation Boolean  @default(true)
+  SendShipmentRepNotify    Boolean  @default(true)
+  SendTrackingUpdates      Boolean  @default(true)
+  AttachInvoicePdf         Boolean  @default(true)
+  AttachPackingSlipPdf     Boolean  @default(true)
   UpdatedAt                DateTime @default(now()) @updatedAt
 
-  // SMTP Configuration - falls back to .env if not set
+  // SMTP Configuration (DB only)
   SmtpHost                 String?  @db.NVarChar(200)
   SmtpPort                 Int?
   SmtpUser                 String?  @db.NVarChar(200)
@@ -414,9 +422,24 @@ model Sku {
   SyncOrderTemp           Int?
   ShopifyImageURL         String?        @db.NVarChar(500)
   ThumbnailPath           String?        @db.NVarChar(500)
+  ThumbnailSizes          String?        @db.VarChar(100)   // Comma-separated pixel sizes that exist: "120,240,480"
   CollectionID            Int?
   SkuCategories           SkuCategories? @relation(fields: [CategoryID], references: [ID], onDelete: NoAction, onUpdate: NoAction, map: "FK_Sku_SkuCategories")
   Collection              Collection?    @relation(fields: [CollectionID], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "FK_Sku_Collection")
+}
+
+// Configuration for where SKU images are displayed and what sizes are needed
+model SkuImageConfig {
+  id          String   @id @db.VarChar(50)      // e.g., "admin_products_table"
+  description String   @db.NVarChar(200)        // Human-readable description
+  pixelSize   Int?                              // Target pixel size (null if using srcSet)
+  useSrcSet   Boolean  @default(false)          // Whether to use responsive srcSet
+  primary     String   @db.VarChar(20)          // "s3_thumbnail" | "shopify_cdn"
+  fallback    String?  @db.VarChar(20)          // "shopify_cdn" | null
+  enabled     Boolean  @default(true)
+  sortOrder   Int      @default(0)
+
+  @@map("SkuImageConfig")
 }
 
 /// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.

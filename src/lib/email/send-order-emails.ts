@@ -5,7 +5,7 @@
  * Matches .NET EmailsProcessing.SendEmail() behavior.
  */
 
-import { sendMailWithConfig, EMAIL_FROM, EMAIL_CC, EMAIL_SALES } from './client'
+import { sendMailWithConfig } from './client'
 import { customerConfirmationHtml, salesNotificationHtml } from './templates'
 import { generatePdf } from '@/lib/pdf/generate'
 import { generateOrderConfirmationHtml } from '@/lib/pdf/order-confirmation'
@@ -51,31 +51,11 @@ function formatDate(date: Date): string {
 }
 
 /**
- * Get email configuration from database with fallback to environment variables.
+ * Get email configuration from database.
+ * Throws if DB query fails - no ENV fallback.
  */
 async function getEmailConfig(): Promise<EmailSettingsRecord> {
-  try {
-    return await getEmailSettings()
-  } catch {
-    // Fallback to environment variables if DB query fails
-    return {
-      ID: 0,
-      FromEmail: EMAIL_FROM,
-      FromName: null,
-      SalesTeamEmails: EMAIL_SALES,
-      CCEmails: EMAIL_CC || null,
-      NotifyOnNewOrder: true,
-      NotifyOnOrderUpdate: false,
-      SendCustomerConfirmation: true,
-      UpdatedAt: new Date(),
-      // SMTP fallbacks from env
-      SmtpHost: process.env.SMTP_HOST || null,
-      SmtpPort: process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT, 10) : null,
-      SmtpUser: process.env.SMTP_USER || null,
-      SmtpPassword: process.env.SMTP_PASSWORD || null,
-      SmtpSecure: process.env.SMTP_SECURE === 'true',
-    }
-  }
+  return await getEmailSettings()
 }
 
 export async function sendOrderEmails(data: OrderEmailData, isUpdate = false): Promise<SendOrderEmailsResult> {
@@ -120,8 +100,12 @@ export async function sendOrderEmails(data: OrderEmailData, isUpdate = false): P
     items: data.items,
   }
 
-  // Determine from address
-  const fromEmail = config.FromEmail || EMAIL_FROM
+  // Determine from address (DB only)
+  if (!config.FromEmail) {
+    result.errors.push('From email not configured. Set in Admin → Settings → Email.')
+    return result
+  }
+  const fromEmail = config.FromEmail
   const fromAddress = config.FromName ? `"${config.FromName}" <${fromEmail}>` : fromEmail
 
   // Generate PDF attachment
@@ -182,13 +166,11 @@ export async function sendOrderEmails(data: OrderEmailData, isUpdate = false): P
     result.errors.push(`PDF generation failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
   }
 
-  // Build CC list from config
+  // Build CC list from config (DB only)
   const ccList: string[] = []
   if (config.CCEmails) {
     const ccEmails = config.CCEmails.split(',').map(e => e.trim()).filter(Boolean)
     ccList.push(...ccEmails)
-  } else if (EMAIL_CC) {
-    ccList.push(EMAIL_CC)
   }
 
   // 1. Send customer confirmation email (if enabled)
@@ -232,8 +214,8 @@ export async function sendOrderEmails(data: OrderEmailData, isUpdate = false): P
     }
   }
 
-  // 2. Send sales team notification
-  const salesEmails = config.SalesTeamEmails || EMAIL_SALES
+  // 2. Send sales team notification (DB only)
+  const salesEmails = config.SalesTeamEmails
   if (salesEmails) {
     try {
       const appUrl = process.env.APP_URL || process.env.NEXTAUTH_URL || 'http://localhost:3000'
