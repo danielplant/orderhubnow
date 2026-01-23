@@ -358,9 +358,10 @@ export type EmailType =
   | 'order_update'
   | 'sales_notification'
   | 'password_reset'
+  | 'test_email'
 
 /**
- * Log email result (sent or failed)
+ * Log email result (sent, failed, or skipped)
  */
 export async function logEmailResult(params: {
   entityType: EntityType
@@ -369,13 +370,23 @@ export async function logEmailResult(params: {
   orderNumber?: string
   emailType: EmailType
   recipient: string
-  status: 'sent' | 'failed'
+  status: 'sent' | 'failed' | 'skipped'
   errorMessage?: string
+  skipReason?: string
   performedBy?: string
 }): Promise<void> {
-  const description = params.status === 'sent'
-    ? `${params.emailType.replace(/_/g, ' ')} sent to ${params.recipient}`
-    : `${params.emailType.replace(/_/g, ' ')} failed to ${params.recipient}`
+  let description: string
+  switch (params.status) {
+    case 'sent':
+      description = `${params.emailType.replace(/_/g, ' ')} sent to ${params.recipient}`
+      break
+    case 'failed':
+      description = `${params.emailType.replace(/_/g, ' ')} failed to ${params.recipient}`
+      break
+    case 'skipped':
+      description = `${params.emailType.replace(/_/g, ' ')} skipped for ${params.recipient}${params.skipReason ? `: ${params.skipReason}` : ''}`
+      break
+  }
 
   await logActivity({
     entityType: params.entityType,
@@ -387,6 +398,7 @@ export async function logEmailResult(params: {
       recipient: params.recipient,
       status: params.status,
       errorMessage: params.errorMessage,
+      skipReason: params.skipReason,
     },
     performedBy: params.performedBy,
     orderNumber: params.orderNumber,

@@ -10,17 +10,25 @@ import { auth } from '@/lib/auth/providers'
 import { getEmailSettings } from '@/lib/data/queries/settings'
 import { sendMailWithConfig, testSmtpConnection } from '@/lib/email/client'
 import { isValidEmail } from '@/lib/utils/email'
+import { logEmailResult } from '@/lib/audit/activity-logger'
 
 export async function POST(request: NextRequest) {
+  // Capture session and recipient early for use in error logging
+  let session: { user?: { id?: string; email?: string | null; name?: string | null; role?: string } } | null = null
+  let recipientEmail = ''
+  let performedBy = 'admin'
+
   try {
     // Require admin auth
-    const session = await auth()
+    session = await auth()
     if (!session?.user || session.user.role !== 'admin') {
       return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 })
     }
+    performedBy = session.user.email || session.user.name || 'admin'
 
     const body = await request.json()
     const { to } = body
+    recipientEmail = to || ''
 
     if (!to || typeof to !== 'string') {
       return NextResponse.json({ success: false, error: 'Email address is required' }, { status: 400 })
@@ -75,6 +83,16 @@ export async function POST(request: NextRequest) {
       `,
     })
 
+    // Log successful test email (non-blocking)
+    logEmailResult({
+      entityType: 'user',
+      entityId: session.user.id || '0',
+      emailType: 'test_email',
+      recipient: to,
+      status: 'sent',
+      performedBy,
+    }).catch((err) => console.error('Failed to log test email:', err))
+
     return NextResponse.json({
       success: true,
       messageId: result.messageId,
@@ -82,6 +100,20 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Test email error:', error)
     const message = error instanceof Error ? error.message : 'Unknown error'
+
+    // Log failed test email (non-blocking)
+    if (recipientEmail) {
+      logEmailResult({
+        entityType: 'user',
+        entityId: session?.user?.id || '0',
+        emailType: 'test_email',
+        recipient: recipientEmail,
+        status: 'failed',
+        errorMessage: message,
+        performedBy,
+      }).catch((err) => console.error('Failed to log test email failure:', err))
+    }
+
     return NextResponse.json({ success: false, error: message }, { status: 500 })
   }
 }

@@ -24,6 +24,7 @@ const EMAIL_TYPE_LABELS: Record<EmailType, string> = {
   tracking_update: 'Tracking Update',
   rep_notification: 'Rep Notification',
   password_reset: 'Password Reset',
+  test_email: 'Test Email',
 }
 
 export function OrderEmailPanel({

@@ -30,6 +30,7 @@ const EMAIL_TYPE_LABELS: Record<EmailType, string> = {
   tracking_update: 'Tracking Update',
   rep_notification: 'Rep Notification',
   password_reset: 'Password Reset',
+  test_email: 'Test Email',
 }
 
 const EMAIL_TYPE_OPTIONS = [
@@ -40,11 +41,13 @@ const EMAIL_TYPE_OPTIONS = [
   { value: 'tracking_update', label: 'Tracking Update' },
   { value: 'rep_notification', label: 'Rep Notification' },
   { value: 'password_reset', label: 'Password Reset' },
+  { value: 'test_email', label: 'Test Email' },
 ]
 
 const STATUS_OPTIONS = [
   { value: 'sent', label: 'Sent' },
   { value: 'failed', label: 'Failed' },
+  { value: 'skipped', label: 'Skipped' },
 ]
 
 // ============================================================================

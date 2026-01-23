@@ -35,13 +35,13 @@ export interface SendShipmentEmailsOptions {
   customerEmail: string
   salesRep: string
   salesRepEmail?: string
-  
+
   shipmentNumber: number
   totalShipments: number
   shipDate: Date
   carrier?: Carrier
   trackingNumber?: string
-  
+
   items: Array<{
     sku: string
     productName: string
@@ -49,21 +49,24 @@ export interface SendShipmentEmailsOptions {
     unitPrice: number
     lineTotal: number
   }>
-  
+
   currency: 'USD' | 'CAD'
   subtotal: number
   shippingCost: number
   shipmentTotal: number
-  
+
   orderTotal: number
   previouslyShipped: number
   remainingBalance: number
-  
+
   // Email options
   notifyCustomer: boolean
   attachInvoice: boolean
   attachPackingSlip: boolean
   notifyRep: boolean
+
+  // Audit
+  performedBy?: string
 }
 
 export interface SendShipmentEmailsResult {
@@ -85,6 +88,7 @@ export interface SendTrackingUpdateOptions {
     productName: string
     quantity: number
   }>
+  performedBy?: string
 }
 
 // ============================================================================
@@ -204,6 +208,7 @@ export async function sendShipmentEmails(
         emailType: 'shipment_confirmation',
         recipient: options.customerEmail,
         status: 'sent',
+        performedBy: options.performedBy,
       })
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error'
@@ -219,63 +224,104 @@ export async function sendShipmentEmails(
         recipient: options.customerEmail,
         status: 'failed',
         errorMessage: message,
+        performedBy: options.performedBy,
       })
     }
+  } else if (options.customerEmail) {
+    // Log skipped email with reason
+    let skipReason = ''
+    if (!options.notifyCustomer) {
+      skipReason = 'User opted not to notify customer'
+    } else if (!emailConfig.SendShipmentConfirmation) {
+      skipReason = 'Shipment confirmation emails disabled in settings'
+    }
+
+    await logEmailResult({
+      entityType: 'shipment',
+      entityId: options.shipmentId,
+      orderId: options.orderId,
+      orderNumber: options.orderNumber,
+      emailType: 'shipment_confirmation',
+      recipient: options.customerEmail,
+      status: 'skipped',
+      skipReason,
+      performedBy: options.performedBy,
+    })
   }
 
   // 2. Send rep notification email
   // Check global toggle AND per-shipment option
-  if (options.notifyRep && emailConfig.SendShipmentRepNotify) {
-    const repEmail = options.salesRepEmail || emailConfig.SalesTeamEmails
+  const repEmail = options.salesRepEmail || emailConfig.SalesTeamEmails
 
-    if (repEmail) {
-      try {
-        const appUrl = process.env.APP_URL || process.env.NEXTAUTH_URL || 'http://localhost:3000'
-        const adminOrderUrl = `${appUrl}/admin/orders/${options.orderId}`
+  if (options.notifyRep && emailConfig.SendShipmentRepNotify && repEmail) {
+    try {
+      const appUrl = process.env.APP_URL || process.env.NEXTAUTH_URL || 'http://localhost:3000'
+      const adminOrderUrl = `${appUrl}/admin/orders/${options.orderId}`
 
-        const repHtml = repShipmentNotificationHtml({
-          ...emailData,
-          adminOrderUrl,
-        })
+      const repHtml = repShipmentNotificationHtml({
+        ...emailData,
+        adminOrderUrl,
+      })
 
-        const subject = `Shipment created: ${options.orderNumber} - ${options.storeName}`
+      const subject = `Shipment created: ${options.orderNumber} - ${options.storeName}`
 
-        await sendMailWithConfig(emailConfig, {
-          from: emailConfig.FromEmail!,
-          to: repEmail,
-          subject,
-          html: repHtml,
-        })
+      await sendMailWithConfig(emailConfig, {
+        from: emailConfig.FromEmail!,
+        to: repEmail,
+        subject,
+        html: repHtml,
+      })
 
-        result.repEmailSent = true
+      result.repEmailSent = true
 
-        // Log successful send
-        await logEmailResult({
-          entityType: 'shipment',
-          entityId: options.shipmentId,
-          orderId: options.orderId,
-          orderNumber: options.orderNumber,
-          emailType: 'rep_notification',
-          recipient: repEmail,
-          status: 'sent',
-        })
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Unknown error'
-        result.errors.push(`Rep email failed: ${message}`)
+      // Log successful send
+      await logEmailResult({
+        entityType: 'shipment',
+        entityId: options.shipmentId,
+        orderId: options.orderId,
+        orderNumber: options.orderNumber,
+        emailType: 'rep_notification',
+        recipient: repEmail,
+        status: 'sent',
+        performedBy: options.performedBy,
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      result.errors.push(`Rep email failed: ${message}`)
 
-        // Log failed send
-        await logEmailResult({
-          entityType: 'shipment',
-          entityId: options.shipmentId,
-          orderId: options.orderId,
-          orderNumber: options.orderNumber,
-          emailType: 'rep_notification',
-          recipient: repEmail,
-          status: 'failed',
-          errorMessage: message,
-        })
-      }
+      // Log failed send
+      await logEmailResult({
+        entityType: 'shipment',
+        entityId: options.shipmentId,
+        orderId: options.orderId,
+        orderNumber: options.orderNumber,
+        emailType: 'rep_notification',
+        recipient: repEmail,
+        status: 'failed',
+        errorMessage: message,
+        performedBy: options.performedBy,
+      })
     }
+  } else if (repEmail) {
+    // Log skipped email with reason
+    let skipReason = ''
+    if (!options.notifyRep) {
+      skipReason = 'User opted not to notify rep'
+    } else if (!emailConfig.SendShipmentRepNotify) {
+      skipReason = 'Rep notification emails disabled in settings'
+    }
+
+    await logEmailResult({
+      entityType: 'shipment',
+      entityId: options.shipmentId,
+      orderId: options.orderId,
+      orderNumber: options.orderNumber,
+      emailType: 'rep_notification',
+      recipient: repEmail,
+      status: 'skipped',
+      skipReason,
+      performedBy: options.performedBy,
+    })
   }
 
   // Log results
@@ -308,6 +354,18 @@ export async function sendTrackingUpdateEmail(
 
     // Check if tracking updates are enabled
     if (!emailConfig.SendTrackingUpdates) {
+      // Log skipped email
+      await logEmailResult({
+        entityType: 'shipment',
+        entityId: options.shipmentId,
+        orderId: options.orderId,
+        orderNumber: options.orderNumber,
+        emailType: 'tracking_update',
+        recipient: options.customerEmail,
+        status: 'skipped',
+        skipReason: 'Tracking update emails disabled in settings',
+        performedBy: options.performedBy,
+      })
       return { sent: false, skipped: true }
     }
 
@@ -340,6 +398,7 @@ export async function sendTrackingUpdateEmail(
       emailType: 'tracking_update',
       recipient: options.customerEmail,
       status: 'sent',
+      performedBy: options.performedBy,
     })
 
     console.log(`Tracking update email sent for ${options.orderNumber}`)
@@ -358,6 +417,7 @@ export async function sendTrackingUpdateEmail(
       recipient: options.customerEmail,
       status: 'failed',
       errorMessage: message,
+      performedBy: options.performedBy,
     })
 
     return { sent: false, error: message }

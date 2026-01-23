@@ -21,6 +21,7 @@ interface OrderEmailData {
   customerEmail: string
   customerPhone: string
   salesRep: string
+  salesRepEmail?: string
   orderAmount: number
   currency: 'USD' | 'CAD'
   shipStartDate: Date
@@ -38,6 +39,7 @@ interface OrderEmailData {
 
 interface SendOrderEmailsResult {
   customerEmailSent: boolean
+  repEmailSent: boolean
   salesEmailSent: boolean
   errors: string[]
 }
@@ -61,6 +63,7 @@ async function getEmailConfig(): Promise<EmailSettingsRecord> {
 export async function sendOrderEmails(data: OrderEmailData, isUpdate = false): Promise<SendOrderEmailsResult> {
   const result: SendOrderEmailsResult = {
     customerEmailSent: false,
+    repEmailSent: false,
     salesEmailSent: false,
     errors: [],
   }
@@ -227,7 +230,72 @@ export async function sendOrderEmails(data: OrderEmailData, isUpdate = false): P
     }
   }
 
-  // 2. Send sales team notification (DB only)
+  // 2. Send rep order copy (if enabled and rep email provided)
+  if (config.SendRepOrderCopy && data.salesRepEmail) {
+    try {
+      const customerHtml = customerConfirmationHtml(emailData)
+      const subject = isUpdate
+        ? `[REP COPY] Order ${data.orderNumber} Updated - ${data.storeName}`
+        : `[REP COPY] Order ${data.orderNumber} - ${data.storeName}`
+
+      await sendMailWithConfig(config, {
+        from: fromAddress,
+        to: data.salesRepEmail,
+        subject,
+        html: customerHtml,
+        attachments: pdfBuffer
+          ? [
+              {
+                filename: `${data.orderNumber}-Confirmation.pdf`,
+                content: pdfBuffer,
+                contentType: 'application/pdf',
+              },
+            ]
+          : [],
+      })
+
+      result.repEmailSent = true
+
+      // Log the email send (non-blocking)
+      logEmailSent({
+        entityType: 'order',
+        entityId: data.orderId,
+        orderId: data.orderId,
+        orderNumber: data.orderNumber,
+        emailType: isUpdate ? 'order_update' : 'order_confirmation',
+        recipient: data.salesRepEmail,
+      }).catch((err) => console.error('Failed to log rep copy email:', err))
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+      result.errors.push(`Rep copy email failed: ${errorMessage}`)
+
+      // Log the failed send (non-blocking)
+      logEmailResult({
+        entityType: 'order',
+        entityId: data.orderId,
+        orderId: data.orderId,
+        orderNumber: data.orderNumber,
+        emailType: isUpdate ? 'order_update' : 'order_confirmation',
+        recipient: data.salesRepEmail,
+        status: 'failed',
+        errorMessage,
+      }).catch((err) => console.error('Failed to log rep copy email failure:', err))
+    }
+  } else if (data.salesRepEmail && !config.SendRepOrderCopy) {
+    // Log skipped email
+    logEmailResult({
+      entityType: 'order',
+      entityId: data.orderId,
+      orderId: data.orderId,
+      orderNumber: data.orderNumber,
+      emailType: isUpdate ? 'order_update' : 'order_confirmation',
+      recipient: data.salesRepEmail,
+      status: 'skipped',
+      skipReason: 'Rep order copy emails disabled in settings',
+    }).catch((err) => console.error('Failed to log rep copy skip:', err))
+  }
+
+  // 3. Send sales team notification (DB only)
   const salesEmails = config.SalesTeamEmails
   if (salesEmails) {
     try {
