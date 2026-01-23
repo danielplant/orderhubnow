@@ -1,5 +1,5 @@
 import { prisma } from '@/lib/prisma'
-import { parseSkuId } from '@/lib/utils'
+import { getBaseSku } from '@/lib/utils'
 import {
   mapCategories,
   mapCategoriesWithCount,
@@ -130,7 +130,7 @@ export async function getCategoryWithProducts(id: string): Promise<CategoryWithP
   const mainCategoryId = category.SkuMainSubRship[0]?.SkuMainCatID ?? 0
   const minQty = invSettings?.MinQuantityToShow ?? 0
 
-  // Query SKU table and derive BaseSku via parseSkuId()
+  // Query SKU table and derive BaseSku using Size field
   const skus = await prisma.sku.findMany({
     where: {
       CategoryID: categoryId,
@@ -142,6 +142,7 @@ export async function getCategoryWithProducts(id: string): Promise<CategoryWithP
     orderBy: [{ DisplayPriority: 'asc' }, { SkuID: 'asc' }],
     select: {
       SkuID: true,
+      Size: true,
       DisplayPriority: true,
       OrderEntryDescription: true,
       Description: true,
@@ -153,7 +154,7 @@ export async function getCategoryWithProducts(id: string): Promise<CategoryWithP
   // Group into "products" by BaseSku.
   const byBase = new Map<string, { sortOrder: number; description: string; imageUrl: string | null; thumbnailPath: string | null }>()
   for (const row of skus) {
-    const { baseSku } = parseSkuId(row.SkuID)
+    const baseSku = getBaseSku(row.SkuID, row.Size)
     if (!baseSku) continue
 
     const sortOrder = row.DisplayPriority ?? 0

@@ -6,9 +6,10 @@ import {
   cleanupOrphanedRuns,
   processJsonlStream,
   transformToSkuTable,
-  BULK_OPERATION_QUERY,
-  CURRENT_BULK_OPERATION_QUERY,
+  buildBulkOperationQuery,
+  clearProductDataCache,
 } from '@/lib/shopify/sync'
+import { getStatusCascadeConfig } from '@/lib/data/queries/sync-config'
 
 // ============================================================================
 // Cron Security
@@ -147,6 +148,9 @@ export async function GET(request: Request) {
     // Clean up any orphaned runs
     await cleanupOrphanedRuns()
 
+    // Clear product data cache from previous sync
+    clearProductDataCache()
+
     // Check if sync is already in progress
     const { inProgress, reason } = await isSyncInProgress(shopifyFetch)
     if (inProgress) {
@@ -158,9 +162,16 @@ export async function GET(request: Request) {
       })
     }
 
+    // Get cascade config to determine which product statuses to fetch
+    const cascadeConfig = await getStatusCascadeConfig('Product')
+    console.log(`Sync: Ingestion filter: ${JSON.stringify(cascadeConfig.ingestionAllowed)}`)
+
+    // Build dynamic query with status filter
+    const bulkOperationQuery = buildBulkOperationQuery(cascadeConfig.ingestionAllowed)
+
     // Step 1: Start the bulk operation
-    console.log('Step 1: Triggering bulk operation...')
-    const result = await shopifyFetch(BULK_OPERATION_QUERY)
+    console.log(`Step 1: Triggering bulk operation (filter: ${cascadeConfig.ingestionAllowed.join(', ')})...`)
+    const result = await shopifyFetch(bulkOperationQuery)
 
     if (result.error) {
       console.error('Sync: Failed to start bulk operation:', result.error)

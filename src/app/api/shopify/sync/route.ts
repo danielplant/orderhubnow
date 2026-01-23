@@ -23,13 +23,8 @@ export async function GET() {
     // Get latest sync run for "in progress" / "last run" info
     const latestRun = await getLatestSyncRun()
 
-    // #region agent log - A: syncInProgress calculation
-    const now = new Date().getTime();
-    const startedAt = latestRun?.startedAt.getTime() ?? 0;
-    const ageMs = now - startedAt;
-    const syncInProgress = latestRun?.status === 'started' && ageMs < 15 * 60 * 1000;
-    fetch('http://127.0.0.1:7243/ingest/a5fde547-ac60-4379-a83d-f48710b84ace',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'route.ts:32',message:'GET syncInProgress calc',data:{latestRunStatus:latestRun?.status,ageMs,is15MinCheck:ageMs < 15*60*1000,syncInProgress},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
-    // #endregion
+    // Sync is in progress if status is 'started' - trust the database status
+    const syncInProgress = latestRun?.status === 'started';
 
     return NextResponse.json({
       ...status,

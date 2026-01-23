@@ -2,12 +2,18 @@ import { NextResponse } from 'next/server'
 import { auth } from '@/lib/auth/providers'
 import { prisma } from '@/lib/prisma'
 import { getSyncSettings } from '@/lib/data/queries/settings'
-import { generateThumbnailCacheKey, extractCacheKey, THUMBNAIL_SIZES } from '@/lib/utils/thumbnails'
+import { generateThumbnailCacheKey, extractCacheKey } from '@/lib/utils/thumbnails'
 import type { ThumbnailSize } from '@/lib/utils/thumbnails'
-import { HeadObjectCommand, S3Client } from '@aws-sdk/client-s3'
 
-const s3 = new S3Client({ region: process.env.AWS_REGION || 'us-east-1' })
-const S3_BUCKET = process.env.S3_BUCKET_NAME || 'orderhub-uploads'
+const S3_BASE_URL = process.env.S3_BASE_URL || 'https://orderhub-uploads.s3.us-east-1.amazonaws.com'
+
+// Map size names to pixel values used in S3 paths
+const SIZE_TO_PIXELS: Record<ThumbnailSize, number> = {
+  sm: 120,
+  md: 240,
+  lg: 480,
+  xl: 720,
+}
 
 /**
  * GET /api/admin/shopify/thumbnails/analyze
@@ -47,18 +53,18 @@ export async function GET() {
     const skusWithImages = skus.length
     const skusWithoutImages = totalSkus - skusWithImages
 
-    // Helper to check if S3 file exists
-    async function s3Exists(key: string): Promise<boolean> {
+    // Helper to check if S3 file exists via HTTP HEAD (public bucket)
+    async function s3Exists(cacheKey: string, pixelSize: number): Promise<boolean> {
       try {
-        await s3.send(new HeadObjectCommand({ Bucket: S3_BUCKET, Key: key }))
-        return true
+        const url = `${S3_BASE_URL}/thumbnails/${pixelSize}/${cacheKey}.png`
+        const response = await fetch(url, { method: 'HEAD' })
+        return response.ok
       } catch {
         return false
       }
     }
 
     // Check per-size existence in S3 (sample-based for speed)
-    // For full accuracy on large datasets, we sample a subset
     const sizesToCheck: ThumbnailSize[] = ['sm', 'md', 'lg', 'xl']
     const bySize: Record<ThumbnailSize, { cached: number; needed: number }> = {
       sm: { cached: 0, needed: 0 },
@@ -94,8 +100,8 @@ export async function GET() {
 
         // Check each size in parallel
         await Promise.all(sizesToCheck.map(async (size) => {
-          const s3Key = `thumbnails/${size}/${cacheKeyToCheck}.png`
-          const exists = await s3Exists(s3Key)
+          const pixelSize = SIZE_TO_PIXELS[size]
+          const exists = await s3Exists(cacheKeyToCheck, pixelSize)
 
           if (exists) {
             bySize[size].cached++

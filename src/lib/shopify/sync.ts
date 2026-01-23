@@ -118,85 +118,103 @@ export async function getBulkOperationUrl(
 }
 
 /**
- * GraphQL mutation to start a bulk operation for product variants.
- * Includes all metafields needed for sync (from .NET SyncController.cs).
+ * Build GraphQL mutation to start a bulk operation for products/variants.
+ * Filters products by status based on cascade config (ingestionAllowed).
+ *
+ * When using products(query: "status:...") with nested variants, Shopify
+ * outputs separate JSONL lines:
+ * - Product lines with product data
+ * - Variant lines with __parentId pointing to product
  */
-export const BULK_OPERATION_QUERY = `
+export function buildBulkOperationQuery(ingestionAllowed: string[]): string {
+  // Build status filter: ['ACTIVE'] → "status:ACTIVE"
+  // ['ACTIVE', 'DRAFT'] → "status:ACTIVE OR status:DRAFT"
+  const statusFilter = ingestionAllowed
+    .map(s => `status:${s}`)
+    .join(' OR ')
+
+  console.log(`[Sync] Building bulk query with status filter: ${statusFilter}`)
+
+  return `
   mutation {
     bulkOperationRunQuery(
       query: """
       {
-        productVariants {
+        products(query: "${statusFilter}") {
           edges {
             node {
               id
-              sku
-              price
-              inventoryQuantity
-              displayName
               title
-              selectedOptions {
-                name
+              status
+              productType
+              featuredMedia {
+                preview {
+                  image {
+                    url
+                  }
+                }
+              }
+              mfOrderEntryCollection: metafield(namespace: "custom", key: "order_entry_collection") {
                 value
               }
-              image {
-                url
+              mfOrderEntryDescription: metafield(namespace: "custom", key: "label_title") {
+                value
               }
-              product {
-                id
-                title
-                status
-                productType
-                featuredMedia {
-                  preview {
+              mfFabric: metafield(namespace: "custom", key: "fabric") {
+                value
+              }
+              mfColor: metafield(namespace: "custom", key: "color") {
+                value
+              }
+              # NOTE: CAD wholesale price uses legacy key "test_number_" (created during testing, never renamed)
+              # Shopify admin shows label "CAD WS PRICE" but underlying key is "test_number_"
+              # All other price metafields have proper names (us_ws_price, msrp_cad, msrp_us)
+              mfCADWSPrice: metafield(namespace: "custom", key: "test_number_") {
+                value
+              }
+              mfUSDWSPrice: metafield(namespace: "custom", key: "us_ws_price") {
+                value
+              }
+              mfMSRPCAD: metafield(namespace: "custom", key: "msrp_cad") {
+                value
+              }
+              mfMSRPUSD: metafield(namespace: "custom", key: "msrp_us") {
+                value
+              }
+              variants {
+                edges {
+                  node {
+                    id
+                    sku
+                    price
+                    inventoryQuantity
+                    displayName
+                    title
+                    selectedOptions {
+                      name
+                      value
+                    }
                     image {
                       url
                     }
-                  }
-                }
-                mfOrderEntryCollection: metafield(namespace: "custom", key: "order_entry_collection") {
-                  value
-                }
-                mfOrderEntryDescription: metafield(namespace: "custom", key: "label_title") {
-                  value
-                }
-                mfFabric: metafield(namespace: "custom", key: "fabric") {
-                  value
-                }
-                mfColor: metafield(namespace: "custom", key: "color") {
-                  value
-                }
-                # NOTE: CAD wholesale price uses legacy key "test_number_" (created during testing, never renamed)
-                # Shopify admin shows label "CAD WS PRICE" but underlying key is "test_number_"
-                # All other price metafields have proper names (us_ws_price, msrp_cad, msrp_us)
-                mfCADWSPrice: metafield(namespace: "custom", key: "test_number_") {
-                  value
-                }
-                mfUSDWSPrice: metafield(namespace: "custom", key: "us_ws_price") {
-                  value
-                }
-                mfMSRPCAD: metafield(namespace: "custom", key: "msrp_cad") {
-                  value
-                }
-                mfMSRPUSD: metafield(namespace: "custom", key: "msrp_us") {
-                  value
-                }
-              }
-              inventoryItem {
-                id
-                measurement {
-                  weight {
-                    unit
-                    value
-                  }
-                }
-                inventoryLevels(first: 10) {
-                  edges {
-                    node {
+                    inventoryItem {
                       id
-                      quantities(names: ["incoming", "committed"]) {
-                        name
-                        quantity
+                      measurement {
+                        weight {
+                          unit
+                          value
+                        }
+                      }
+                      inventoryLevels(first: 10) {
+                        edges {
+                          node {
+                            id
+                            quantities(names: ["incoming", "committed"]) {
+                              name
+                              quantity
+                            }
+                          }
+                        }
                       }
                     }
                   }
@@ -220,6 +238,7 @@ export const BULK_OPERATION_QUERY = `
     }
   }
 `
+}
 
 /**
  * GraphQL query to check current bulk operation status.
@@ -591,8 +610,28 @@ interface QuantityData {
 }
 
 /**
+ * In-memory store for product data during JSONL processing.
+ * When using products → variants query, Shopify outputs separate lines:
+ * - Product lines with all product data (metafields, status, etc.)
+ * - Variant lines with __parentId pointing to the product
+ * We store product data here and look it up when processing variants.
+ */
+const productDataCache = new Map<string, ProductData>()
+
+/**
+ * Clear the product data cache (called at start of each sync)
+ */
+export function clearProductDataCache(): void {
+  productDataCache.clear()
+}
+
+/**
  * Process a single JSONL line item.
- * Handles both ProductVariant and InventoryLevel records from bulk operation.
+ * Handles Product, ProductVariant, and InventoryLevel records from bulk operation.
+ *
+ * With the new products(query: "status:...") → variants structure:
+ * - Product lines come first with all metadata
+ * - Variant lines follow with __parentId pointing to product
  */
 async function processJsonlItem(
   item: Record<string, unknown>,
@@ -601,14 +640,41 @@ async function processJsonlItem(
   const itemId = item.id as string | undefined
   const parentId = item.__parentId as string | undefined
 
+  // Handle Product records - store for later variant lookup
+  // Product lines have id like "gid://shopify/Product/12345" with no __parentId
+  if (itemId && itemId.includes('/Product/') && !itemId.includes('ProductVariant') && !parentId) {
+    const productData: ProductData = {
+      id: itemId,
+      title: item.title as string | undefined,
+      status: item.status as string | undefined,
+      productType: item.productType as string | undefined,
+      featuredMedia: item.featuredMedia as ProductData['featuredMedia'],
+      mfOrderEntryCollection: item.mfOrderEntryCollection as ProductMetafield | undefined,
+      mfOrderEntryDescription: item.mfOrderEntryDescription as ProductMetafield | undefined,
+      mfFabric: item.mfFabric as ProductMetafield | undefined,
+      mfColor: item.mfColor as ProductMetafield | undefined,
+      mfCADWSPrice: item.mfCADWSPrice as ProductMetafield | undefined,
+      mfUSDWSPrice: item.mfUSDWSPrice as ProductMetafield | undefined,
+      mfMSRPCAD: item.mfMSRPCAD as ProductMetafield | undefined,
+      mfMSRPUSD: item.mfMSRPUSD as ProductMetafield | undefined,
+    }
+    productDataCache.set(itemId, productData)
+    return false // Product itself doesn't count as processed variant
+  }
+
   // Handle ProductVariant records
   if (itemId && itemId.includes('ProductVariant')) {
-    const product = item.product as ProductData | undefined
+    // Look up parent product data from cache (new nested structure)
+    // parentId will be set when using products → variants query
+    const product = parentId ? productDataCache.get(parentId) : (item.product as ProductData | undefined)
+
     const inventoryItem = item.inventoryItem as InventoryItemData | undefined
     const variantImage = item.image as { url?: string } | undefined
     const productStatus = product?.status ?? null
 
     // Filter by allowed statuses (cascade ingestion filter)
+    // Note: With the new filtered query, this should already be filtered by Shopify
+    // But we keep this as a safety check
     if (options?.ingestionAllowed && !options.ingestionAllowed.includes(productStatus ?? '')) {
       return false
     }
@@ -641,7 +707,7 @@ async function processJsonlItem(
       displayName: (item.displayName as string) || '',
       size,
       productTitle: product?.title,
-      productGid: product?.id,
+      productGid: product?.id ?? parentId,
       productType: product?.productType,
       productStatus: productStatus ?? undefined,
       imageUrl: product?.featuredMedia?.preview?.image?.url,
@@ -1285,16 +1351,27 @@ export async function runFullSync(options?: {
     onProgress('Starting', 'Cleaning up orphaned runs')
     await cleanupOrphanedRuns()
 
+    // Clear product data cache from previous sync
+    clearProductDataCache()
+
     // Check if sync is already in progress
     const { inProgress, reason } = await isSyncInProgress(shopifyFetch)
     if (inProgress) {
       return { success: false, message: 'Sync already in progress', error: reason }
     }
 
+    // Get cascade config to determine which product statuses to fetch
+    // This controls the Shopify API query filter (e.g., only ACTIVE products)
+    const cascadeConfig = await getStatusCascadeConfig('Product')
+    console.log(`[Sync] Ingestion filter from cascade config: ${JSON.stringify(cascadeConfig.ingestionAllowed)}`)
+
+    // Build dynamic query with status filter
+    const bulkOperationQuery = buildBulkOperationQuery(cascadeConfig.ingestionAllowed)
+
     // Step 1: Start bulk operation
-    onProgress('Step 1/5', 'Starting bulk operation')
+    onProgress('Step 1/5', `Starting bulk operation (filter: ${cascadeConfig.ingestionAllowed.join(', ')})`)
     // Note: Can't update progress yet - no operationId until after start
-    const result = await shopifyFetch(BULK_OPERATION_QUERY)
+    const result = await shopifyFetch(bulkOperationQuery)
 
     if (result.error) {
       return { success: false, message: 'Failed to start bulk operation', error: result.error }
@@ -1431,7 +1508,8 @@ export async function runFullSync(options?: {
       return { success: false, message: 'Failed to download JSONL', operationId }
     }
 
-    const cascadeConfig = await getStatusCascadeConfig('Product')
+    // Note: cascadeConfig was already fetched before building the bulk query
+    // We reuse it here for the ingestion filter (belt-and-suspenders with API filter)
 
     const processResult = await processJsonlStream(
       jsonlResponse,

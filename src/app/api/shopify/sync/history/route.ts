@@ -25,19 +25,32 @@ export async function GET(request: NextRequest) {
       },
     });
 
-    const history = runs.map((run) => ({
-      id: String(run.ID),
-      syncType: run.SyncType,
-      syncTime: run.CompletedAt ?? run.StartedAt,
-      status:
-        run.Status === 'completed'
-          ? 'completed'
-          : run.Status === 'started'
-            ? 'in_progress'
-            : 'failed',
-      itemCount: run.ItemCount ?? 0,
-      errorMessage: run.ErrorMessage,
-    }));
+    // Detect stale runs: started more than 10 minutes ago with no progress
+    const STALE_THRESHOLD_MS = 10 * 60 * 1000; // 10 minutes
+    const now = Date.now();
+
+    const history = runs.map((run) => {
+      const startedAt = new Date(run.StartedAt).getTime();
+      const isStale = run.Status === 'started' &&
+                      (now - startedAt) > STALE_THRESHOLD_MS &&
+                      (run.ItemCount ?? 0) === 0;
+
+      return {
+        id: String(run.ID),
+        syncType: run.SyncType,
+        syncTime: run.CompletedAt ?? run.StartedAt,
+        status:
+          run.Status === 'completed'
+            ? 'completed'
+            : isStale
+              ? 'failed' // Stale runs show as failed/timeout
+              : run.Status === 'started'
+                ? 'in_progress'
+                : 'failed',
+        itemCount: run.ItemCount ?? 0,
+        errorMessage: isStale ? 'Sync timed out (no progress)' : run.ErrorMessage,
+      };
+    });
 
     return NextResponse.json({ history });
   } catch (error) {

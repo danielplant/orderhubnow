@@ -1,7 +1,23 @@
 import { auth } from '@/lib/auth/providers'
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
+
+// Redirect apex domain to www (handles cookie/session domain mismatch)
+function wwwRedirect(req: NextRequest): NextResponse | null {
+  const host = req.headers.get('host') || ''
+  // If accessing apex domain (no www), redirect to www
+  if (host === 'orderhubnow.com') {
+    const url = req.nextUrl.clone()
+    url.host = 'www.orderhubnow.com'
+    return NextResponse.redirect(url, 301)
+  }
+  return null
+}
 
 export default auth((req) => {
+  // Check for apex domain redirect first
+  const wwwResponse = wwwRedirect(req)
+  if (wwwResponse) return wwwResponse
+
   const { pathname, searchParams } = req.nextUrl
   const isLoggedIn = !!req.auth
   const role = req.auth?.user?.role
@@ -76,5 +92,8 @@ export default auth((req) => {
 })
 
 export const config = {
-  matcher: ['/admin/:path*', '/rep/:path*', '/buyer/:path*'],
+  // Match all paths except static files and api routes that don't need www redirect
+  matcher: [
+    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+  ],
 }
