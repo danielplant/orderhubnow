@@ -1234,6 +1234,7 @@ export async function transformToSkuTable(options?: { skipBackup?: boolean }): P
 export async function runFullSync(options?: {
   onProgress?: (step: string, details?: string) => void
   maxWaitMs?: number
+  pollIntervalMs?: number
 }): Promise<{
   success: boolean
   message: string
@@ -1244,6 +1245,7 @@ export async function runFullSync(options?: {
 }> {
   const onProgress = options?.onProgress ?? ((step, details) => console.log(`Sync: ${step}${details ? ` - ${details}` : ''}`))
   const maxWaitMs = options?.maxWaitMs ?? 300000 // 5 minutes default
+  const pollIntervalMs = options?.pollIntervalMs ?? 3000 // 3 seconds default
 
   let operationId: string | undefined
 
@@ -1347,7 +1349,6 @@ export async function runFullSync(options?: {
     `
 
     const startTime = Date.now()
-    const pollInterval = 3000 // 3 seconds like .NET
     let pollUrl: string | undefined
     let objectCount = 0
 
@@ -1399,7 +1400,7 @@ export async function runFullSync(options?: {
       }
 
       // Still running, wait and poll again
-      await new Promise(resolve => setTimeout(resolve, pollInterval))
+      await new Promise(resolve => setTimeout(resolve, pollIntervalMs))
     }
 
     if (!pollUrl) {

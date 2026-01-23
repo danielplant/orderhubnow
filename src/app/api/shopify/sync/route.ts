@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { auth } from '@/lib/auth/providers'
 import { getSyncStatus } from '@/lib/data/queries/shopify'
+import { getSyncSettings } from '@/lib/data/queries/settings'
 import { isShopifyConfigured } from '@/lib/shopify/client'
 import { getLatestSyncRun, runFullSync } from '@/lib/shopify/sync'
 
@@ -82,11 +83,15 @@ export async function POST() {
       )
     }
 
+    // Get sync settings from database
+    const settings = await getSyncSettings()
+
     // Run the full sync (like .NET: poll until complete, download, transform)
     // This may take several minutes
-    console.log('Starting full Shopify sync via API...')
+    console.log(`Starting full Shopify sync via API (maxWait: ${settings.syncMaxWaitMs}ms, pollInterval: ${settings.syncPollIntervalMs}ms)...`)
     const result = await runFullSync({
-      maxWaitMs: 600000, // 10 minutes max
+      maxWaitMs: settings.syncMaxWaitMs,
+      pollIntervalMs: settings.syncPollIntervalMs,
     })
 
     if (result.success) {
