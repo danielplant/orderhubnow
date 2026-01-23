@@ -108,8 +108,8 @@ export function extractCacheKey(thumbnailRef: string | null): string | null {
   const oldMatch = thumbnailRef.match(/\/thumbnails\/([a-f0-9]{16})\.png$/)
   if (oldMatch) return oldMatch[1]
 
-  // S3 URL format: .../thumbnails/{size}/{cacheKey}.png
-  const s3Match = thumbnailRef.match(/\/thumbnails\/\d+\/([a-f0-9]{16})\.png/)
+  // S3 URL format: .../thumbnails/{size}/{cacheKey}.png (size = sm, md, lg, xl or pixel value)
+  const s3Match = thumbnailRef.match(/\/thumbnails\/(?:sm|md|lg|xl|\d+)\/([a-f0-9]{16})\.png/)
   if (s3Match) return s3Match[1]
 
   return null
