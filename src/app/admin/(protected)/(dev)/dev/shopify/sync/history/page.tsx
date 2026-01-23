@@ -1,39 +1,53 @@
 import { Suspense } from 'react';
-import Link from 'next/link';
 import { History, CheckCircle, XCircle, Clock, RefreshCw } from 'lucide-react';
+import { prisma } from '@/lib/prisma';
 
 export const dynamic = 'force-dynamic';
 
 interface SyncRun {
   id: string;
-  mappingId?: string;
-  mappingName?: string;
-  syncType: 'full' | 'incremental' | 'webhook';
-  status: 'pending' | 'running' | 'completed' | 'failed';
-  triggeredBy?: string;
+  syncType: string;
+  status: 'completed' | 'in_progress' | 'failed';
   startedAt: string;
   completedAt?: string;
-  recordsFetched?: number;
-  recordsWritten?: number;
-  recordsSkipped?: number;
-  recordsFailed?: number;
-  durationMs?: number;
+  itemCount: number;
   errorMessage?: string;
 }
 
 // ============================================================================
-// Data Fetching
+// Data Fetching - Direct from ShopifySyncRun
 // ============================================================================
 
 async function getHistory(): Promise<SyncRun[]> {
   try {
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-    const res = await fetch(`${baseUrl}/api/admin/shopify/sync/history?limit=50`, {
-      cache: 'no-store',
+    const runs = await prisma.shopifySyncRun.findMany({
+      orderBy: { StartedAt: 'desc' },
+      take: 50,
+      select: {
+        ID: true,
+        SyncType: true,
+        Status: true,
+        StartedAt: true,
+        CompletedAt: true,
+        ItemCount: true,
+        ErrorMessage: true,
+      },
     });
-    if (!res.ok) return [];
-    const data = await res.json();
-    return data.runs || [];
+
+    return runs.map((run) => ({
+      id: String(run.ID),
+      syncType: run.SyncType,
+      status:
+        run.Status === 'completed'
+          ? 'completed' as const
+          : run.Status === 'started'
+            ? 'in_progress' as const
+            : 'failed' as const,
+      startedAt: run.StartedAt.toISOString(),
+      completedAt: run.CompletedAt?.toISOString(),
+      itemCount: run.ItemCount ?? 0,
+      errorMessage: run.ErrorMessage ?? undefined,
+    }));
   } catch (error) {
     console.error('Failed to fetch history:', error);
     return [];
@@ -46,8 +60,7 @@ async function getHistory(): Promise<SyncRun[]> {
 
 function StatusBadge({ status }: { status: SyncRun['status'] }) {
   const config = {
-    pending: { icon: Clock, color: 'bg-yellow-100 text-yellow-700', label: 'Pending' },
-    running: { icon: RefreshCw, color: 'bg-blue-100 text-blue-700', label: 'Running' },
+    in_progress: { icon: RefreshCw, color: 'bg-amber-100 text-amber-700', label: 'Running' },
     completed: { icon: CheckCircle, color: 'bg-green-100 text-green-700', label: 'Completed' },
     failed: { icon: XCircle, color: 'bg-red-100 text-red-700', label: 'Failed' },
   };
@@ -56,14 +69,18 @@ function StatusBadge({ status }: { status: SyncRun['status'] }) {
 
   return (
     <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs ${color}`}>
-      <Icon className={`h-3 w-3 ${status === 'running' ? 'animate-spin' : ''}`} />
+      <Icon className={`h-3 w-3 ${status === 'in_progress' ? 'animate-spin' : ''}`} />
       {label}
     </span>
   );
 }
 
-function formatDuration(ms?: number): string {
-  if (!ms) return '-';
+function formatDuration(startedAt: string, completedAt?: string): string {
+  if (!completedAt) return '-';
+  const start = new Date(startedAt).getTime();
+  const end = new Date(completedAt).getTime();
+  const ms = end - start;
+
   if (ms < 1000) return `${ms}ms`;
   if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
   return `${(ms / 60000).toFixed(1)}m`;
@@ -71,36 +88,32 @@ function formatDuration(ms?: number): string {
 
 function formatDate(dateStr: string): string {
   const date = new Date(dateStr);
-  return date.toLocaleString();
+  return date.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
 }
 
 function HistoryRow({ run }: { run: SyncRun }) {
   return (
     <tr className="hover:bg-muted/30">
       <td className="px-4 py-3 text-sm">
-        <Link
-          href={`/admin/dev/shopify/sync/history/${run.id}`}
-          className="text-primary hover:underline"
-        >
-          {run.id.slice(0, 8)}...
-        </Link>
+        {formatDate(run.startedAt)}
       </td>
-      <td className="px-4 py-3 text-sm">{run.mappingName || '-'}</td>
       <td className="px-4 py-3 text-sm capitalize">{run.syncType}</td>
       <td className="px-4 py-3 text-sm">
         <StatusBadge status={run.status} />
       </td>
-      <td className="px-4 py-3 text-sm">{run.triggeredBy || 'manual'}</td>
-      <td className="px-4 py-3 text-sm">{formatDate(run.startedAt)}</td>
-      <td className="px-4 py-3 text-sm text-right">{formatDuration(run.durationMs)}</td>
+      <td className="px-4 py-3 text-sm text-right">{formatDuration(run.startedAt, run.completedAt)}</td>
       <td className="px-4 py-3 text-sm text-right">
         {run.status === 'completed' ? (
-          <span className="text-muted-foreground">
-            {run.recordsWritten ?? 0} written
-          </span>
-        ) : run.status === 'failed' ? (
-          <span className="text-red-600 truncate max-w-[150px] inline-block" title={run.errorMessage}>
-            {run.errorMessage?.slice(0, 30)}...
+          <span>{run.itemCount.toLocaleString()} items</span>
+        ) : run.status === 'failed' && run.errorMessage ? (
+          <span className="text-red-600 truncate max-w-[200px] inline-block" title={run.errorMessage}>
+            {run.errorMessage.slice(0, 40)}...
           </span>
         ) : (
           '-'
@@ -134,12 +147,9 @@ async function HistoryTable() {
       <table className="w-full">
         <thead className="bg-muted/50">
           <tr>
-            <th className="px-4 py-3 text-left text-sm font-medium">ID</th>
-            <th className="px-4 py-3 text-left text-sm font-medium">Mapping</th>
+            <th className="px-4 py-3 text-left text-sm font-medium">Started</th>
             <th className="px-4 py-3 text-left text-sm font-medium">Type</th>
             <th className="px-4 py-3 text-left text-sm font-medium">Status</th>
-            <th className="px-4 py-3 text-left text-sm font-medium">Triggered By</th>
-            <th className="px-4 py-3 text-left text-sm font-medium">Started</th>
             <th className="px-4 py-3 text-right text-sm font-medium">Duration</th>
             <th className="px-4 py-3 text-right text-sm font-medium">Result</th>
           </tr>

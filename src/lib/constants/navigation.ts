@@ -45,14 +45,11 @@ export const devNav: NavItem[] = [
   { name: 'Back to Admin', path: '/admin', back: true },
 
   { name: 'SHOPIFY', section: true },
-  { name: 'Overview', path: '/admin/dev/shopify' },
   {
     name: 'Sync',
     path: '/admin/dev/shopify/sync',
     children: [
-      { name: 'Dashboard', path: '/admin/dev/shopify/sync' },
       { name: 'Setup', path: '/admin/dev/shopify/sync/setup' },
-      { name: 'Run', path: '/admin/dev/shopify/sync/run' },
       { name: 'Mappings', path: '/admin/dev/shopify/sync/mappings' },
       { name: 'Schedules', path: '/admin/dev/shopify/sync/schedules' },
       { name: 'History', path: '/admin/dev/shopify/sync/history' },
