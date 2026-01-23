@@ -1,3 +1,5 @@
 export { PortalLayout } from './portal-layout'
-export { PortalHeader } from './portal-header'
 export { PortalSidebar } from './portal-sidebar'
+export { PortalSwitcher, type Portal } from './portal-switcher'
+export { RepPickerDialog } from './rep-picker-dialog'
+export { AdminViewBanner } from './admin-view-banner'

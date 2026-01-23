@@ -3,13 +3,16 @@
 import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
+import { buildRepHref } from '@/lib/utils/auth'
 
 interface Props {
   orderNumber: string
   customerName: string | null
+  /** View-as params to preserve when redirecting */
+  viewAsParams?: { repId: string; repName?: string } | null
 }
 
-export function OrderSubmittedToast({ orderNumber, customerName }: Props) {
+export function OrderSubmittedToast({ orderNumber, customerName, viewAsParams }: Props) {
   const router = useRouter()
 
   useEffect(() => {
@@ -19,9 +22,10 @@ export function OrderSubmittedToast({ orderNumber, customerName }: Props) {
 
     toast.success(message, { duration: 5000 })
 
-    // Remove query params from URL without reload
-    router.replace('/rep/orders', { scroll: false })
-  }, [orderNumber, customerName, router])
+    // Remove query params from URL without reload, preserving view-as params
+    const redirectUrl = buildRepHref('/rep/orders', viewAsParams)
+    router.replace(redirectUrl, { scroll: false })
+  }, [orderNumber, customerName, viewAsParams, router])
 
   return null
 }

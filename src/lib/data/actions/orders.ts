@@ -1,6 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
+import { headers } from 'next/headers'
 import { prisma } from '@/lib/prisma'
 import { auth } from '@/lib/auth/providers'
 import type { OrderStatus, CreateOrderResult, UpdateOrderInput, UpdateOrderResult } from '@/lib/types/order'
@@ -8,7 +9,7 @@ import { createOrderInputSchema, type CreateOrderInput } from '@/lib/schemas/ord
 import { sendOrderEmails } from '@/lib/email/send-order-emails'
 
 // ============================================================================
-// Auth Helper
+// Auth Helpers
 // ============================================================================
 
 async function requireAdmin() {
@@ -17,6 +18,39 @@ async function requireAdmin() {
     throw new Error('Unauthorized')
   }
   return session
+}
+
+/**
+ * Block mutation if user is admin in view-as mode.
+ * Admins viewing as reps should not be able to create/modify orders.
+ * The x-url header is set by middleware with the current URL.
+ */
+async function blockIfAdminViewAs(): Promise<{ blocked: true; error: string } | { blocked: false }> {
+  const session = await auth()
+
+  // If not authenticated or not admin, allow through
+  if (!session?.user || session.user.role !== 'admin') {
+    return { blocked: false }
+  }
+
+  // Admin is authenticated - check for view-as mode via x-url header
+  const headersList = await headers()
+  const currentUrl = headersList.get('x-url') || ''
+
+  try {
+    const url = new URL(currentUrl, 'http://localhost')
+    const adminViewAs = url.searchParams.get('adminViewAs')
+
+    if (adminViewAs) {
+      return { blocked: true, error: 'Order modifications are disabled in view-as mode' }
+    }
+  } catch {
+    // URL parsing failed, continue
+  }
+
+  // Admin without explicit view-as param - allow through
+  // (page-level checks handle preventing admin access to buyer flow)
+  return { blocked: false }
 }
 
 // ============================================================================
@@ -259,27 +293,6 @@ async function getNextOrderNumberFallback(prefix: string): Promise<string> {
 }
 
 /**
- * Get grouping key for an order item based on ship window/category.
- * Used to split orders by delivery date/collection.
- */
-function getShipWindowKey(item: {
-  categoryId?: number | null
-  shipWindowStart?: string | null
-  shipWindowEnd?: string | null
-}): string {
-  // Group by categoryId first (most specific - matches business labels like "FW26 Core1")
-  if (item.categoryId) {
-    return `cat-${item.categoryId}`
-  }
-  // Fallback to ship window dates
-  if (item.shipWindowStart || item.shipWindowEnd) {
-    return `window-${item.shipWindowStart || 'none'}-${item.shipWindowEnd || 'none'}`
-  }
-  // Default group for items without metadata
-  return 'default'
-}
-
-/**
  * Derive order type (ATS vs Pre-Order) from SKU data.
  * Master source: SkuCategories.IsPreOrder
  * 
@@ -353,6 +366,12 @@ function getOrderGroupKey(
  */
 export async function createOrder(input: CreateOrderInput): Promise<CreateOrderResult> {
   try {
+    // Block if admin is in view-as mode
+    const viewAsCheck = await blockIfAdminViewAs()
+    if (viewAsCheck.blocked) {
+      return { success: false, error: viewAsCheck.error }
+    }
+
     // Validate input server-side
     const parsed = createOrderInputSchema.safeParse(input)
     if (!parsed.success) {
@@ -412,7 +431,7 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
       }
 
       // Create one order per ship window group (and order type)
-      for (const [groupKey, groupItems] of itemGroups) {
+      for (const [, groupItems] of itemGroups) {
         // Determine order type from first item's SKU (all items in group have same type)
         const firstItemVariantId = String(groupItems[0].skuVariantId)
         const isPreOrder = skuPreOrderMap.get(firstItemVariantId) ?? false
@@ -630,6 +649,12 @@ export async function updateOrder(
   input: UpdateOrderInput
 ): Promise<UpdateOrderResult> {
   try {
+    // Block if admin is in view-as mode
+    const viewAsCheck = await blockIfAdminViewAs()
+    if (viewAsCheck.blocked) {
+      return { success: false, error: viewAsCheck.error }
+    }
+
     const { orderId, items, ...headerData } = input
 
     // Verify order exists and is editable

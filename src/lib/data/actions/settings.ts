@@ -381,7 +381,7 @@ export async function updateSyncSettings(
       })
     }
 
-    revalidatePath('/admin/shopify/settings')
+    revalidatePath('/admin/dev/shopify/settings')
     return { success: true, message: 'Sync settings have been updated successfully.' }
   } catch (err) {
     console.error('[updateSyncSettings] Error:', err)
@@ -408,7 +408,7 @@ export async function restoreSyncSettings(
     const snapshot = JSON.parse(historyRecord.snapshot) as Record<string, unknown>
 
     // Remove non-editable fields from snapshot
-    const { id, version, updatedAt, ...editableFields } = snapshot
+    const { id: _id, version: _version, updatedAt: _updatedAt, ...editableFields } = snapshot
 
     return updateSyncSettings(
       editableFields as Partial<SyncSettingsEditableFields>,

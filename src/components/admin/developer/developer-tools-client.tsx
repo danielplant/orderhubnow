@@ -16,7 +16,7 @@ import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { RefreshCw, Loader2 } from 'lucide-react'
 import { formatDate } from '@/lib/utils/format'
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { FieldConfigPanel, FieldConfig, FieldCategory } from './field-config-panel'
 import { MetafieldsPanel, EnabledMetafield } from './metafields-panel'
@@ -529,7 +529,7 @@ export function DeveloperToolsClient() {
           <p className="pt-2 border-t border-border mt-4">
             <strong>Note:</strong> The sync runs automatically on a schedule and can also be
             triggered manually from the{' '}
-            <Link href="/admin/shopify" className="text-primary hover:underline">
+            <Link href="/admin/dev/shopify" className="text-primary hover:underline">
               Shopify Integration
             </Link>{' '}
             page.

@@ -3,7 +3,7 @@
  *
  * This script:
  * 1. Queries all SKUs with thumbnails
- * 2. Regenerates all sizes (120, 240, 480px) from Shopify URLs
+ * 2. Regenerates all sizes (120, 240, 480px, 720px) from Shopify URLs
  * 3. Uploads to S3
  * 4. Updates the database with cache keys (instead of old file paths)
  *

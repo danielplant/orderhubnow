@@ -8,7 +8,7 @@ import {
   type ShopifyOrderRequest,
   type ShopifyCustomerRequest,
 } from '@/lib/shopify/client'
-import { findShopifyVariant, findCachedShopifyCustomer } from '@/lib/data/queries/shopify'
+import { findShopifyVariant } from '@/lib/data/queries/shopify'
 import { getStatusCascadeConfig } from '@/lib/data/queries/sync-config'
 import type {
   ShopifyTransferResult,
@@ -56,7 +56,7 @@ export async function ignoreMissingSku(
       data: { IsReviewed: true, DateModified: new Date() },
     })
 
-    revalidatePath('/admin/shopify')
+    revalidatePath('/admin/dev/shopify')
     return { success: true }
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Failed to ignore SKU'
@@ -78,7 +78,7 @@ export async function bulkIgnoreMissingSkus(
       data: { IsReviewed: true, DateModified: new Date() },
     })
 
-    revalidatePath('/admin/shopify')
+    revalidatePath('/admin/dev/shopify')
     return { success: true, ignored: result.count }
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Failed to bulk ignore SKUs'
@@ -149,7 +149,7 @@ export async function addMissingSkuToInventory(
       data: { IsReviewed: true, DateModified: now },
     })
 
-    revalidatePath('/admin/shopify')
+    revalidatePath('/admin/dev/shopify')
     revalidatePath('/admin/products')
     return { success: true, skuId: String(newSku.ID) }
   } catch (e) {
@@ -235,7 +235,7 @@ export async function bulkAddMissingSkus(
     }
   }
 
-  revalidatePath('/admin/shopify')
+  revalidatePath('/admin/dev/shopify')
   revalidatePath('/admin/products')
 
   return {
@@ -605,7 +605,7 @@ export async function transferOrderToShopify(
       await populateShopifyLineItemIds(orderItems, retryResult.order.line_items)
 
       revalidatePath('/admin/orders')
-      revalidatePath('/admin/shopify')
+      revalidatePath('/admin/dev/shopify')
 
       return {
         success: true,
@@ -638,7 +638,7 @@ export async function transferOrderToShopify(
     await populateShopifyLineItemIds(orderItems, createdOrder.line_items)
 
     revalidatePath('/admin/orders')
-    revalidatePath('/admin/shopify')
+    revalidatePath('/admin/dev/shopify')
 
     return {
       success: true,

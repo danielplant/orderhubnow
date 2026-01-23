@@ -1,20 +1,12 @@
 import type { ReactNode } from 'react'
-import { auth } from '@/lib/auth/providers'
-import { PortalLayout } from '@/components/portal'
-import { adminNav } from '@/lib/constants/navigation'
 
-export default async function AdminLayout({ children }: { children: ReactNode }) {
-  const session = await auth()
-  const userName = session?.user?.name || 'Admin'
-
-  return (
-    <PortalLayout
-      title="Admin"
-      nav={adminNav}
-      logoutUrl="/admin/login"
-      userName={userName}
-    >
-      {children}
-    </PortalLayout>
-  )
+/**
+ * Protected layout - handles authentication only.
+ * Child route groups (admin) and (dev) handle their own portal layouts.
+ * This prevents layout nesting issues.
+ */
+export default function ProtectedLayout({ children }: { children: ReactNode }) {
+  // Auth is handled by middleware - this layout just passes through children
+  // Each child route group has its own PortalLayout
+  return <>{children}</>
 }

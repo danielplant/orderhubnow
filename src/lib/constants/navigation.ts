@@ -1,47 +1,62 @@
 /**
  * Navigation Constants
  * ============================================================================
- * Updated to include Reports link.
+ * Sidebar navigation for Admin, Rep, Developer, and Buyer portals.
  * Path: src/lib/constants/navigation.ts
  */
 
 export type NavItem = {
   name: string
-  path: string
+  path?: string           // Optional - sections don't have paths
   children?: NavItem[]
+  section?: boolean       // True = render as section header (not a link)
+  back?: boolean          // True = render as "← Back to X" link
 }
 
 export const adminNav: NavItem[] = [
   { name: 'Dashboard', path: '/admin' },
   { name: 'Reports', path: '/admin/reports' },
+
+  { name: 'ORDERS', section: true },
   { name: 'Orders', path: '/admin/orders' },
   { name: 'Open Items', path: '/admin/open-items' },
+
+  { name: 'CATALOG', section: true },
   { name: 'Products', path: '/admin/products' },
   { name: 'Collections', path: '/admin/collections' },
+  { name: 'Categories', path: '/admin/categories' },
   { name: 'Inventory', path: '/admin/inventory' },
+  { name: 'Prepacks', path: '/admin/prepacks' },
+
+  { name: 'PEOPLE', section: true },
   { name: 'Customers', path: '/admin/customers' },
   { name: 'Reps', path: '/admin/reps' },
-  { name: 'Prepacks', path: '/admin/prepacks' },
+
+  { name: 'SYSTEM', section: true },
+  { name: 'Settings', path: '/admin/settings' },
+  { name: 'Feature Interest', path: '/admin/feature-interest' },
+  { name: 'Developer Portal', path: '/admin/dev' },
+]
+
+export const devNav: NavItem[] = [
+  { name: 'Back to Admin', path: '/admin', back: true },
+
+  { name: 'SHOPIFY', section: true },
+  { name: 'Overview', path: '/admin/dev/shopify' },
   {
-    name: 'Shopify',
-    path: '/admin/shopify',
+    name: 'Sync',
+    path: '/admin/dev/shopify/sync',
     children: [
-      { name: 'Overview', path: '/admin/shopify' },
-      { name: 'Configuration', path: '/admin/shopify/config' },
-      { name: 'Discovery', path: '/admin/shopify/discovery' },
-      {
-        name: 'Sync',
-        path: '/admin/shopify/sync',
-        children: [
-          { name: 'Run Sync', path: '/admin/shopify/sync/run' },
-          { name: 'Mappings', path: '/admin/shopify/sync/mapping' },
-          { name: 'History', path: '/admin/shopify/sync/history' },
-        ],
-      },
-      { name: 'Settings', path: '/admin/shopify/settings' },
+      { name: 'Dashboard', path: '/admin/dev/shopify/sync' },
+      { name: 'Setup', path: '/admin/dev/shopify/sync/setup' },
+      { name: 'Run', path: '/admin/dev/shopify/sync/run' },
+      { name: 'Mappings', path: '/admin/dev/shopify/sync/mappings' },
+      { name: 'Schedules', path: '/admin/dev/shopify/sync/schedules' },
+      { name: 'History', path: '/admin/dev/shopify/sync/history' },
     ],
   },
-  { name: 'Settings', path: '/admin/settings' },
+  { name: 'Configuration', path: '/admin/dev/shopify/config' },
+  { name: 'Sync Settings', path: '/admin/dev/shopify/settings' },
 ]
 
 export const repNav: NavItem[] = [

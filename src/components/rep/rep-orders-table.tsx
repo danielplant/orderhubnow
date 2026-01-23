@@ -29,6 +29,9 @@ interface RepOrdersTableProps {
   orders: RepOrderRow[]
   total: number
   statusCounts: RepOrdersListResult['statusCounts']
+  repId: string
+  repName?: string | null
+  isReadOnly?: boolean
 }
 
 // ============================================================================
@@ -68,7 +71,14 @@ function getStatusBadgeStatus(status: OrderStatus) {
 // Component
 // ============================================================================
 
-export function RepOrdersTable({ orders, total, statusCounts }: RepOrdersTableProps) {
+export function RepOrdersTable({
+  orders,
+  total,
+  statusCounts,
+  repId,
+  repName,
+  isReadOnly = false,
+}: RepOrdersTableProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
 
@@ -125,6 +135,15 @@ export function RepOrdersTable({ orders, total, statusCounts }: RepOrdersTablePr
   )
 
   // Define table columns
+  const buildEditHref = React.useCallback(
+    (orderId: string) => {
+      const params = new URLSearchParams({ editOrder: orderId, returnTo: '/rep/orders', repId })
+      if (repName) params.set('repName', repName)
+      return `/buyer/my-order?${params.toString()}`
+    },
+    [repId, repName]
+  )
+
   const columns = React.useMemo<DataTableColumn<RepOrderRow>[]>(
     () => [
       {
@@ -156,9 +175,9 @@ export function RepOrdersTable({ orders, total, statusCounts }: RepOrdersTablePr
         id: 'action',
         header: 'Action',
         cell: (order) =>
-          order.status === 'Pending' && !order.inShopify ? (
+          !isReadOnly && order.status === 'Pending' && !order.inShopify ? (
             <Link
-              href={`/buyer/my-order?editOrder=${order.id}&returnTo=/rep/orders`}
+              href={buildEditHref(String(order.id))}
               className="text-primary hover:underline inline-flex items-center gap-1"
             >
               <FileEdit className="size-4" />
@@ -208,7 +227,7 @@ export function RepOrdersTable({ orders, total, statusCounts }: RepOrdersTablePr
         ),
       },
     ],
-    []
+    [buildEditHref, isReadOnly]
   )
 
   return (
@@ -235,7 +254,7 @@ export function RepOrdersTable({ orders, total, statusCounts }: RepOrdersTablePr
           </SelectContent>
         </Select>
 
-        {orders.length > 0 && (
+        {!isReadOnly && orders.length > 0 && (
           <Button variant="outline" asChild className="ml-auto gap-2">
             <a href={`/api/rep/orders/export?${searchParams.toString()}`}>
               <FileDown className="size-4" />

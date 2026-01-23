@@ -31,7 +31,7 @@ import {
   normalizeWebsite,
 } from '@/lib/utils/form-normalization'
 import { formatCurrency } from '@/lib/utils'
-import { isRepPortalReturn } from '@/lib/utils/rep-context'
+import { isValidPortalReturn } from '@/lib/utils/rep-context'
 import type { Currency } from '@/lib/types'
 import type { OrderForEditing } from '@/lib/data/queries/orders'
 import { EmailConfirmationModal, type SubmittedOrder } from './email-confirmation-modal'
@@ -528,7 +528,7 @@ export function OrderForm({
     
     // Redirect after email confirmation
     const primaryOrderId = submittedOrders[0]?.orderId
-    if (isRepPortalReturn(returnTo)) {
+    if (isValidPortalReturn(returnTo)) {
       router.push(returnTo)
     } else if (primaryOrderId) {
       router.push(`/buyer/confirmation/${primaryOrderId}`)
@@ -553,7 +553,7 @@ export function OrderForm({
     
     // Redirect after skipping emails
     const primaryOrderId = submittedOrders[0]?.orderId
-    if (isRepPortalReturn(returnTo)) {
+    if (isValidPortalReturn(returnTo)) {
       router.push(returnTo)
     } else if (primaryOrderId) {
       router.push(`/buyer/confirmation/${primaryOrderId}`)

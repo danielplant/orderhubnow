@@ -19,7 +19,7 @@ import { THUMBNAIL_SIZES, type ThumbnailSize } from '@/lib/utils/thumbnails'
 
 /**
  * Thumbnail settings for export
- * Thumbnails are stored in S3 at multiple sizes (120, 240, 480px)
+ * Thumbnails are stored in S3 at multiple sizes (120, 240, 480px, 720px)
  * Exports use the smallest size for efficiency
  */
 export const EXPORT_THUMBNAIL = {
