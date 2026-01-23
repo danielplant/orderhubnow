@@ -94,8 +94,10 @@ export const authConfig: NextAuthConfig = {
         }
 
         // Server-side role enforcement
-        const requiredRole = credentials.requiredRole as UserRole | undefined
-        if (requiredRole && role !== requiredRole) {
+        // Note: undefined gets serialized as string 'undefined' by NextAuth
+        const requiredRole = credentials.requiredRole as string | undefined
+        const effectiveRequiredRole = requiredRole && requiredRole !== 'undefined' ? requiredRole as UserRole : undefined
+        if (effectiveRequiredRole && role !== effectiveRequiredRole) {
           return null
         }
 
@@ -105,6 +107,7 @@ export const authConfig: NextAuthConfig = {
           role,
           repId: user.RepId,
           name: user.Email || user.LoginID,
+          email: user.Email || undefined,
         }
       },
     }),
