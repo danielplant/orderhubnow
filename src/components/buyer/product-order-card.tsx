@@ -37,6 +37,7 @@ function ProductImage({
   title: string;
 }) {
   const [thumbError, setThumbError] = useState(false);
+  const [shopifyError, setShopifyError] = useState(false);
   const [fullError, setFullError] = useState(false);
   const [disableXl, setDisableXl] = useState(false);
 
@@ -48,6 +49,7 @@ function ProductImage({
   const lightboxSrc = fullsizeUrl || imageData?.src;
   const gridSizes = "(max-width: 768px) 100vw, (max-width: 1280px) 50vw, 33vw";
 
+  // Try S3 thumbnail first, then fall back to Shopify CDN, then show placeholder
   const handleThumbError = () => {
     if (!disableXl) {
       setDisableXl(true);
@@ -56,11 +58,20 @@ function ProductImage({
     setThumbError(true);
   };
 
+  const handleShopifyError = () => {
+    setShopifyError(true);
+  };
+
+  // Determine what to show: S3 thumbnail → Shopify CDN → placeholder
+  const showS3 = imageData && !thumbError;
+  const showShopify = !showS3 && shopifyImageUrl && !shopifyError;
+  const showPlaceholder = !showS3 && !showShopify;
+
   return (
     <Dialog>
       <DialogTrigger asChild>
         <div className="relative flex-1 min-h-0 bg-secondary overflow-hidden group cursor-zoom-in">
-          {imageData && !thumbError ? (
+          {showS3 && (
             <img
               key={disableXl ? "thumb-no-xl" : "thumb-xl"}
               src={imageData.src}
@@ -72,7 +83,19 @@ function ProductImage({
               className="absolute inset-0 w-full h-full object-contain p-2 motion-slow transition-transform group-hover:scale-105"
               onError={handleThumbError}
             />
-          ) : (
+          )}
+          {showShopify && (
+            <img
+              key="shopify-fallback"
+              src={shopifyImageUrl}
+              alt={title}
+              loading="lazy"
+              decoding="async"
+              className="absolute inset-0 w-full h-full object-contain p-2 motion-slow transition-transform group-hover:scale-105"
+              onError={handleShopifyError}
+            />
+          )}
+          {showPlaceholder && (
             <div className="absolute inset-0 flex items-center justify-center text-muted-foreground/40">
               <svg
                 className="w-16 h-16"

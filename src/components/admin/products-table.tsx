@@ -34,6 +34,47 @@ import { CollectionSelector, type CollectionFilterMode } from '@/components/admi
 import { MoreHorizontal, Download, Upload, ChevronDown, FileSpreadsheet, FileText } from 'lucide-react'
 
 // ============================================================================
+// Image Cell with S3 → Shopify fallback
+// ============================================================================
+
+function ImageCell({ thumbnailPath, imageUrl, alt }: { thumbnailPath: string | null; imageUrl: string | null; alt: string }) {
+  const [s3Error, setS3Error] = React.useState(false)
+  const [shopifyError, setShopifyError] = React.useState(false)
+
+  const s3Url = getSkuImageUrl(thumbnailPath, null, 'md')
+
+  return (
+    <div className="w-24 h-24 relative bg-muted rounded overflow-hidden flex-shrink-0">
+      {s3Url && !s3Error ? (
+        <Image
+          src={s3Url}
+          alt={alt}
+          fill
+          className="object-contain"
+          sizes="96px"
+          onError={() => setS3Error(true)}
+        />
+      ) : imageUrl && !shopifyError ? (
+        <Image
+          src={imageUrl}
+          alt={alt}
+          fill
+          className="object-contain"
+          sizes="96px"
+          onError={() => setShopifyError(true)}
+        />
+      ) : (
+        <div className="w-full h-full flex items-center justify-center text-muted-foreground">
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+          </svg>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ============================================================================
 // Types
 // ============================================================================
 
@@ -245,27 +286,13 @@ export function ProductsTable({
       {
         id: 'image',
         header: 'Image',
-        cell: (r) => {
-          const thumbnailUrl = getSkuImageUrl(r.thumbnailPath, r.imageUrl, 'md')
-          return (
-          <div className="w-24 h-24 relative bg-muted rounded overflow-hidden flex-shrink-0">
-            {thumbnailUrl ? (
-              <Image
-                src={thumbnailUrl}
-                alt={r.description}
-                fill
-                className="object-contain"
-                sizes="96px"
-              />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center text-muted-foreground">
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                </svg>
-              </div>
-            )}
-          </div>
-        )},
+        cell: (r) => (
+          <ImageCell
+            thumbnailPath={r.thumbnailPath}
+            imageUrl={r.imageUrl}
+            alt={r.description}
+          />
+        ),
       },
       {
         id: 'skuId',

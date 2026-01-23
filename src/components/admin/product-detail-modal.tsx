@@ -48,17 +48,20 @@ export function ProductDetailModal({
   product,
   highlightedSku,
 }: ProductDetailModalProps) {
-  const [imageError, setImageError] = React.useState(false)
+  const [s3Error, setS3Error] = React.useState(false)
+  const [shopifyError, setShopifyError] = React.useState(false)
 
   // Prefer S3 thumbnail (lg size for modal), fallback to Shopify CDN
-  const imageUrl = React.useMemo(
-    () => product ? getSkuImageUrl(product.thumbnailPath, product.imageUrl, 'lg') : null,
+  const s3Url = React.useMemo(
+    () => product ? getSkuImageUrl(product.thumbnailPath, null, 'lg') : null,
     [product]
   )
+  const shopifyUrl = product?.imageUrl ?? null
 
   React.useEffect(() => {
-    setImageError(false)
-  }, [imageUrl])
+    setS3Error(false)
+    setShopifyError(false)
+  }, [product])
 
   if (!product) return null
 
@@ -87,15 +90,23 @@ export function ProductDetailModal({
         </DialogHeader>
 
         <div className="grid gap-6 md:grid-cols-2">
-          {/* Product Image */}
+          {/* Product Image - S3 → Shopify → placeholder */}
           <div className="relative aspect-square bg-muted rounded-lg overflow-hidden">
-            {imageUrl && !imageError ? (
+            {s3Url && !s3Error ? (
               <Image
-                src={imageUrl}
+                src={s3Url}
                 alt={product.title}
                 fill
                 className="object-contain p-4"
-                onError={() => setImageError(true)}
+                onError={() => setS3Error(true)}
+              />
+            ) : shopifyUrl && !shopifyError ? (
+              <Image
+                src={shopifyUrl}
+                alt={product.title}
+                fill
+                className="object-contain p-4"
+                onError={() => setShopifyError(true)}
               />
             ) : (
               <div className="absolute inset-0 flex items-center justify-center text-muted-foreground">
