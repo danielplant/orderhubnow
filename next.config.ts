@@ -29,6 +29,19 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  async redirects() {
+    return [
+      // Legacy shopify routes → new dev portal
+      { source: '/admin/shopify', destination: '/admin/dev/shopify', permanent: true },
+      { source: '/admin/shopify/config', destination: '/admin/dev/shopify/config', permanent: true },
+      { source: '/admin/shopify/settings', destination: '/admin/dev/shopify/settings', permanent: true },
+      { source: '/admin/shopify/discovery', destination: '/admin/dev/schema', permanent: true },
+      { source: '/admin/shopify/sync', destination: '/admin/dev/shopify/sync', permanent: true },
+      { source: '/admin/shopify/sync/:path*', destination: '/admin/dev/shopify/sync/:path*', permanent: true },
+      // Legacy developer route
+      { source: '/admin/developer', destination: '/admin/dev/shopify/config', permanent: true },
+    ];
+  },
 };
 
 export default nextConfig;

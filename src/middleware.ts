@@ -2,7 +2,7 @@ import { auth } from '@/lib/auth/providers'
 import { NextResponse } from 'next/server'
 
 export default auth((req) => {
-  const { pathname } = req.nextUrl
+  const { pathname, searchParams } = req.nextUrl
   const isLoggedIn = !!req.auth
   const role = req.auth?.user?.role
 
@@ -12,38 +12,24 @@ export default auth((req) => {
   const isAdminLogin = pathname === '/admin/login'
   const isRepLogin = pathname === '/rep/login'
 
-  // Already authenticated user on login pages → redirect to their dashboard
-  if (isLoggedIn) {
-    if (isAdminLogin) {
-      // Authenticated user on /admin/login
-      if (role === 'admin') {
-        return NextResponse.redirect(new URL('/admin', req.nextUrl.origin))
-      } else {
-        // Rep on admin login → send to rep dashboard
-        return NextResponse.redirect(new URL('/rep', req.nextUrl.origin))
-      }
-    }
-    if (isRepLogin) {
-      // Authenticated user on /rep/login
-      if (role === 'rep') {
-        return NextResponse.redirect(new URL('/rep', req.nextUrl.origin))
-      } else {
-        // Admin on rep login → send to admin dashboard
-        return NextResponse.redirect(new URL('/admin', req.nextUrl.origin))
-      }
-    }
+  // Login pages now redirect to /login themselves, so we don't need
+  // to handle authenticated users on login pages - they'll be redirected
+  // by the page component. But keep a quick redirect for efficiency.
+  if (isLoggedIn && (isAdminLogin || isRepLogin)) {
+    const defaultUrl = role === 'admin' ? '/admin' : '/rep'
+    return NextResponse.redirect(new URL(defaultUrl, req.nextUrl.origin))
   }
 
-  // Unauthenticated user on protected routes → redirect to role-specific login
+  // Unauthenticated user on protected routes → redirect to unified login
   if (!isLoggedIn) {
     if (isAdminRoute && !isAdminLogin) {
-      const loginUrl = new URL('/admin/login', req.nextUrl.origin)
-      loginUrl.searchParams.set('callbackUrl', pathname)
+      const loginUrl = new URL('/login', req.nextUrl.origin)
+      loginUrl.searchParams.set('callbackUrl', `${pathname}${req.nextUrl.search}`)
       return NextResponse.redirect(loginUrl)
     }
     if (isRepRoute && !isRepLogin) {
-      const loginUrl = new URL('/rep/login', req.nextUrl.origin)
-      loginUrl.searchParams.set('callbackUrl', pathname)
+      const loginUrl = new URL('/login', req.nextUrl.origin)
+      loginUrl.searchParams.set('callbackUrl', `${pathname}${req.nextUrl.search}`)
       return NextResponse.redirect(loginUrl)
     }
   }
@@ -54,15 +40,41 @@ export default auth((req) => {
       // Rep trying to access admin area → redirect to rep dashboard
       return NextResponse.redirect(new URL('/rep', req.nextUrl.origin))
     }
+
     if (isRepRoute && !isRepLogin && role === 'admin') {
-      // Admin trying to access rep area → redirect to admin dashboard
+      // Admin trying to access rep area
+      // Allow if adminViewAs param is present (view-as mode)
+      const adminViewAs = searchParams.get('adminViewAs')
+      if (adminViewAs) {
+        // Admin in view-as mode - allow access and pass URL via request header
+        // (must use request headers, not response headers, for server-side code to read)
+        const requestHeaders = new Headers(req.headers)
+        requestHeaders.set('x-url', req.nextUrl.toString())
+        return NextResponse.next({ request: { headers: requestHeaders } })
+      }
+      // Admin without view-as → redirect to admin dashboard
       return NextResponse.redirect(new URL('/admin', req.nextUrl.origin))
     }
+  }
+
+  // For rep routes, always pass the URL header for view-as support
+  if (isRepRoute && isLoggedIn) {
+    const requestHeaders = new Headers(req.headers)
+    requestHeaders.set('x-url', req.nextUrl.toString())
+    return NextResponse.next({ request: { headers: requestHeaders } })
+  }
+
+  // For buyer routes, pass URL header for view-as detection in buyer layout
+  const isBuyerRoute = pathname.startsWith('/buyer')
+  if (isBuyerRoute) {
+    const requestHeaders = new Headers(req.headers)
+    requestHeaders.set('x-url', req.nextUrl.toString())
+    return NextResponse.next({ request: { headers: requestHeaders } })
   }
 
   return NextResponse.next()
 })
 
 export const config = {
-  matcher: ['/admin/:path*', '/rep/:path*'],
+  matcher: ['/admin/:path*', '/rep/:path*', '/buyer/:path*'],
 }

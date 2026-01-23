@@ -7,6 +7,7 @@ import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import type { UserRole } from '@/lib/types/auth'
 import { AUTH_ERROR_CODES } from '@/lib/auth/config'
+import { getValidCallbackForRole } from '@/lib/utils/auth'
 
 interface LoginFormProps {
   /** If provided, only users with this role can log in */
@@ -78,25 +79,30 @@ export function LoginForm({ requiredRole, defaultRedirect }: LoginFormProps) {
         return
       }
 
-      // Get callback URL or use default redirect
-      const callbackUrl = searchParams.get('callbackUrl')
-      if (callbackUrl) {
-        router.push(callbackUrl)
-      } else if (defaultRedirect) {
-        router.push(defaultRedirect)
-      } else {
-        // Fallback: fetch session to determine role
-        const res = await fetch('/api/auth/session')
-        const session = await res.json()
-        const role = session?.user?.role
+      // Fetch session to get user's role for redirect validation
+      const res = await fetch('/api/auth/session')
+      const session = await res.json()
+      const role = session?.user?.role as UserRole | undefined
 
-        if (role === 'admin') {
-          router.push('/admin')
-        } else if (role === 'rep') {
-          router.push('/rep')
-        } else {
-          router.push('/')
-        }
+      if (!role) {
+        // Shouldn't happen after successful login, but handle gracefully
+        router.push('/')
+        router.refresh()
+        return
+      }
+
+      // When requiredRole is set, the auth config enforces role matching.
+      // For unified login (no requiredRole), validate callback against role.
+      const callbackUrl = searchParams.get('callbackUrl')
+
+      if (requiredRole) {
+        // Role-specific login: validate callback against role, then fallback to default
+        const safeRedirect = getValidCallbackForRole(callbackUrl, role) || defaultRedirect || (role === 'admin' ? '/admin' : '/rep')
+        router.push(safeRedirect)
+      } else {
+        // Unified login: validate callback against user's actual role
+        const safeRedirect = getValidCallbackForRole(callbackUrl, role)
+        router.push(safeRedirect)
       }
 
       router.refresh()
