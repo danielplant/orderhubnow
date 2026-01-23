@@ -15,7 +15,7 @@ import { prisma } from '@/lib/prisma'
 import { createAuthToken, checkTokenRateLimit, buildTokenUrl } from '@/lib/auth/tokens'
 import { sendMailWithConfig } from '@/lib/email/client'
 import { getEmailSettings } from '@/lib/data/queries/settings'
-import { logEmailSent } from '@/lib/audit/activity-logger'
+import { logEmailSent, logEmailResult } from '@/lib/audit/activity-logger'
 
 export async function POST(request: Request) {
   try {
@@ -70,36 +70,52 @@ export async function POST(request: Request) {
       : fromEmail
 
     // Send reset email
-    await sendMailWithConfig(emailSettings, {
-      from: fromAddress,
-      to: user.Email!,
-      subject: 'Password Reset Request',
-      html: `
-        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2>Password Reset</h2>
-          <p>Hi,</p>
-          <p>You requested a password reset. Click the link below to set a new password:</p>
-          <p style="margin: 24px 0;">
-            <a href="${resetUrl}" style="background-color: #0066cc; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px;">
-              Reset Password
-            </a>
-          </p>
-          <p>Or copy and paste this link into your browser:</p>
-          <p style="word-break: break-all; color: #666;">${resetUrl}</p>
-          <p style="margin-top: 24px; color: #666; font-size: 14px;">
-            This link will expire in 24 hours. If you didn't request this, you can safely ignore this email.
-          </p>
-        </div>
-      `,
-    })
+    try {
+      await sendMailWithConfig(emailSettings, {
+        from: fromAddress,
+        to: user.Email!,
+        subject: 'Password Reset Request',
+        html: `
+          <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2>Password Reset</h2>
+            <p>Hi,</p>
+            <p>You requested a password reset. Click the link below to set a new password:</p>
+            <p style="margin: 24px 0;">
+              <a href="${resetUrl}" style="background-color: #0066cc; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px;">
+                Reset Password
+              </a>
+            </p>
+            <p>Or copy and paste this link into your browser:</p>
+            <p style="word-break: break-all; color: #666;">${resetUrl}</p>
+            <p style="margin-top: 24px; color: #666; font-size: 14px;">
+              This link will expire in 24 hours. If you didn't request this, you can safely ignore this email.
+            </p>
+          </div>
+        `,
+      })
 
-    // Log the email send (non-blocking)
-    logEmailSent({
-      entityType: 'user',
-      entityId: user.ID.toString(),
-      emailType: 'password_reset',
-      recipient: user.Email!,
-    }).catch((err) => console.error('Failed to log password reset email:', err))
+      // Log the email send (non-blocking)
+      logEmailSent({
+        entityType: 'user',
+        entityId: user.ID.toString(),
+        emailType: 'password_reset',
+        recipient: user.Email!,
+      }).catch((err) => console.error('Failed to log password reset email:', err))
+    } catch (emailError) {
+      // Log the failed send (non-blocking)
+      const errorMessage = emailError instanceof Error ? emailError.message : 'Unknown error'
+      logEmailResult({
+        entityType: 'user',
+        entityId: user.ID.toString(),
+        emailType: 'password_reset',
+        recipient: user.Email!,
+        status: 'failed',
+        errorMessage,
+      }).catch((err) => console.error('Failed to log password reset email failure:', err))
+
+      console.error('Password reset email failed:', errorMessage)
+      // Don't reveal email failures to user (security)
+    }
 
     return NextResponse.json({ success: true })
   } catch (error) {

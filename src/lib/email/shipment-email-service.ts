@@ -19,6 +19,7 @@ import {
 import { getDocument } from '@/lib/storage/document-storage'
 import { getTrackingUrl } from '@/lib/types/shipment'
 import { getTrackingUrl as generateOrderTrackingUrl } from '@/lib/tokens/order-tracking'
+import { logEmailResult } from '@/lib/audit/activity-logger'
 import type { Carrier } from '@/lib/types/shipment'
 
 // ============================================================================
@@ -72,6 +73,8 @@ export interface SendShipmentEmailsResult {
 }
 
 export interface SendTrackingUpdateOptions {
+  shipmentId: string
+  orderId: string
   orderNumber: string
   buyerName: string
   customerEmail: string
@@ -142,18 +145,20 @@ export async function sendShipmentEmails(
   }
 
   // 1. Send customer confirmation email
-  if (options.notifyCustomer && options.customerEmail) {
+  // Check global toggle AND per-shipment option
+  if (options.notifyCustomer && options.customerEmail && emailConfig.SendShipmentConfirmation) {
     try {
       const customerHtml = shipmentConfirmationHtml(emailData)
-      
-      // Get invoice PDF if attachment requested
+
+      // Get attachments based on settings toggles
       const attachments: Array<{
         filename: string
         content: Buffer
         contentType: string
       }> = []
-      
-      if (options.attachInvoice) {
+
+      // Check AttachInvoicePdf setting AND per-shipment option
+      if (options.attachInvoice && emailConfig.AttachInvoicePdf) {
         const invoicePdf = await getDocument(options.shipmentId, 'shipping_invoice')
         if (invoicePdf) {
           attachments.push({
@@ -164,7 +169,8 @@ export async function sendShipmentEmails(
         }
       }
 
-      if (options.attachPackingSlip) {
+      // Check AttachPackingSlipPdf setting AND per-shipment option
+      if (options.attachPackingSlip && emailConfig.AttachPackingSlipPdf) {
         const packingSlipPdf = await getDocument(options.shipmentId, 'packing_slip')
         if (packingSlipPdf) {
           attachments.push({
@@ -188,14 +194,38 @@ export async function sendShipmentEmails(
       })
 
       result.customerEmailSent = true
+
+      // Log successful send
+      await logEmailResult({
+        entityType: 'shipment',
+        entityId: options.shipmentId,
+        orderId: options.orderId,
+        orderNumber: options.orderNumber,
+        emailType: 'shipment_confirmation',
+        recipient: options.customerEmail,
+        status: 'sent',
+      })
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error'
       result.errors.push(`Customer email failed: ${message}`)
+
+      // Log failed send
+      await logEmailResult({
+        entityType: 'shipment',
+        entityId: options.shipmentId,
+        orderId: options.orderId,
+        orderNumber: options.orderNumber,
+        emailType: 'shipment_confirmation',
+        recipient: options.customerEmail,
+        status: 'failed',
+        errorMessage: message,
+      })
     }
   }
 
   // 2. Send rep notification email
-  if (options.notifyRep) {
+  // Check global toggle AND per-shipment option
+  if (options.notifyRep && emailConfig.SendShipmentRepNotify) {
     const repEmail = options.salesRepEmail || emailConfig.SalesTeamEmails
 
     if (repEmail) {
@@ -218,9 +248,32 @@ export async function sendShipmentEmails(
         })
 
         result.repEmailSent = true
+
+        // Log successful send
+        await logEmailResult({
+          entityType: 'shipment',
+          entityId: options.shipmentId,
+          orderId: options.orderId,
+          orderNumber: options.orderNumber,
+          emailType: 'rep_notification',
+          recipient: repEmail,
+          status: 'sent',
+        })
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown error'
         result.errors.push(`Rep email failed: ${message}`)
+
+        // Log failed send
+        await logEmailResult({
+          entityType: 'shipment',
+          entityId: options.shipmentId,
+          orderId: options.orderId,
+          orderNumber: options.orderNumber,
+          emailType: 'rep_notification',
+          recipient: repEmail,
+          status: 'failed',
+          errorMessage: message,
+        })
       }
     }
   }
@@ -245,12 +298,17 @@ export async function sendShipmentEmails(
  */
 export async function sendTrackingUpdateEmail(
   options: SendTrackingUpdateOptions
-): Promise<{ sent: boolean; error?: string }> {
+): Promise<{ sent: boolean; skipped?: boolean; error?: string }> {
   try {
     // Get email config from DB
     const emailConfig = await getEmailSettings()
     if (!emailConfig.FromEmail) {
       return { sent: false, error: 'From email not configured. Set in Admin → Settings → Email.' }
+    }
+
+    // Check if tracking updates are enabled
+    if (!emailConfig.SendTrackingUpdates) {
+      return { sent: false, skipped: true }
     }
 
     const trackingUrl = getTrackingUrl(options.carrier, options.trackingNumber) || undefined
@@ -273,11 +331,35 @@ export async function sendTrackingUpdateEmail(
       html,
     })
 
+    // Log successful send
+    await logEmailResult({
+      entityType: 'shipment',
+      entityId: options.shipmentId,
+      orderId: options.orderId,
+      orderNumber: options.orderNumber,
+      emailType: 'tracking_update',
+      recipient: options.customerEmail,
+      status: 'sent',
+    })
+
     console.log(`Tracking update email sent for ${options.orderNumber}`)
     return { sent: true }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error'
     console.error('Tracking update email error:', message)
+
+    // Log failed send
+    await logEmailResult({
+      entityType: 'shipment',
+      entityId: options.shipmentId,
+      orderId: options.orderId,
+      orderNumber: options.orderNumber,
+      emailType: 'tracking_update',
+      recipient: options.customerEmail,
+      status: 'failed',
+      errorMessage: message,
+    })
+
     return { sent: false, error: message }
   }
 }

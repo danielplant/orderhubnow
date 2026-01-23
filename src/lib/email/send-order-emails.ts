@@ -10,7 +10,7 @@ import { customerConfirmationHtml, salesNotificationHtml } from './templates'
 import { generatePdf } from '@/lib/pdf/generate'
 import { generateOrderConfirmationHtml } from '@/lib/pdf/order-confirmation'
 import { getEmailSettings, getCompanySettings } from '@/lib/data/queries/settings'
-import { logEmailSent } from '@/lib/audit/activity-logger'
+import { logEmailSent, logEmailResult } from '@/lib/audit/activity-logger'
 import type { EmailSettingsRecord } from '@/lib/types/settings'
 
 interface OrderEmailData {
@@ -210,7 +210,20 @@ export async function sendOrderEmails(data: OrderEmailData, isUpdate = false): P
         recipient: data.customerEmail,
       }).catch((err) => console.error('Failed to log customer email:', err))
     } catch (error) {
-      result.errors.push(`Customer email failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+      result.errors.push(`Customer email failed: ${errorMessage}`)
+
+      // Log the failed send (non-blocking)
+      logEmailResult({
+        entityType: 'order',
+        entityId: data.orderId,
+        orderId: data.orderId,
+        orderNumber: data.orderNumber,
+        emailType: isUpdate ? 'order_update' : 'order_confirmation',
+        recipient: data.customerEmail,
+        status: 'failed',
+        errorMessage,
+      }).catch((err) => console.error('Failed to log customer email failure:', err))
     }
   }
 
@@ -249,7 +262,20 @@ export async function sendOrderEmails(data: OrderEmailData, isUpdate = false): P
         recipient: salesEmails,
       }).catch((err) => console.error('Failed to log sales email:', err))
     } catch (error) {
-      result.errors.push(`Sales email failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+      result.errors.push(`Sales email failed: ${errorMessage}`)
+
+      // Log the failed send (non-blocking)
+      logEmailResult({
+        entityType: 'order',
+        entityId: data.orderId,
+        orderId: data.orderId,
+        orderNumber: data.orderNumber,
+        emailType: 'sales_notification',
+        recipient: salesEmails,
+        status: 'failed',
+        errorMessage,
+      }).catch((err) => console.error('Failed to log sales email failure:', err))
     }
   }
 

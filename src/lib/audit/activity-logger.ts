@@ -360,7 +360,42 @@ export type EmailType =
   | 'password_reset'
 
 /**
- * Log email sent
+ * Log email result (sent or failed)
+ */
+export async function logEmailResult(params: {
+  entityType: EntityType
+  entityId: string
+  orderId?: string
+  orderNumber?: string
+  emailType: EmailType
+  recipient: string
+  status: 'sent' | 'failed'
+  errorMessage?: string
+  performedBy?: string
+}): Promise<void> {
+  const description = params.status === 'sent'
+    ? `${params.emailType.replace(/_/g, ' ')} sent to ${params.recipient}`
+    : `${params.emailType.replace(/_/g, ' ')} failed to ${params.recipient}`
+
+  await logActivity({
+    entityType: params.entityType,
+    entityId: params.entityId,
+    action: 'email_sent',
+    description,
+    newValues: {
+      emailType: params.emailType,
+      recipient: params.recipient,
+      status: params.status,
+      errorMessage: params.errorMessage,
+    },
+    performedBy: params.performedBy,
+    orderNumber: params.orderNumber,
+    orderId: params.orderId,
+  })
+}
+
+/**
+ * Log email sent (backwards compatible wrapper)
  */
 export async function logEmailSent(params: {
   entityType: EntityType
@@ -371,19 +406,7 @@ export async function logEmailSent(params: {
   recipient: string
   performedBy?: string
 }): Promise<void> {
-  await logActivity({
-    entityType: params.entityType,
-    entityId: params.entityId,
-    action: 'email_sent',
-    description: `${params.emailType.replace(/_/g, ' ')} sent to ${params.recipient}`,
-    newValues: {
-      emailType: params.emailType,
-      recipient: params.recipient,
-    },
-    performedBy: params.performedBy,
-    orderNumber: params.orderNumber,
-    orderId: params.orderId,
-  })
+  await logEmailResult({ ...params, status: 'sent' })
 }
 
 /**
