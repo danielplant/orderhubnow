@@ -14,6 +14,19 @@ echo "  DEPLOYMENT SCRIPT"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
+# Pre-flight: Check if dev server is running
+# The dev server writes to .next and can corrupt production builds
+if lsof -i :3000 -sTCP:LISTEN >/dev/null 2>&1; then
+    echo "❌ ERROR: Dev server detected on port 3000"
+    echo ""
+    echo "   The dev server modifies .next while running, which can"
+    echo "   corrupt production builds and cause missing page errors."
+    echo ""
+    echo "   Please stop 'npm run dev' before deploying."
+    echo ""
+    exit 1
+fi
+
 # Step 1: Check for uncommitted changes
 echo "[1/8] Checking git status..."
 if [[ -n $(git status --porcelain) ]]; then
