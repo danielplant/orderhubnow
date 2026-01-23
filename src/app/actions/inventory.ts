@@ -9,7 +9,8 @@ export type {
 } from "@/lib/types";
 
 import type { Product, ProductVariant, DashboardMetrics } from "@/lib/types";
-import { sortBySize } from "@/lib/utils/size-sort";
+import { sortBySize, loadSizeOrderConfig } from "@/lib/utils/size-sort";
+import { getBaseSku } from "@/lib/utils";
 
 // Internal Shopify API types (not exported)
 interface ShopifyProductEdge {
@@ -234,16 +235,6 @@ function parsePrice(value: string | null | undefined): number {
   return isNaN(parsed) ? 0 : parsed;
 }
 
-// Helper to extract base SKU from variant SKU
-function extractBaseSku(variantSku: string): string {
-  if (!variantSku) return "Unknown";
-  // SKU format: PREFIX-STYLE-COLOR-SIZE (e.g., "2PC-582P-SM-2/3")
-  // We want to return everything except the last segment (size)
-  const parts = variantSku.split("-");
-  if (parts.length <= 1) return variantSku;
-  // Remove the last part (size) and rejoin
-  return parts.slice(0, -1).join("-");
-}
 
 // Helper to delay execution
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -468,7 +459,7 @@ export async function getProductsByCategory(category: string): Promise<Product[]
   const groupedByBaseSku = new Map<string, VariantWithParent[]>();
 
   allVariants.forEach((item) => {
-    const baseSku = extractBaseSku(item.variant.sku);
+    const baseSku = getBaseSku(item.variant.sku, item.variant.title);
     if (!groupedByBaseSku.has(baseSku)) {
       groupedByBaseSku.set(baseSku, []);
     }
@@ -514,13 +505,9 @@ export async function getProductsByCategory(category: string): Promise<Product[]
     availableItems.forEach(({ variant }) => {
       if (seenSkus.has(variant.sku)) return; // Skip duplicates
       seenSkus.add(variant.sku);
-      
-      // Extract size from SKU suffix (matches .NET logic: PREFIX-STYLE-COLOR-SIZE)
-      const skuParts = variant.sku.split("-");
-      const sizeFromSku = skuParts.length > 1 ? skuParts[skuParts.length - 1] : "OS";
 
       variants.push({
-        size: sizeFromSku,
+        size: variant.title || "OS",
         sku: variant.sku,
         available: Math.max(0, variant.inventoryQuantity),
         onRoute: 0,
@@ -557,6 +544,9 @@ export async function getProductsByCategory(category: string): Promise<Product[]
   console.log(`\n--- CATEGORY PRODUCTS: ${category} ---`);
   console.log(`Found ${products.length} products (grouped by base SKU)`);
   console.log("-----------------------------------\n");
+
+  // Load size order config from DB before sorting
+  await loadSizeOrderConfig();
 
   // Sort variants by size using Limeapple's specific size sequence
   return products.map((product) => ({
@@ -812,7 +802,7 @@ export async function getPreOrderProductsByCategory(category: string): Promise<P
   const groupedByBaseSku = new Map<string, VariantWithParent[]>();
 
   allVariants.forEach((item) => {
-    const baseSku = extractBaseSku(item.variant.sku);
+    const baseSku = getBaseSku(item.variant.sku, item.variant.title);
     if (!groupedByBaseSku.has(baseSku)) {
       groupedByBaseSku.set(baseSku, []);
     }
@@ -849,13 +839,9 @@ export async function getPreOrderProductsByCategory(category: string): Promise<P
       if (seenSkus.has(variant.sku)) return;
       seenSkus.add(variant.sku);
 
-      // Extract size from SKU suffix
-      const skuParts = variant.sku.split("-");
-      const sizeFromSku = skuParts.length > 1 ? skuParts[skuParts.length - 1] : "OS";
-
       // onRoute set to 0 for now - future SQL sync will provide this data
       variants.push({
-        size: sizeFromSku,
+        size: variant.title || "OS",
         sku: variant.sku,
         available: Math.max(0, variant.inventoryQuantity),
         onRoute: 0,
@@ -885,6 +871,9 @@ export async function getPreOrderProductsByCategory(category: string): Promise<P
   console.log(`Categories found: ${Array.from(foundCategories).join(", ") || "none"}`);
   console.log(`Matched products: ${products.length}`);
   console.log("----------------------------------------------\n");
+
+  // Load size order config from DB before sorting
+  await loadSizeOrderConfig();
 
   // Sort variants by size using Limeapple's specific size sequence
   return products.map((product) => ({

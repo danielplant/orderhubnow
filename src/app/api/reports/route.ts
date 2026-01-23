@@ -9,11 +9,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth/providers';
 import { prisma } from '@/lib/prisma';
-import { getEffectiveQuantity } from '@/lib/utils';
+import { getEffectiveQuantity, getBaseSku } from '@/lib/utils';
 import type { ReportType, FilterState } from '@/lib/types/report';
 import {
-  parseSizeFromSku,
   getSizeBucketKey,
+  normalizeSizeToBucket,
 } from '@/lib/data/mappers/dashboard';
 import {
   getExceptionReport,
@@ -148,6 +148,7 @@ async function getPOSoldReport(
 ): Promise<ReportResult> {
   interface POSoldRawRow {
     SKU: string;
+    Size: string | null;
     CategoryID: number | null;
     CategoryName: string;
     Quantity: number;
@@ -156,17 +157,18 @@ async function getPOSoldReport(
   const rawResults = await prisma.$queryRaw<POSoldRawRow[]>`
     SELECT
       S.SkuID AS SKU,
+      S.Size AS Size,
       S.CategoryID AS CategoryID,
       CONCAT(SC.Name, ' (', CASE WHEN SC.IsPreOrder = 1 THEN 'PreOrder' ELSE 'ATS' END, ')') AS CategoryName,
       CAST(COALESCE(SUM(RIL.CommittedQuantity), 0) AS INT) AS Quantity
     FROM RawSkusFromShopify RS
-    JOIN RawSkusInventoryLevelFromShopify RIL 
+    JOIN RawSkusInventoryLevelFromShopify RIL
       ON CAST(RIL.ParentId AS BIGINT) = RS.ShopifyId
-    JOIN Sku S 
+    JOIN Sku S
       ON S.ShopifyProductVariantId = RS.ShopifyId
-    JOIN SkuCategories SC 
+    JOIN SkuCategories SC
       ON SC.ID = S.CategoryID
-    GROUP BY S.SkuID, S.CategoryID, SC.Name, SC.IsPreOrder
+    GROUP BY S.SkuID, S.Size, S.CategoryID, SC.Name, SC.IsPreOrder
     ORDER BY S.CategoryID, S.SkuID
   `;
 
@@ -192,8 +194,7 @@ async function getPOSoldReport(
   >();
 
   for (const raw of rawResults) {
-    const parts = raw.SKU.split('-');
-    const baseSku = parts.length > 1 ? parts.slice(0, -1).join('-') : raw.SKU;
+    const baseSku = getBaseSku(raw.SKU, raw.Size);
     const key = `${baseSku}|${raw.CategoryName}`;
 
     let row = rowMap.get(key);
@@ -208,9 +209,9 @@ async function getPOSoldReport(
       rowMap.set(key, row);
     }
 
-    const size = parseSizeFromSku(raw.SKU);
-    if (size) {
-      const bucketKey = getSizeBucketKey(size);
+    const normalizedSize = normalizeSizeToBucket(raw.Size);
+    if (normalizedSize) {
+      const bucketKey = getSizeBucketKey(normalizedSize);
       if (bucketKey && bucketKey in row && bucketKey !== 'sku' && bucketKey !== 'categoryName' && bucketKey !== 'total') {
         (row as unknown as Record<string, number>)[bucketKey] += raw.Quantity;
       }

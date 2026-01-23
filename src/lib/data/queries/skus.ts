@@ -1,6 +1,6 @@
 import { prisma } from '@/lib/prisma'
-import { parsePrice, parseSkuId, resolveColor } from '@/lib/utils'
-import { sortBySize, extractSize } from '@/lib/utils/size-sort'
+import { parsePrice, getBaseSku, resolveColor } from '@/lib/utils'
+import { sortBySize, extractSize, loadSizeOrderConfig } from '@/lib/utils/size-sort'
 import type { Product, ProductVariant } from '@/lib/types'
 
 /**
@@ -29,7 +29,7 @@ export async function getSkusByCategory(categoryId: number): Promise<Product[]> 
   const grouped = new Map<string, Array<typeof skus[0] & { baseSku: string; size: string }>>()
 
   for (const sku of skus) {
-    const { baseSku } = parseSkuId(sku.SkuID)
+    const baseSku = getBaseSku(sku.SkuID, sku.Size)
     const size = extractSize(sku.Size || '')
     const skuWithParsed = { ...sku, baseSku, size }
 
@@ -42,6 +42,9 @@ export async function getSkusByCategory(categoryId: number): Promise<Product[]> 
     }
     grouped.get(groupKey)!.push(skuWithParsed)
   }
+
+  // Load size order config from DB before sorting
+  await loadSizeOrderConfig()
 
   // Transform each group into a Product
   const products: Product[] = []

@@ -4,7 +4,7 @@
  */
 
 import { prisma } from '@/lib/prisma';
-import { getEffectiveQuantity } from '@/lib/utils';
+import { getEffectiveQuantity, getBaseSku } from '@/lib/utils';
 import {
   type TimePeriod,
   type DateRange,
@@ -17,8 +17,8 @@ import {
   getDateRangeForPeriod,
   getPriorPeriodRange,
   getTrendDirection,
-  parseSizeFromSku,
   getSizeBucketKey,
+  normalizeSizeToBucket,
   createEmptyPOSoldRow,
 } from '../mappers/dashboard';
 
@@ -301,17 +301,18 @@ export async function getPOSoldData(): Promise<POSoldRow[]> {
   const rawResults = await prisma.$queryRaw<POSoldRawRow[]>`
     SELECT
       S.SkuID AS SKU,
+      S.Size AS Size,
       S.CategoryID AS CategoryID,
       CONCAT(SC.Name, ' (', CASE WHEN SC.IsPreOrder = 1 THEN 'PreOrder' ELSE 'ATS' END, ')') AS CategoryName,
       CAST(COALESCE(SUM(RIL.CommittedQuantity), 0) AS INT) AS Quantity
     FROM RawSkusFromShopify RS
-    JOIN RawSkusInventoryLevelFromShopify RIL 
+    JOIN RawSkusInventoryLevelFromShopify RIL
       ON CAST(RIL.ParentId AS BIGINT) = RS.ShopifyId
-    JOIN Sku S 
+    JOIN Sku S
       ON S.ShopifyProductVariantId = RS.ShopifyId
-    JOIN SkuCategories SC 
+    JOIN SkuCategories SC
       ON SC.ID = S.CategoryID
-    GROUP BY S.SkuID, S.CategoryID, SC.Name, SC.IsPreOrder
+    GROUP BY S.SkuID, S.Size, S.CategoryID, SC.Name, SC.IsPreOrder
     ORDER BY S.CategoryID, S.SkuID
   `;
   
@@ -319,23 +320,21 @@ export async function getPOSoldData(): Promise<POSoldRow[]> {
   const rowMap = new Map<string, POSoldRow>();
   
   for (const raw of rawResults) {
-    // Extract base SKU (without size suffix) for grouping
-    const parts = raw.SKU.split('-');
-    // Remove the last part (size) to get the base SKU for grouping
-    const baseSku = parts.length > 1 ? parts.slice(0, -1).join('-') : raw.SKU;
+    // Extract base SKU using the Size field for accurate parsing
+    const baseSku = getBaseSku(raw.SKU, raw.Size);
     const key = `${baseSku}|${raw.CategoryName}`;
-    
+
     // Get or create row
     let row = rowMap.get(key);
     if (!row) {
       row = createEmptyPOSoldRow(baseSku, raw.CategoryName);
       rowMap.set(key, row);
     }
-    
-    // Determine which size bucket this goes into
-    const size = parseSizeFromSku(raw.SKU);
-    if (size) {
-      const bucketKey = getSizeBucketKey(size);
+
+    // Determine which size bucket this goes into (use Size field directly)
+    const normalizedSize = normalizeSizeToBucket(raw.Size);
+    if (normalizedSize) {
+      const bucketKey = getSizeBucketKey(normalizedSize);
       if (bucketKey && bucketKey !== 'sku' && bucketKey !== 'categoryName' && bucketKey !== 'total') {
         (row[bucketKey] as number) += raw.Quantity;
       }

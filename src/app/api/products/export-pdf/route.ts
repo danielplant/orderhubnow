@@ -15,8 +15,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/lib/auth/providers'
 import { prisma } from '@/lib/prisma'
 import { generatePdf, wrapHtml, formatDate } from '@/lib/pdf/generate'
-import { parsePrice, parseSkuId, resolveColor } from '@/lib/utils'
-import { extractSize, sortBySize } from '@/lib/utils/size-sort'
+import { parsePrice, getBaseSku, resolveColor } from '@/lib/utils'
+import { extractSize, sortBySize, loadSizeOrderConfig } from '@/lib/utils/size-sort'
 import { getImageDataUrl } from '@/lib/utils/pdf-images'
 import type { CurrencyMode } from '@/lib/types/export'
 
@@ -149,7 +149,7 @@ export async function GET(request: NextRequest) {
 
     // Parse each SKU to get baseSku and size, then group by baseSku
     const skusWithParsed = rawSkus.map((sku) => {
-      const { baseSku } = parseSkuId(sku.SkuID)
+      const baseSku = getBaseSku(sku.SkuID, sku.Size)
       const size = extractSize(sku.Size || '')
       return { ...sku, baseSku, size }
     })
@@ -162,6 +162,9 @@ export async function GET(request: NextRequest) {
       }
       grouped.get(sku.baseSku)!.push(sku)
     }
+
+    // Load size order config from DB before sorting
+    await loadSizeOrderConfig()
 
     // Sort each group by size, then flatten with position flags
     const skus: Array<

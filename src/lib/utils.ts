@@ -89,25 +89,31 @@ export function parsePrice(value: string | null | undefined): number {
 }
 
 /**
- * Parse SKU ID to extract BaseSku and ParsedSize.
- * Matches .NET logic from the vw_SkuWithSize SQL view:
- * - ParsedSize = text after last hyphen
- * - BaseSku = text before last hyphen
- * 
+ * Extract the base SKU from a full SKU ID.
+ *
+ * PREFERRED: Pass the Size field from the database to reliably strip
+ * the size suffix, even for complex sizes like "M/L(7-16)" that contain hyphens.
+ *
  * Examples:
- *   "ABC-123-S"  → { baseSku: "ABC-123", parsedSize: "S" }
- *   "ABC-123-2T" → { baseSku: "ABC-123", parsedSize: "2T" }
- *   "ABC123"     → { baseSku: "ABC123", parsedSize: "ABC123" }
+ *   getBaseSku("2PC-671P-M/L(7-16)", "M/L(7-16)") → "2PC-671P"
+ *   getBaseSku("ABC-123-S", "S") → "ABC-123"
+ *   getBaseSku("ABC-123-2T", "2T") → "ABC-123"
+ *   getBaseSku("ABC-123-S") → "ABC-123" (fallback, less reliable)
  */
-export function parseSkuId(skuId: string): { baseSku: string; parsedSize: string } {
-  const lastHyphenIndex = skuId.lastIndexOf('-')
-  if (lastHyphenIndex > 0) {
-    return {
-      baseSku: skuId.substring(0, lastHyphenIndex),
-      parsedSize: skuId.substring(lastHyphenIndex + 1),
+export function getBaseSku(skuId: string, size?: string | null): string {
+  if (!skuId) return ''
+
+  // If size field is provided, strip it from the end
+  if (size) {
+    const suffix = '-' + size
+    if (skuId.endsWith(suffix)) {
+      return skuId.slice(0, -suffix.length)
     }
   }
-  return { baseSku: skuId, parsedSize: skuId }
+
+  // Fallback: last hyphen (legacy behavior, may break on complex sizes)
+  const lastHyphen = skuId.lastIndexOf('-')
+  return lastHyphen > 0 ? skuId.substring(0, lastHyphen) : skuId
 }
 
 // ============================================================================

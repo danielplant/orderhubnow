@@ -149,6 +149,7 @@ export type POSoldSizeColumn = typeof PO_SOLD_SIZE_COLUMNS[number];
 // Raw result from SQL query
 export interface POSoldRawRow {
   SKU: string;
+  Size: string | null;
   CategoryID: number;
   CategoryName: string;
   Quantity: number;
@@ -188,61 +189,49 @@ export interface POSoldRow {
 }
 
 /**
- * Parse size from SKU ID and return the bucket key.
- * Matches .NET logic in POSoldReport.aspx.cs
+ * Normalize a Size field value to a bucket-compatible key.
+ * Handles formats like:
+ *   "XS/S (6-8)" → "XS/S"
+ *   "M/L - size 7 to 16" → "M/L"
+ *   "S (7-8)" → "S"
+ *   "JR-S" → "S"
+ *   "6-12M" → "12M-24M" (baby sizes)
  */
-export function parseSizeFromSku(skuId: string): string | null {
-  // SKU format typically: STYLE-COLOR-SIZE or similar
-  // The size is usually the last segment after the last hyphen
-  const parts = skuId.split('-');
-  if (parts.length < 2) return null;
-  
-  const lastPart = parts[parts.length - 1].toUpperCase().trim();
-  
-  // Map various size formats to our bucket keys
-  const sizeMap: Record<string, string> = {
-    '2': '2',
-    '3': '3',
-    '2/3': '2/3',
-    '4': '4',
-    '5': '5',
-    '4/5': '4/5',
-    '6': '6',
-    '5/6': '5/6',
-    '7': '7',
-    '8': '8',
-    '7/8': '7/8',
-    '10': '10',
-    '12': '12',
-    '10/12': '10/12',
-    '14': '14',
-    '16': '16',
-    '14/16': '14/16',
-    '6/6X': '6/6X',
-    '6X': '6/6X',
-    '2T-4T': '2T-4T',
-    '2T': '2T-4T',
-    '3T': '2T-4T',
-    '4T': '2T-4T',
-    '4-6': '4-6',
-    '7-16': '7-16',
-    '7-10': '7-10',
-    'M/L': 'M/L',
-    'M': 'M/L',
-    'L': 'M/L',
-    'XS/S': 'XS/S',
-    'XS': 'XS/S',
-    'S': 'XS/S',
-    '12M-24M': '12M-24M',
-    '12M': '12M-24M',
-    '18M': '12M-24M',
-    '24M': '12M-24M',
-    'O/S': 'O/S',
-    'OS': 'O/S',
-    'ONE SIZE': 'O/S',
-  };
-  
-  return sizeMap[lastPart] || null;
+export function normalizeSizeToBucket(size: string | null): string | null {
+  if (!size) return null;
+
+  const s = size.toUpperCase().trim();
+
+  // Handle baby month sizes (e.g., "6-12M", "12-18M")
+  if (/^\d+-\d+M$/.test(s)) {
+    return '12M-24M';
+  }
+
+  // Handle "JR-X" prefix sizes
+  if (s.startsWith('JR-')) {
+    return s.substring(3); // "JR-S" → "S"
+  }
+
+  // Extract base size before parenthesis or dash-description
+  // "XS/S (6-8)" → "XS/S"
+  // "M/L - size 7 to 16" → "M/L"
+  const match = s.match(/^([A-Z0-9/]+)/);
+  if (match) {
+    const base = match[1];
+
+    // Map individual letters to combined sizes
+    const letterMap: Record<string, string> = {
+      'XS': 'XS/S',
+      'S': 'XS/S',
+      'M': 'M/L',
+      'L': 'M/L',
+      '6X': '6/6X',
+    };
+
+    return letterMap[base] || base;
+  }
+
+  return null;
 }
 
 /**

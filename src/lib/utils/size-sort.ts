@@ -11,6 +11,8 @@
  * When no config exists, falls back to DEFAULT_SIZE_ORDER.
  */
 
+import { prisma } from '@/lib/prisma'
+
 // ============================================================================
 // Default Size Order (fallback when no config exists)
 // ============================================================================
@@ -33,7 +35,7 @@ export const DEFAULT_SIZE_ORDER: string[] = [
   // Letter sizes (small to large)
   'XXXS', 'XXS', 'XS', 'S', 'M', 'M/L', 'L', 'XL', 'XXL',
   // Letter sizes with parenthetical numeric (small to large)
-  'XS/S(4-6)', 'XS(6/6X)', 'S(7/8)', 'M/L(7-16)', 'M(10/12)', 'L(14/16)',
+  'XS/S(4-6)', 'XS/S(6-8)', 'XS(6/6X)', 'S(7/8)', 'M/L(7-16)', 'M/L(10-16)', 'M(10/12)', 'L(14/16)',
   // Junior sizes
   'JR-XS', 'JR-S', 'JR-M', 'JR-L', 'JR-XL',
   // One-size
@@ -73,6 +75,32 @@ export function setSizeOrderCache(sizes: string[]): void {
  */
 function getSizeOrder(): string[] {
   return cachedSizeOrder ?? DEFAULT_SIZE_ORDER;
+}
+
+/**
+ * Load size order configuration from database and cache it.
+ * Call this before sortBySize() in query functions to ensure
+ * the admin-configured size order is used.
+ *
+ * Safe to call multiple times - only loads if cache is empty.
+ */
+export async function loadSizeOrderConfig(): Promise<void> {
+  // Skip if already cached
+  if (cachedSizeOrder !== null) return;
+
+  try {
+    const row = await prisma.sizeOrderConfig.findFirst();
+    if (row?.Sizes) {
+      const sizes = JSON.parse(row.Sizes) as string[];
+      cachedSizeOrder = sizes;
+    } else {
+      // No config in DB, use defaults (and cache them to avoid repeated queries)
+      cachedSizeOrder = DEFAULT_SIZE_ORDER;
+    }
+  } catch (err) {
+    console.error('[loadSizeOrderConfig] Failed to load, using defaults:', err);
+    cachedSizeOrder = DEFAULT_SIZE_ORDER;
+  }
 }
 
 /**

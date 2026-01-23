@@ -13,8 +13,8 @@
 
 import { prisma } from '@/lib/prisma'
 import type { Product, ProductVariant } from '@/lib/types/inventory'
-import { sortBySize, extractSize } from '@/lib/utils/size-sort'
-import { resolveColor } from '@/lib/utils'
+import { sortBySize, extractSize, loadSizeOrderConfig } from '@/lib/utils/size-sort'
+import { resolveColor, getBaseSku } from '@/lib/utils'
 
 // ============================================================================
 // Types
@@ -101,16 +101,6 @@ export async function getPreOrderCategoryById(
 // Product Queries
 // ============================================================================
 
-/**
- * Extract base SKU from full SKU.
- * e.g., "744-MU-7/8" → "744-MU" (base), "7/8" (size)
- */
-function extractBaseSku(fullSku: string): string {
-  // Find the last dash that separates base from size
-  const lastDashIndex = fullSku.lastIndexOf('-')
-  if (lastDashIndex === -1) return fullSku
-  return fullSku.substring(0, lastDashIndex)
-}
 
 /**
  * Get pre-order products with variants for a category.
@@ -168,7 +158,7 @@ export async function getPreOrderProductsWithVariants(
   >()
 
   for (const sku of skus) {
-    const baseSku = extractBaseSku(sku.SkuID)
+    const baseSku = getBaseSku(sku.SkuID, sku.Size)
     const imageUrl = sku.ShopifyImageURL ?? ''
     const groupKey = `${baseSku}::${imageUrl}`
 
@@ -177,6 +167,9 @@ export async function getPreOrderProductsWithVariants(
     }
     productMap.get(groupKey)!.skus.push(sku)
   }
+
+  // Load size order config from DB before sorting
+  await loadSizeOrderConfig()
 
   // Convert to Product[] format
   const products: Product[] = []
