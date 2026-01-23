@@ -81,14 +81,20 @@ export async function GET() {
       await Promise.all(batch.map(async (sku) => {
         if (!sku.ShopifyImageURL) return
 
-        const expectedCacheKey = generateThumbnailCacheKey(
+        // Use the stored cache key from ThumbnailPath if available
+        // This reflects what was ACTUALLY generated, not what WOULD be generated with current settings
+        const storedCacheKey = extractCacheKey(sku.ThumbnailPath)
+
+        // For checking existing thumbnails, use stored cache key
+        // For new images (no ThumbnailPath), use new cache key
+        const cacheKeyToCheck = storedCacheKey || generateThumbnailCacheKey(
           sku.ShopifyImageURL,
           settings.thumbnailSettingsVersion
         )
 
         // Check each size in parallel
         await Promise.all(sizesToCheck.map(async (size) => {
-          const s3Key = `thumbnails/${size}/${expectedCacheKey}.png`
+          const s3Key = `thumbnails/${size}/${cacheKeyToCheck}.png`
           const exists = await s3Exists(s3Key)
 
           if (exists) {
