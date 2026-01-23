@@ -542,7 +542,7 @@ export async function getPreOrderProductsByCollection(collectionId: number): Pro
       skuGroup.map((sku) => ({
         size: sku.size,
         sku: sku.SkuID,
-        available: sku.OnRoute ?? 0, // Use OnRoute for PreOrder
+        available: sku.Quantity ?? 0,
         onRoute: sku.OnRoute ?? 0,
         priceCad: parsePrice(sku.PriceCAD),
         priceUsd: parsePrice(sku.PriceUSD),
