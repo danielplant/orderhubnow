@@ -578,6 +578,14 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
     // Send order confirmation emails (non-blocking) unless skipEmail is set
     // When skipEmail is true, emails are sent via the confirmation popup instead
     if (!data.skipEmail) {
+      // Look up rep name and email for the order emails
+      const rep = await prisma.reps.findUnique({
+        where: { ID: parseInt(data.salesRepId) },
+        select: { Name: true, Email1: true, Email2: true },
+      })
+      const salesRepName = rep?.Name || ''
+      const salesRepEmail = rep?.Email1 || rep?.Email2 || undefined
+
       // Send email for each created order
       for (const order of createdOrders) {
         sendOrderEmails({
@@ -587,7 +595,8 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
           buyerName: data.buyerName,
           customerEmail: data.customerEmail,
           customerPhone: data.customerPhone,
-          salesRep: data.storeName, // Will be looked up by email service
+          salesRep: salesRepName,
+          salesRepEmail,
           orderAmount: order.orderAmount,
           currency: data.currency,
           shipStartDate: order.shipWindowStart ? new Date(order.shipWindowStart) : new Date(data.shipStartDate),
@@ -744,12 +753,13 @@ export async function updateOrder(
     revalidatePath('/admin/orders')
     revalidatePath('/rep/orders')
 
-    // Look up the rep name for email
+    // Look up the rep name and email for email
     const repForEmail = await prisma.reps.findUnique({
       where: { ID: parseInt(headerData.salesRepId) },
-      select: { Name: true },
+      select: { Name: true, Email1: true, Email2: true },
     })
     const salesRepName = repForEmail?.Name ?? ''
+    const salesRepEmail = repForEmail?.Email1 || repForEmail?.Email2 || undefined
 
     // Send update notification emails (async, non-blocking)
     // Email settings control whether update notifications are actually sent
@@ -763,6 +773,7 @@ export async function updateOrder(
         customerEmail: headerData.customerEmail,
         customerPhone: headerData.customerPhone,
         salesRep: salesRepName,
+        salesRepEmail,
         orderAmount: orderAmount,
         currency: currency,
         shipStartDate: new Date(headerData.shipStartDate),

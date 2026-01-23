@@ -405,6 +405,7 @@ export async function createShipment(
           attachInvoice: input.attachInvoice ?? false,
           attachPackingSlip: input.attachPackingSlip ?? false,
           notifyRep: input.notifyRep ?? false,
+          performedBy: userName,
         })
 
         // Track what was sent
@@ -1531,7 +1532,8 @@ export async function resendShipmentEmail(
   input: ResendShipmentEmailInput
 ): Promise<ResendShipmentEmailResult> {
   try {
-    await requireAdmin()
+    const session = await requireAdmin()
+    const userName = session.user.name || session.user.loginId || 'Admin'
 
     // Fetch shipment with all needed data
     const shipment = await prisma.shipments.findUnique({
@@ -1666,6 +1668,7 @@ export async function resendShipmentEmail(
       attachInvoice: input.attachInvoice,
       attachPackingSlip: false,
       notifyRep: input.recipient === 'rep',
+      performedBy: userName,
     })
 
     return { success: true }

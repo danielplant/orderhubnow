@@ -1,9 +1,10 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import Image from 'next/image'
 import { GripVertical, Calendar, EyeOff } from 'lucide-react'
 import type { CollectionWithCount } from '@/lib/types/collection'
+import { useImageConfig } from '@/lib/contexts'
 
 // Default fallback image (Limeapple logo)
 const FALLBACK_IMAGE = '/logos/limeapple-logo.png'
@@ -14,7 +15,9 @@ interface CollectionCardProps {
 }
 
 export function CollectionCard({ collection, onClick }: CollectionCardProps) {
-  const [imgError, setImgError] = useState(false)
+  const [primaryError, setPrimaryError] = useState(false)
+  const [fallbackError, setFallbackError] = useState(false)
+  const { getImageUrl } = useImageConfig()
 
   const formatDate = (dateStr: string | null) => {
     if (!dateStr) return null
@@ -27,8 +30,18 @@ export function CollectionCard({ collection, onClick }: CollectionCardProps) {
   const hasShipWindow = shipStart && shipEnd
   const isHidden = collection.isActive === false
 
-  // Use fallback if no image or error loading image
-  const imageSrc = imgError || !collection.imageUrl ? FALLBACK_IMAGE : collection.imageUrl
+  // Get image URLs from config
+  // Note: Collections don't have thumbnailPath like SKUs do, so we pass null
+  const { primaryUrl, fallbackUrl } = useMemo(
+    () => getImageUrl('admin_collection_card', null, collection.imageUrl),
+    [getImageUrl, collection.imageUrl]
+  )
+
+  // Determine what to show: primary → fallback → static fallback
+  const showPrimary = primaryUrl && !primaryError
+  const showFallback = !showPrimary && fallbackUrl && !fallbackError
+  const imageSrc = showPrimary ? primaryUrl : showFallback ? fallbackUrl : FALLBACK_IMAGE
+  const useStaticFallback = !showPrimary && !showFallback
 
   return (
     <div
@@ -60,9 +73,12 @@ export function CollectionCard({ collection, onClick }: CollectionCardProps) {
           src={imageSrc}
           alt={collection.name}
           fill
-          className={imgError || !collection.imageUrl ? 'object-contain p-4' : 'object-cover'}
+          className={useStaticFallback ? 'object-contain p-4' : 'object-cover'}
           unoptimized
-          onError={() => setImgError(true)}
+          onError={() => {
+            if (showPrimary) setPrimaryError(true)
+            else if (showFallback) setFallbackError(true)
+          }}
         />
       </div>
 

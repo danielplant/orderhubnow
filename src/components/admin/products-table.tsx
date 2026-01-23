@@ -21,7 +21,7 @@ import type { CurrencyMode } from '@/lib/types/export'
 import { BulkActionsBar } from '@/components/admin/bulk-actions-bar'
 import { ProductDetailModal } from '@/components/admin/product-detail-modal'
 import { cn } from '@/lib/utils'
-import { getSkuImageUrl } from '@/lib/utils/thumbnail-url'
+import { useImageConfig } from '@/lib/contexts'
 import type { AdminSkuRow, CategoryForFilter } from '@/lib/types'
 import {
   deleteSku,
@@ -38,30 +38,32 @@ import { MoreHorizontal, Download, Upload, ChevronDown, FileSpreadsheet, FileTex
 // ============================================================================
 
 function ImageCell({ thumbnailPath, imageUrl, alt }: { thumbnailPath: string | null; imageUrl: string | null; alt: string }) {
-  const [s3Error, setS3Error] = React.useState(false)
-  const [shopifyError, setShopifyError] = React.useState(false)
+  const [primaryError, setPrimaryError] = React.useState(false)
+  const [fallbackError, setFallbackError] = React.useState(false)
+  const { getImageUrl } = useImageConfig()
 
-  const s3Url = getSkuImageUrl(thumbnailPath, null, 'md')
+  // Get URLs from config - dynamically controlled by dashboard
+  const { primaryUrl, fallbackUrl } = getImageUrl('admin_products_table', thumbnailPath, imageUrl)
 
   return (
     <div className="w-24 h-24 relative bg-muted rounded overflow-hidden flex-shrink-0">
-      {s3Url && !s3Error ? (
+      {primaryUrl && !primaryError ? (
         <Image
-          src={s3Url}
+          src={primaryUrl}
           alt={alt}
           fill
           className="object-contain"
           sizes="96px"
-          onError={() => setS3Error(true)}
+          onError={() => setPrimaryError(true)}
         />
-      ) : imageUrl && !shopifyError ? (
+      ) : fallbackUrl && !fallbackError ? (
         <Image
-          src={imageUrl}
+          src={fallbackUrl}
           alt={alt}
           fill
           className="object-contain"
           sizes="96px"
-          onError={() => setShopifyError(true)}
+          onError={() => setFallbackError(true)}
         />
       ) : (
         <div className="w-full h-full flex items-center justify-center text-muted-foreground">

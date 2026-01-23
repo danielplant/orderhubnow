@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
-import { OrderProvider, AnnouncementProvider, CurrencyProvider } from "@/lib/contexts";
+import { OrderProvider, AnnouncementProvider, CurrencyProvider, ImageConfigProvider } from "@/lib/contexts";
 import { BuyerNavWrapper } from "@/components/buyer/buyer-nav-wrapper";
 import { buildRepHref } from "@/lib/utils/auth";
 
@@ -26,16 +26,18 @@ export default async function BuyerLayout({
   }
 
   return (
-    <CurrencyProvider>
-      <OrderProvider>
-        <AnnouncementProvider>
-          <Suspense fallback={<div className="min-h-screen" />}>
-            <BuyerNavWrapper>
-              {children}
-            </BuyerNavWrapper>
-          </Suspense>
-        </AnnouncementProvider>
-      </OrderProvider>
-    </CurrencyProvider>
+    <ImageConfigProvider>
+      <CurrencyProvider>
+        <OrderProvider>
+          <AnnouncementProvider>
+            <Suspense fallback={<div className="min-h-screen" />}>
+              <BuyerNavWrapper>
+                {children}
+              </BuyerNavWrapper>
+            </Suspense>
+          </AnnouncementProvider>
+        </OrderProvider>
+      </CurrencyProvider>
+    </ImageConfigProvider>
   );
 }

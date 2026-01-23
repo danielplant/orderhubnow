@@ -4,11 +4,10 @@ import { useCallback, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import type { Product, ProductVariant, Currency } from "@/lib/types";
 import { cn, formatPrice } from "@/lib/utils";
-import { getSkuImageSrcSet } from "@/lib/utils/thumbnail-url";
 import { STOCK_THRESHOLDS } from "@/lib/constants/inventory";
 import { FEATURES } from "@/lib/constants/features";
 import { ColorSwatch, FabricSwatch, Text } from "@/components/ui";
-import { useOrder, useAnnouncement, useCurrency } from "@/lib/contexts";
+import { useOrder, useAnnouncement, useCurrency, useImageConfig } from "@/lib/contexts";
 import {
   Dialog,
   DialogContent,
@@ -36,63 +35,57 @@ function ProductImage({
   fullsizeUrl?: string | null;
   title: string;
 }) {
-  const [thumbError, setThumbError] = useState(false);
-  const [shopifyError, setShopifyError] = useState(false);
-  const [fullError, setFullError] = useState(false);
-  const [disableXl, setDisableXl] = useState(false);
+  const [primaryError, setPrimaryError] = useState(false);
+  const [fallbackError, setFallbackError] = useState(false);
+  const [lightboxError, setLightboxError] = useState(false);
+  const { getImageUrl } = useImageConfig();
 
-  const imageData = useMemo(
-    () => getSkuImageSrcSet(thumbnailPath, shopifyImageUrl, { includeXl: !disableXl }),
-    [thumbnailPath, shopifyImageUrl, disableXl]
+  // Get thumbnail image data from config (supports srcSet)
+  const thumbData = useMemo(
+    () => getImageUrl('buyer_product_thumbnail', thumbnailPath, shopifyImageUrl),
+    [thumbnailPath, shopifyImageUrl, getImageUrl]
   );
 
-  const lightboxSrc = fullsizeUrl || imageData?.src;
+  // Get lightbox image data from config
+  const lightboxData = useMemo(
+    () => getImageUrl('buyer_product_lightbox', thumbnailPath, shopifyImageUrl),
+    [thumbnailPath, shopifyImageUrl, getImageUrl]
+  );
+
+  const lightboxSrc = fullsizeUrl || lightboxData.primaryUrl;
   const gridSizes = "(max-width: 768px) 100vw, (max-width: 1280px) 50vw, 33vw";
 
-  // Try S3 thumbnail first, then fall back to Shopify CDN, then show placeholder
-  const handleThumbError = () => {
-    if (!disableXl) {
-      setDisableXl(true);
-      return;
-    }
-    setThumbError(true);
-  };
-
-  const handleShopifyError = () => {
-    setShopifyError(true);
-  };
-
-  // Determine what to show: S3 thumbnail → Shopify CDN → placeholder
-  const showS3 = imageData && !thumbError;
-  const showShopify = !showS3 && shopifyImageUrl && !shopifyError;
-  const showPlaceholder = !showS3 && !showShopify;
+  // Determine what to show: primary → fallback → placeholder
+  const showPrimary = thumbData.primaryUrl && !primaryError;
+  const showFallback = !showPrimary && thumbData.fallbackUrl && !fallbackError;
+  const showPlaceholder = !showPrimary && !showFallback;
 
   return (
     <Dialog>
       <DialogTrigger asChild>
         <div className="relative flex-1 min-h-0 bg-secondary overflow-hidden group cursor-zoom-in">
-          {showS3 && (
+          {showPrimary && (
             <img
-              key={disableXl ? "thumb-no-xl" : "thumb-xl"}
-              src={imageData.src}
-              srcSet={imageData.srcSet}
+              key="primary"
+              src={thumbData.primaryUrl!}
+              srcSet={thumbData.srcSet ?? undefined}
               alt={title}
               sizes={gridSizes}
               loading="lazy"
               decoding="async"
               className="absolute inset-0 w-full h-full object-contain p-2 motion-slow transition-transform group-hover:scale-105"
-              onError={handleThumbError}
+              onError={() => setPrimaryError(true)}
             />
           )}
-          {showShopify && (
+          {showFallback && (
             <img
-              key="shopify-fallback"
-              src={shopifyImageUrl}
+              key="fallback"
+              src={thumbData.fallbackUrl!}
               alt={title}
               loading="lazy"
               decoding="async"
               className="absolute inset-0 w-full h-full object-contain p-2 motion-slow transition-transform group-hover:scale-105"
-              onError={handleShopifyError}
+              onError={() => setFallbackError(true)}
             />
           )}
           {showPlaceholder && (
@@ -118,12 +111,12 @@ function ProductImage({
       {/* Lightbox Modal */}
       <DialogContent className="max-w-3xl p-0 overflow-hidden">
         <div className="relative aspect-square w-full bg-secondary">
-          {lightboxSrc && !fullError ? (
+          {lightboxSrc && !lightboxError ? (
             <img
               src={lightboxSrc}
               alt={title}
               className="absolute inset-0 w-full h-full object-contain"
-              onError={() => setFullError(true)}
+              onError={() => setLightboxError(true)}
             />
           ) : (
             <div className="absolute inset-0 flex items-center justify-center text-muted-foreground/40">

@@ -428,6 +428,9 @@ export interface OrderEmailLogEntry {
   id: string
   emailType: EmailType
   recipient: string
+  status: 'sent' | 'failed' | 'skipped'
+  errorMessage?: string
+  skipReason?: string
   timestamp: Date
   performedBy: string | null
 }
@@ -450,12 +453,18 @@ export async function getOrderEmailLogs(orderId: string): Promise<OrderEmailLogE
   return logs.map((log) => {
     let emailType: EmailType = 'order_confirmation'
     let recipient = ''
+    let status: 'sent' | 'failed' | 'skipped' = 'sent'
+    let errorMessage: string | undefined
+    let skipReason: string | undefined
 
     if (log.NewValues) {
       try {
         const parsed = JSON.parse(log.NewValues)
         emailType = parsed.emailType || 'order_confirmation'
         recipient = parsed.recipient || ''
+        status = parsed.status || 'sent'
+        errorMessage = parsed.errorMessage
+        skipReason = parsed.skipReason
       } catch {
         // Ignore parse errors
       }
@@ -465,6 +474,9 @@ export async function getOrderEmailLogs(orderId: string): Promise<OrderEmailLogE
       id: log.ID.toString(),
       emailType,
       recipient,
+      status,
+      errorMessage,
+      skipReason,
       timestamp: log.DateAdded,
       performedBy: log.PerformedBy,
     }

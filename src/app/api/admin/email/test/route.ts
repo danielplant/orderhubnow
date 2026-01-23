@@ -84,9 +84,10 @@ export async function POST(request: NextRequest) {
     })
 
     // Log successful test email (non-blocking)
+    // Use '0' as entityId since test emails don't belong to a specific entity
     logEmailResult({
       entityType: 'user',
-      entityId: session.user.id || '0',
+      entityId: '0',
       emailType: 'test_email',
       recipient: to,
       status: 'sent',
@@ -102,10 +103,11 @@ export async function POST(request: NextRequest) {
     const message = error instanceof Error ? error.message : 'Unknown error'
 
     // Log failed test email (non-blocking)
+    // Use '0' as entityId since test emails don't belong to a specific entity
     if (recipientEmail) {
       logEmailResult({
         entityType: 'user',
-        entityId: session?.user?.id || '0',
+        entityId: '0',
         emailType: 'test_email',
         recipient: recipientEmail,
         status: 'failed',

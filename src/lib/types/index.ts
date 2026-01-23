@@ -76,3 +76,11 @@ export type {
   ShopifySyncedProduct,
   AddMissingSkuInput,
 } from "./shopify";
+
+// Image config types
+export type {
+  ImageSource,
+  SkuImageConfig,
+  ResolvedImageUrl,
+  ImageLocationId,
+} from "./image-config";

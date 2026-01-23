@@ -94,6 +94,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       customerEmail: order.CustomerEmail || '',
       customerPhone: order.CustomerPhone || '',
       salesRep: order.SalesRep || '',
+      salesRepEmail: repEmail,
       orderAmount: order.OrderAmount,
       currency,
       shipStartDate: order.ShipStartDate || new Date(),

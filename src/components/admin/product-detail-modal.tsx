@@ -9,7 +9,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
-import { getSkuImageUrl } from '@/lib/utils/thumbnail-url'
+import { useImageConfig } from '@/lib/contexts'
 
 interface ProductVariant {
   sku: string
@@ -48,19 +48,21 @@ export function ProductDetailModal({
   product,
   highlightedSku,
 }: ProductDetailModalProps) {
-  const [s3Error, setS3Error] = React.useState(false)
-  const [shopifyError, setShopifyError] = React.useState(false)
+  const [primaryError, setPrimaryError] = React.useState(false)
+  const [fallbackError, setFallbackError] = React.useState(false)
+  const { getImageUrl } = useImageConfig()
 
-  // Prefer S3 thumbnail (lg size for modal), fallback to Shopify CDN
-  const s3Url = React.useMemo(
-    () => product ? getSkuImageUrl(product.thumbnailPath, null, 'lg') : null,
-    [product]
+  // Get URLs from config - dynamically controlled by dashboard
+  const { primaryUrl, fallbackUrl } = React.useMemo(
+    () => product
+      ? getImageUrl('admin_product_modal', product.thumbnailPath, product.imageUrl)
+      : { primaryUrl: null, fallbackUrl: null },
+    [product, getImageUrl]
   )
-  const shopifyUrl = product?.imageUrl ?? null
 
   React.useEffect(() => {
-    setS3Error(false)
-    setShopifyError(false)
+    setPrimaryError(false)
+    setFallbackError(false)
   }, [product])
 
   if (!product) return null
@@ -90,23 +92,23 @@ export function ProductDetailModal({
         </DialogHeader>
 
         <div className="grid gap-6 md:grid-cols-2">
-          {/* Product Image - S3 → Shopify → placeholder */}
+          {/* Product Image - primary → fallback → placeholder */}
           <div className="relative aspect-square bg-muted rounded-lg overflow-hidden">
-            {s3Url && !s3Error ? (
+            {primaryUrl && !primaryError ? (
               <Image
-                src={s3Url}
+                src={primaryUrl}
                 alt={product.title}
                 fill
                 className="object-contain p-4"
-                onError={() => setS3Error(true)}
+                onError={() => setPrimaryError(true)}
               />
-            ) : shopifyUrl && !shopifyError ? (
+            ) : fallbackUrl && !fallbackError ? (
               <Image
-                src={shopifyUrl}
+                src={fallbackUrl}
                 alt={product.title}
                 fill
                 className="object-contain p-4"
-                onError={() => setShopifyError(true)}
+                onError={() => setFallbackError(true)}
               />
             ) : (
               <div className="absolute inset-0 flex items-center justify-center text-muted-foreground">

@@ -183,12 +183,13 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     // NOTE: Order type will be derived from SKU data below, not preOrderMeta
 
-    // Look up rep name
+    // Look up rep name and email
     const rep = await prisma.reps.findUnique({
       where: { ID: parseInt(formData.salesRepId) },
-      select: { Name: true },
+      select: { Name: true, Email1: true, Email2: true },
     })
     const salesRepName = rep?.Name || 'Unknown Rep'
+    const salesRepEmail = rep?.Email1 || rep?.Email2 || undefined
 
     // Look up or create customer
     let customerId: number | null = null
@@ -374,6 +375,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         storeName: formData.storeName,
         buyerName: formData.buyerName,
         salesRep: salesRepName,
+        salesRepEmail,
         customerEmail: formData.customerEmail,
         customerPhone: formData.customerPhone,
         shipStartDate: order.shipWindowStart ? new Date(order.shipWindowStart) : new Date(formData.shipStartDate),
