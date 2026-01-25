@@ -161,7 +161,7 @@ export interface ShopifyValidationResult {
   inventoryStatus: InventoryStatusItem[]
   // Enhanced fields for Transfer Preview modal
   shipWindow: string | null          // Formatted "Jan 15 – Jan 22, 2026"
-  shipWindowTag: string | null       // For Shopify tag: "2026-01-15_2026-01-22"
+  shipWindowTag: string | null       // For Shopify tag: "Jan 20 - Feb 15 2026"
   ohnCollection: string | null       // OHN collection name (from Sku.CollectionID)
   shopifyCollectionRaw: string | null        // Single Shopify raw value or "Mixed" if multiple
   shopifyCollectionRawValues: string[]       // All unique Shopify raw values (for tags)

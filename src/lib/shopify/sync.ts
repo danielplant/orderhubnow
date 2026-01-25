@@ -6,12 +6,6 @@
 
 import { prisma } from '@/lib/prisma'
 import { getStatusCascadeConfig } from '@/lib/data/queries/sync-config'
-import { getSyncSettings } from '@/lib/data/queries/settings'
-import {
-  processThumbnailsBatch,
-  logThumbnailSyncSummary,
-  type ThumbnailSyncItem,
-} from '@/lib/utils/thumbnails'
 import { parseUnitsFromSku, calculateUnitPrice } from '@/lib/utils/units'
 
 // ============================================================================
@@ -118,104 +112,52 @@ export async function getBulkOperationUrl(
 }
 
 /**
- * Build GraphQL mutation to start a bulk operation for products/variants.
- * Filters products by status based on cascade config (ingestionAllowed).
- *
- * When using products(query: "status:...") with nested variants, Shopify
- * outputs separate JSONL lines:
- * - Product lines with product data
- * - Variant lines with __parentId pointing to product
+ * Static bulk operation query for variant-rooted sync.
+ * Uses productVariants as the root to get all variants with inline product data.
+ * Status filtering happens at SKU table transform time via skuAllowed cascade config.
  */
-export function buildBulkOperationQuery(ingestionAllowed: string[]): string {
-  // Build status filter: ['ACTIVE'] → "status:ACTIVE"
-  // ['ACTIVE', 'DRAFT'] → "status:ACTIVE OR status:DRAFT"
-  const statusFilter = ingestionAllowed
-    .map(s => `status:${s}`)
-    .join(' OR ')
-
-  console.log(`[Sync] Building bulk query with status filter: ${statusFilter}`)
-
-  return `
+export const BULK_OPERATION_QUERY = `
   mutation {
     bulkOperationRunQuery(
       query: """
       {
-        products(query: "${statusFilter}") {
+        productVariants {
           edges {
             node {
               id
+              sku
+              price
+              inventoryQuantity
+              displayName
               title
-              status
-              productType
-              featuredMedia {
-                preview {
-                  image {
-                    url
-                  }
-                }
+              image { url }
+              mfSize: metafield(namespace: "custom", key: "size") { value }
+              mfColor: metafield(namespace: "custom", key: "color") { value }
+              product {
+                id
+                title
+                status
+                productType
+                featuredMedia { preview { image { url } } }
+                mfOrderEntryCollection: metafield(namespace: "custom", key: "order_entry_collection") { value }
+                mfOrderEntryDescription: metafield(namespace: "custom", key: "label_title") { value }
+                mfFabric: metafield(namespace: "custom", key: "fabric") { value }
+                mfColor: metafield(namespace: "custom", key: "color") { value }
+                mfFeatures: metafield(namespace: "custom", key: "features") { value }
+                mfMSRP: metafield(namespace: "custom", key: "msrp") { value }
+                mfCADWSPrice: metafield(namespace: "custom", key: "test_number_") { value }
+                mfUSDWSPrice: metafield(namespace: "custom", key: "us_ws_price") { value }
+                mfMSRPCAD: metafield(namespace: "custom", key: "msrp_cad") { value }
+                mfMSRPUSD: metafield(namespace: "custom", key: "msrp_us") { value }
               }
-              mfOrderEntryCollection: metafield(namespace: "custom", key: "order_entry_collection") {
-                value
-              }
-              mfOrderEntryDescription: metafield(namespace: "custom", key: "label_title") {
-                value
-              }
-              mfFabric: metafield(namespace: "custom", key: "fabric") {
-                value
-              }
-              mfColor: metafield(namespace: "custom", key: "color") {
-                value
-              }
-              # NOTE: CAD wholesale price uses legacy key "test_number_" (created during testing, never renamed)
-              # Shopify admin shows label "CAD WS PRICE" but underlying key is "test_number_"
-              # All other price metafields have proper names (us_ws_price, msrp_cad, msrp_us)
-              mfCADWSPrice: metafield(namespace: "custom", key: "test_number_") {
-                value
-              }
-              mfUSDWSPrice: metafield(namespace: "custom", key: "us_ws_price") {
-                value
-              }
-              mfMSRPCAD: metafield(namespace: "custom", key: "msrp_cad") {
-                value
-              }
-              mfMSRPUSD: metafield(namespace: "custom", key: "msrp_us") {
-                value
-              }
-              variants {
-                edges {
-                  node {
-                    id
-                    sku
-                    price
-                    inventoryQuantity
-                    displayName
-                    title
-                    selectedOptions {
-                      name
-                      value
-                    }
-                    image {
-                      url
-                    }
-                    inventoryItem {
+              inventoryItem {
+                id
+                measurement { weight { unit value } }
+                inventoryLevels(first: 10) {
+                  edges {
+                    node {
                       id
-                      measurement {
-                        weight {
-                          unit
-                          value
-                        }
-                      }
-                      inventoryLevels(first: 10) {
-                        edges {
-                          node {
-                            id
-                            quantities(names: ["incoming", "committed"]) {
-                              name
-                              quantity
-                            }
-                          }
-                        }
-                      }
+                      quantities(names: ["incoming", "committed"]) { name quantity }
                     }
                   }
                 }
@@ -226,19 +168,11 @@ export function buildBulkOperationQuery(ingestionAllowed: string[]): string {
       }
       """
     ) {
-      bulkOperation {
-        id
-        status
-        url
-      }
-      userErrors {
-        field
-        message
-      }
+      bulkOperation { id status url }
+      userErrors { field message }
     }
   }
 `
-}
 
 /**
  * GraphQL query to check current bulk operation status.
@@ -462,6 +396,8 @@ export interface ShopifyVariantData {
   metafield_order_entry_description?: string
   metafield_fabric?: string
   metafield_color?: string
+  metafield_features?: string
+  metafield_msrp?: string
   metafield_cad_ws_price?: string
   metafield_usd_ws_price?: string
   metafield_msrp_cad?: string
@@ -511,6 +447,8 @@ export async function upsertShopifyVariant(data: ShopifyVariantData): Promise<vo
     metafield_order_entry_description: data.metafield_order_entry_description ?? null,
     metafield_fabric: data.metafield_fabric ?? null,
     metafield_color: data.metafield_color ?? null,
+    metafield_features: data.metafield_features ?? null,
+    metafield_msrp: data.metafield_msrp ?? null,
     metafield_cad_ws_price: data.metafield_cad_ws_price ?? null,
     metafield_usd_ws_price: data.metafield_usd_ws_price ?? null,
     metafield_msrp_cad: data.metafield_msrp_cad ?? null,
@@ -588,6 +526,8 @@ interface ProductData {
   mfOrderEntryDescription?: ProductMetafield
   mfFabric?: ProductMetafield
   mfColor?: ProductMetafield
+  mfFeatures?: ProductMetafield
+  mfMSRP?: ProductMetafield
   mfCADWSPrice?: ProductMetafield
   mfUSDWSPrice?: ProductMetafield
   mfMSRPCAD?: ProductMetafield
@@ -609,82 +549,45 @@ interface QuantityData {
   quantity: number
 }
 
-/**
- * In-memory store for product data during JSONL processing.
- * When using products → variants query, Shopify outputs separate lines:
- * - Product lines with all product data (metafields, status, etc.)
- * - Variant lines with __parentId pointing to the product
- * We store product data here and look it up when processing variants.
- */
-const productDataCache = new Map<string, ProductData>()
-
-/**
- * Clear the product data cache (called at start of each sync)
- */
-export function clearProductDataCache(): void {
-  productDataCache.clear()
-}
 
 /**
  * Process a single JSONL line item.
- * Handles Product, ProductVariant, and InventoryLevel records from bulk operation.
+ * Handles ProductVariant and InventoryLevel records from bulk operation.
  *
- * With the new products(query: "status:...") → variants structure:
- * - Product lines come first with all metadata
- * - Variant lines follow with __parentId pointing to product
+ * With variant-rooted query (productVariants { product {...} }):
+ * - Each variant line includes inline product data
+ * - No separate product lines, no caching needed
+ * - Status filtering happens at SKU table transform via skuAllowed
  */
 async function processJsonlItem(
-  item: Record<string, unknown>,
-  options?: { ingestionAllowed?: string[] }
+  item: Record<string, unknown>
 ): Promise<boolean> {
   const itemId = item.id as string | undefined
   const parentId = item.__parentId as string | undefined
 
-  // Handle Product records - store for later variant lookup
-  // Product lines have id like "gid://shopify/Product/12345" with no __parentId
-  if (itemId && itemId.includes('/Product/') && !itemId.includes('ProductVariant') && !parentId) {
-    const productData: ProductData = {
-      id: itemId,
-      title: item.title as string | undefined,
-      status: item.status as string | undefined,
-      productType: item.productType as string | undefined,
-      featuredMedia: item.featuredMedia as ProductData['featuredMedia'],
-      mfOrderEntryCollection: item.mfOrderEntryCollection as ProductMetafield | undefined,
-      mfOrderEntryDescription: item.mfOrderEntryDescription as ProductMetafield | undefined,
-      mfFabric: item.mfFabric as ProductMetafield | undefined,
-      mfColor: item.mfColor as ProductMetafield | undefined,
-      mfCADWSPrice: item.mfCADWSPrice as ProductMetafield | undefined,
-      mfUSDWSPrice: item.mfUSDWSPrice as ProductMetafield | undefined,
-      mfMSRPCAD: item.mfMSRPCAD as ProductMetafield | undefined,
-      mfMSRPUSD: item.mfMSRPUSD as ProductMetafield | undefined,
-    }
-    productDataCache.set(itemId, productData)
-    return false // Product itself doesn't count as processed variant
-  }
-
   // Handle ProductVariant records
   if (itemId && itemId.includes('ProductVariant')) {
-    // Look up parent product data from cache (new nested structure)
-    // parentId will be set when using products → variants query
-    const product = parentId ? productDataCache.get(parentId) : (item.product as ProductData | undefined)
+    // With variant-rooted query, product data is inline
+    const product = item.product as ProductData | undefined
 
     const inventoryItem = item.inventoryItem as InventoryItemData | undefined
     const variantImage = item.image as { url?: string } | undefined
     const productStatus = product?.status ?? null
 
-    // Filter by allowed statuses (cascade ingestion filter)
-    // Note: With the new filtered query, this should already be filtered by Shopify
-    // But we keep this as a safety check
-    if (options?.ingestionAllowed && !options.ingestionAllowed.includes(productStatus ?? '')) {
-      return false
-    }
+    // Extract variant-level metafields (size and color)
+    const variantMfSize = item.mfSize as ProductMetafield | undefined
+    const variantMfColor = item.mfColor as ProductMetafield | undefined
 
     // Extract metafield values safely
+    // Color: variant metafield → product metafield fallback
+    // Size: variant metafield → variant title fallback
     const metafields = {
       order_entry_collection: product?.mfOrderEntryCollection?.value ?? undefined,
       order_entry_description: product?.mfOrderEntryDescription?.value ?? undefined,
       fabric: product?.mfFabric?.value ?? undefined,
-      color: product?.mfColor?.value ?? undefined,
+      color: variantMfColor?.value ?? product?.mfColor?.value ?? undefined,
+      features: product?.mfFeatures?.value ?? undefined,
+      msrp: product?.mfMSRP?.value ?? undefined,
       cad_ws_price: product?.mfCADWSPrice?.value ?? undefined,
       usd_ws_price: product?.mfUSDWSPrice?.value ?? undefined,
       msrp_cad: product?.mfMSRPCAD?.value ?? undefined,
@@ -694,10 +597,8 @@ async function processJsonlItem(
     // Extract weight data
     const weight = inventoryItem?.measurement?.weight
 
-    // Extract size from selectedOptions (preferred) or fall back to variant title
-    const selectedOptions = item.selectedOptions as Array<{ name: string; value: string }> | undefined
-    const sizeOption = selectedOptions?.find(opt => opt.name.toLowerCase() === 'size')
-    const size = sizeOption?.value || (item.title as string) || ''
+    // Extract size: variant metafield → variant title fallback
+    const size = variantMfSize?.value || (item.title as string) || ''
 
     await upsertShopifyVariant({
       gid: itemId,
@@ -707,7 +608,7 @@ async function processJsonlItem(
       displayName: (item.displayName as string) || '',
       size,
       productTitle: product?.title,
-      productGid: product?.id ?? parentId,
+      productGid: product?.id,
       productType: product?.productType,
       productStatus: productStatus ?? undefined,
       imageUrl: product?.featuredMedia?.preview?.image?.url,
@@ -719,6 +620,8 @@ async function processJsonlItem(
       metafield_order_entry_description: metafields.order_entry_description,
       metafield_fabric: metafields.fabric,
       metafield_color: metafields.color,
+      metafield_features: metafields.features,
+      metafield_msrp: metafields.msrp,
       metafield_cad_ws_price: metafields.cad_ws_price,
       metafield_usd_ws_price: metafields.usd_ws_price,
       metafield_msrp_cad: metafields.msrp_cad,
@@ -766,8 +669,7 @@ async function processJsonlItem(
  */
 export async function processJsonlStream(
   response: Response,
-  onProgress?: (processed: number) => void,
-  options?: { ingestionAllowed?: string[] }
+  onProgress?: (processed: number) => void
 ): Promise<{ processed: number; errors: number }> {
   const reader = response.body?.getReader()
   if (!reader) {
@@ -792,7 +694,7 @@ export async function processJsonlStream(
         if (!line.trim()) continue
         try {
           const item = JSON.parse(line)
-          const wasProcessed = await processJsonlItem(item, options)
+          const wasProcessed = await processJsonlItem(item)
           if (wasProcessed) {
             processed++
             if (onProgress && processed % 100 === 0) {
@@ -810,7 +712,7 @@ export async function processJsonlStream(
     if (buffer.trim()) {
       try {
         const item = JSON.parse(buffer)
-        const wasProcessed = await processJsonlItem(item, options)
+        const wasProcessed = await processJsonlItem(item)
         if (wasProcessed) {
           processed++
         }
@@ -832,8 +734,7 @@ export async function processJsonlStream(
  */
 export async function processJsonlLines(
   jsonlText: string,
-  onProgress?: (processed: number) => void,
-  options?: { ingestionAllowed?: string[] }
+  onProgress?: (processed: number) => void
 ): Promise<{ processed: number; errors: number }> {
   const lines = jsonlText.trim().split('\n').filter(Boolean)
   let processed = 0
@@ -842,7 +743,7 @@ export async function processJsonlLines(
   for (const line of lines) {
     try {
       const item = JSON.parse(line)
-      const wasProcessed = await processJsonlItem(item, options)
+      const wasProcessed = await processJsonlItem(item)
       if (wasProcessed) {
         processed++
         if (onProgress && processed % 100 === 0) {
@@ -1225,20 +1126,7 @@ export async function transformToSkuTable(options?: { skipBackup?: boolean }): P
       console.log(`Created ${newUnmapped} new unmapped entries`)
     }
 
-    // 7. Preserve ThumbnailPath before truncating (for cache continuity)
-    const existingThumbnails = await prisma.sku.findMany({
-      where: { ThumbnailPath: { not: null } },
-      select: { SkuID: true, ThumbnailPath: true },
-    })
-    const thumbnailMap = new Map<string, string>()
-    for (const sku of existingThumbnails) {
-      if (sku.ThumbnailPath) {
-        thumbnailMap.set(sku.SkuID, sku.ThumbnailPath)
-      }
-    }
-    console.log(`Preserved ${thumbnailMap.size} thumbnail cache keys`)
-
-    // 8. Truncate and bulk insert
+    // 7. Truncate and bulk insert
     await prisma.$executeRawUnsafe('TRUNCATE TABLE Sku')
 
     // Insert in batches
@@ -1248,18 +1136,7 @@ export async function transformToSkuTable(options?: { skipBackup?: boolean }): P
       await prisma.sku.createMany({ data: batch })
     }
 
-    // 9. Restore ThumbnailPath from preserved map
-    let restoredCount = 0
-    for (const [skuId, thumbnailPath] of thumbnailMap) {
-      const updated = await prisma.sku.updateMany({
-        where: { SkuID: skuId },
-        data: { ThumbnailPath: thumbnailPath },
-      })
-      if (updated.count > 0) restoredCount++
-    }
-    console.log(`Restored ${restoredCount} thumbnail cache keys`)
-
-    // 10. Remove duplicates (keep first by ID)
+    // 9. Remove duplicates (keep first by ID)
     await prisma.$executeRawUnsafe(`
       WITH CTE AS (
         SELECT *, ROW_NUMBER() OVER (PARTITION BY SkuID, CollectionID ORDER BY ID DESC) AS rn FROM Sku
@@ -1351,27 +1228,16 @@ export async function runFullSync(options?: {
     onProgress('Starting', 'Cleaning up orphaned runs')
     await cleanupOrphanedRuns()
 
-    // Clear product data cache from previous sync
-    clearProductDataCache()
-
     // Check if sync is already in progress
     const { inProgress, reason } = await isSyncInProgress(shopifyFetch)
     if (inProgress) {
       return { success: false, message: 'Sync already in progress', error: reason }
     }
 
-    // Get cascade config to determine which product statuses to fetch
-    // This controls the Shopify API query filter (e.g., only ACTIVE products)
-    const cascadeConfig = await getStatusCascadeConfig('Product')
-    console.log(`[Sync] Ingestion filter from cascade config: ${JSON.stringify(cascadeConfig.ingestionAllowed)}`)
-
-    // Build dynamic query with status filter
-    const bulkOperationQuery = buildBulkOperationQuery(cascadeConfig.ingestionAllowed)
-
-    // Step 1: Start bulk operation
-    onProgress('Step 1/5', `Starting bulk operation (filter: ${cascadeConfig.ingestionAllowed.join(', ')})`)
+    // Step 1: Start bulk operation (variant-rooted query - all variants with inline product data)
+    onProgress('Step 1/5', 'Starting bulk operation (all variants)')
     // Note: Can't update progress yet - no operationId until after start
-    const result = await shopifyFetch(bulkOperationQuery)
+    const result = await shopifyFetch(BULK_OPERATION_QUERY)
 
     if (result.error) {
       return { success: false, message: 'Failed to start bulk operation', error: result.error }
@@ -1508,9 +1374,6 @@ export async function runFullSync(options?: {
       return { success: false, message: 'Failed to download JSONL', operationId }
     }
 
-    // Note: cascadeConfig was already fetched before building the bulk query
-    // We reuse it here for the ingestion filter (belt-and-suspenders with API filter)
-
     const processResult = await processJsonlStream(
       jsonlResponse,
       async (n) => {
@@ -1526,8 +1389,7 @@ export async function runFullSync(options?: {
             totalRecords: objectCount,
           })
         }
-      },
-      { ingestionAllowed: cascadeConfig.ingestionAllowed }
+      }
     )
     onProgress('Step 3/5', `Complete - ${processResult.processed} variants processed`)
     await updateSyncProgress(operationId, {
@@ -1554,95 +1416,6 @@ export async function runFullSync(options?: {
       percent: 85,
       recordsProcessed: transformResult.processed,
     })
-
-    // Step 5: Generate thumbnails (conditional based on settings)
-    // Check if thumbnails should run during sync
-    const syncSettings = await getSyncSettings()
-
-    if (syncSettings.thumbnailDuringSync && syncSettings.thumbnailEnabled) {
-      // Generate thumbnails during sync (original behavior)
-      onProgress('Step 5/5', 'Processing thumbnails (smart cache)')
-      await updateSyncProgress(operationId, {
-        step: 'Step 5/5',
-        detail: 'Loading SKUs for thumbnail processing...',
-        percent: 86,
-        recordsProcessed: transformResult.processed,
-      })
-      const skusWithImages = await prisma.sku.findMany({
-        where: { ShopifyImageURL: { not: null } },
-        select: { SkuID: true, ShopifyImageURL: true, ThumbnailPath: true },
-      })
-
-      const thumbnailItems: ThumbnailSyncItem[] = skusWithImages.map(s => ({
-        skuId: s.SkuID,
-        imageUrl: s.ShopifyImageURL,
-        currentThumbnailPath: s.ThumbnailPath,
-      }))
-
-      if (thumbnailItems.length > 0) {
-        const { results, stats } = await processThumbnailsBatch(thumbnailItems, {
-          concurrency: syncSettings.thumbnailBatchConcurrency,
-          onProgress: async (processed, total, currentStats) => {
-            const pct = Math.round((processed / total) * 100)
-            onProgress(
-              'Step 5/5',
-              `Thumbnails: ${pct}% (${currentStats.generated} new, ${currentStats.skipped} cached)`
-            )
-            // Update progress: 86-99% range during thumbnail processing
-            const thumbPercent = Math.min(99, 86 + Math.floor((processed / total) * 13))
-            await updateSyncProgress(operationId!, {
-              step: 'Step 5/5',
-              detail: `Thumbnails: ${pct}% (${currentStats.generated} new, ${currentStats.skipped} cached)`,
-              percent: thumbPercent,
-              recordsProcessed: processed,
-              totalRecords: total,
-            })
-          },
-        })
-
-        // Log summary for debugging
-        logThumbnailSyncSummary(stats)
-
-        // Update SKUs that got new thumbnails - store cache key only (not full path)
-        const updates = results.filter(
-          r => r.status === 'generated' && r.cacheKey
-        )
-
-        for (const update of updates) {
-          await prisma.sku.updateMany({
-            where: { SkuID: update.skuId },
-            data: { ThumbnailPath: update.cacheKey },  // Store just the 16-char cache key
-          })
-        }
-
-        onProgress(
-          'Step 5/5',
-          `Complete - ${stats.generated} generated, ${stats.skipped} cached, ${stats.failed} failed`
-        )
-        await updateSyncProgress(operationId, {
-          step: 'Step 5/5',
-          detail: `Complete - ${stats.generated} new, ${stats.skipped} cached, ${stats.failed} failed`,
-          percent: 99,
-          recordsProcessed: thumbnailItems.length,
-          totalRecords: thumbnailItems.length,
-        })
-      } else {
-        onProgress('Step 5/5', 'Complete - No images to process')
-        await updateSyncProgress(operationId, {
-          step: 'Step 5/5',
-          detail: 'Complete - No images to process',
-          percent: 99,
-        })
-      }
-    } else {
-      // Thumbnails disabled during sync - skip this step
-      onProgress('Step 5/5', 'Skipped - Generate thumbnails separately')
-      await updateSyncProgress(operationId, {
-        step: 'Step 5/5',
-        detail: 'Skipped - Use "Generate Thumbnails" on dashboard',
-        percent: 99,
-      })
-    }
 
     // Mark sync as complete
     await completeSyncRun(operationId, 'completed', transformResult.processed)

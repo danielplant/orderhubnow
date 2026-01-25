@@ -278,6 +278,9 @@ export async function transferOrderToShopify(
   }
 ): Promise<ShopifyTransferResult & { customerUpdateWarning?: string }> {
   try {
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/a5fde547-ac60-4379-a83d-f48710b84ace',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'pre-fix',hypothesisId:'H1',location:'shopify.ts:280',message:'transfer start',data:{orderId,enabledTagIdsCount:options?.enabledTagIds?.length ?? null,hasCustomerOverride:!!options?.customerOverride},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     await requireAdmin()
     const cascadeConfig = await getStatusCascadeConfig('Product')
 
@@ -458,6 +461,14 @@ export async function transferOrderToShopify(
       ? allTags.filter((t) => enabledTagIds.includes(t.id))
       : allTags
 
+    const invalidCharRegex = /[^a-zA-Z0-9_\- ]/
+    const strictInvalidCharRegex = /[^a-zA-Z0-9 ]/
+    const maskTag = (value: string) => value.replace(/[A-Za-z0-9]/g, 'x')
+
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/a5fde547-ac60-4379-a83d-f48710b84ace',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'pre-fix',hypothesisId:'H2',location:'shopify.ts:457',message:'tag metadata',data:{allTagsCount:allTags.length,filteredTagsCount:filteredTags.length,orderTagCount:filteredTags.filter((t)=>t.scope==='order').length,customerTagCount:filteredTags.filter((t)=>t.scope==='customer').length,invalidTags:filteredTags.filter((t)=>!t.validation.valid).map((t)=>({id:t.id,source:t.source,scope:t.scope,reason:t.validation.reason ?? null,valueLen:t.value.length,hasComma:t.value.includes(','),hasInvalidChars:invalidCharRegex.test(t.value)})),orderTagDiagnostics:filteredTags.filter((t)=>t.scope==='order').map((t)=>({id:t.id,source:t.source,len:t.value.length,hasInvalidChars:invalidCharRegex.test(t.value),hasStrictInvalidChars:strictInvalidCharRegex.test(t.value),hasComma:t.value.includes(','),hasUnderscore:t.value.includes('_'),hasHyphen:t.value.includes('-'),hasLeadingOrTrailingSpace:t.value.trim()!==t.value,hasDoubleSpace:/\s{2,}/.test(t.value),maskedValue:maskTag(t.value)})),customerTagDiagnostics:filteredTags.filter((t)=>t.scope==='customer').map((t)=>({id:t.id,source:t.source,len:t.value.length,hasInvalidChars:invalidCharRegex.test(t.value),hasStrictInvalidChars:strictInvalidCharRegex.test(t.value),hasComma:t.value.includes(','),hasUnderscore:t.value.includes('_'),hasHyphen:t.value.includes('-'),hasLeadingOrTrailingSpace:t.value.trim()!==t.value,hasDoubleSpace:/\s{2,}/.test(t.value),maskedValue:maskTag(t.value)}))},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+
     // Build order tags string (only enabled order-scope tags)
     const orderTagValues = filteredTags
       .filter((t) => t.scope === 'order')
@@ -469,6 +480,10 @@ export async function transferOrderToShopify(
       .filter((t) => t.scope === 'customer')
       .map((t) => t.value)
     const customerTags = customerTagValues.join(', ')
+
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/a5fde547-ac60-4379-a83d-f48710b84ace',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'pre-fix',hypothesisId:'H3',location:'shopify.ts:473',message:'tag strings built',data:{orderTagsLength:tags.length,customerTagsLength:customerTags.length,orderTagsHasInvalidChars:invalidCharRegex.test(tags),orderTagsHasConsecutiveCommas:/,,/.test(tags),orderTagsHasLeadingOrTrailingComma:/^,|,$/.test(tags),orderTagValueCount:orderTagValues.length},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
 
     // Note attributes
     const noteAttributes = [
@@ -536,6 +551,10 @@ export async function transferOrderToShopify(
 
     // 7. Create order in Shopify
     const { order: createdOrder, error: createError } = await shopify.orders.create(shopifyOrderRequest)
+
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/a5fde547-ac60-4379-a83d-f48710b84ace',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'pre-fix',hypothesisId:'H4',location:'shopify.ts:538',message:'shopify create result',data:{createError:createError ?? null,createdOrderId:createdOrder?.id ?? null},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
 
     let customerCreated = false
 
@@ -1400,12 +1419,21 @@ function formatDate(date: Date): string {
 }
 
 /**
- * Format ship window dates as a Shopify tag: SHIPWINDOW_YYYY-MM-DD_YYYY-MM-DD
+ * Format ship window dates as a Shopify tag value: "Jan 20 - Feb 15 2026"
+ * Avoids commas/underscores and uses ASCII-only characters.
  */
 function formatShipWindowTag(startDate: Date | null, endDate: Date | null): string | null {
   if (!startDate || !endDate) return null
-  const formatISO = (d: Date) => d.toISOString().slice(0, 10)
-  return `SHIPWINDOW_${formatISO(startDate)}_${formatISO(endDate)}`
+  const formatTagDate = (d: Date, includeYear: boolean) => {
+    const month = d.toLocaleDateString('en-US', { month: 'short' })
+    const day = d.getDate()
+    if (includeYear) {
+      const year = d.getFullYear()
+      return `${month} ${day} ${year}`
+    }
+    return `${month} ${day}`
+  }
+  return `${formatTagDate(startDate, false)} - ${formatTagDate(endDate, true)}`
 }
 
 /**
@@ -1447,10 +1475,10 @@ function deriveSeasonFromShipWindow(startDate: Date | null): string | null {
  * Shopify tag validation rules:
  * - Max 255 characters
  * - No commas (used as separator)
- * - Only letters, numbers, spaces, underscores, hyphens allowed
+ * - Only letters, numbers, spaces, hyphens allowed
  * - Parentheses, slashes, quotes, etc. are NOT allowed
  */
-const SHOPIFY_TAG_INVALID_CHARS = /[^a-zA-Z0-9_\- ]/g
+const SHOPIFY_TAG_INVALID_CHARS = /[^a-zA-Z0-9\- ]/g
 
 /**
  * Validate a tag value against Shopify rules.
@@ -1481,6 +1509,7 @@ function validateTagValue(tag: string): { valid: boolean; reason?: string } {
  */
 function sanitizeTag(tag: string): string {
   return tag
+    .replace(/_/g, ' ')                     // Treat underscores as spaces for readability
     .replace(SHOPIFY_TAG_INVALID_CHARS, '') // Remove invalid chars (parentheses, etc.)
     .replace(/\s+/g, ' ')                    // Collapse multiple spaces
     .trim()
@@ -1546,15 +1575,15 @@ function generateTransferTags(params: {
 
   const seasonTag = deriveSeasonFromShipWindow(params.shipStartDate)
   if (seasonTag) {
-    addTag('order', 'season', `SEASON_${seasonTag}`)
+    addTag('order', 'season', seasonTag)
   }
 
   if (params.ohnCollection && params.ohnCollection !== 'Mixed') {
-    addTag('order', 'ohnCollection', `OHN_COLLECTION_${params.ohnCollection.replace(/\s+/g, '_').toUpperCase()}`)
+    addTag('order', 'ohnCollection', params.ohnCollection)
   }
 
   for (const rawValue of params.shopifyRawValues) {
-    addTag('order', 'shopifyCollection', `SHOPIFY_COLLECTION_${rawValue.replace(/\s+/g, '_').toUpperCase()}`)
+    addTag('order', 'shopifyCollection', rawValue)
   }
 
   // Customer tags

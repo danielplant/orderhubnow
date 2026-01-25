@@ -5,10 +5,8 @@ import {
   createSyncRun,
   cleanupOrphanedRuns,
   getLatestSyncRun,
-  buildBulkOperationQuery,
-  clearProductDataCache,
+  BULK_OPERATION_QUERY,
 } from '@/lib/shopify/sync'
-import { getStatusCascadeConfig } from '@/lib/data/queries/sync-config'
 
 // ============================================================================
 // Shopify API Helper
@@ -90,9 +88,6 @@ export async function POST() {
     // Clean up any orphaned runs
     await cleanupOrphanedRuns()
 
-    // Clear product data cache from previous sync
-    clearProductDataCache()
-
     // Check if sync is already in progress
     const { inProgress, reason } = await isSyncInProgress(shopifyFetch)
     if (inProgress) {
@@ -102,15 +97,9 @@ export async function POST() {
       )
     }
 
-    // Get cascade config to determine which product statuses to fetch
-    const cascadeConfig = await getStatusCascadeConfig('Product')
-    console.log(`[Admin Sync] Ingestion filter: ${JSON.stringify(cascadeConfig.ingestionAllowed)}`)
-
-    // Build dynamic query with status filter
-    const bulkOperationQuery = buildBulkOperationQuery(cascadeConfig.ingestionAllowed)
-
-    // Start the bulk operation
-    const result = await shopifyFetch(bulkOperationQuery)
+    // Start the bulk operation (variant-rooted query - all variants)
+    console.log('[Admin Sync] Starting bulk operation (all variants)')
+    const result = await shopifyFetch(BULK_OPERATION_QUERY)
 
     if (result.error) {
       return NextResponse.json({ error: result.error }, { status: 500 })
