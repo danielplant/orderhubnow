@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { auth } from '@/lib/auth/providers'
+import { prisma } from '@/lib/prisma'
 import {
   isSyncInProgress,
   createSyncRun,
@@ -143,6 +144,64 @@ export async function POST() {
     console.error('Error starting sync:', err)
     return NextResponse.json(
       { error: err instanceof Error ? err.message : 'Failed to start sync' },
+      { status: 500 }
+    )
+  }
+}
+
+// ============================================================================
+// DELETE /api/admin/sync-shopify - Cancel stuck sync
+// ============================================================================
+
+export async function DELETE() {
+  // Verify admin auth
+  const session = await auth()
+  if (!session?.user || session.user.role !== 'admin') {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  try {
+    // 1. Find all stuck runs
+    const stuckRuns = await prisma.shopifySyncRun.findMany({
+      where: { Status: 'started' },
+    })
+
+    // 2. Mark them as cancelled
+    const dbResult = await prisma.shopifySyncRun.updateMany({
+      where: { Status: 'started' },
+      data: {
+        Status: 'cancelled',
+        CompletedAt: new Date(),
+        ErrorMessage: 'Manually cancelled by admin',
+      },
+    })
+
+    // 3. Try to cancel Shopify bulk operation
+    let shopifyCancelled = false
+    const cancelMutation = `
+      mutation {
+        bulkOperationCancel {
+          bulkOperation { id status }
+          userErrors { field message }
+        }
+      }
+    `
+    const cancelResult = await shopifyFetch(cancelMutation)
+    if (!cancelResult.error) {
+      shopifyCancelled = true
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: `Cancelled ${dbResult.count} stuck sync(s)`,
+      stuckRunIds: stuckRuns.map(r => r.ID.toString()),
+      shopifyCancelled,
+      shopifyError: cancelResult.error,
+    })
+  } catch (err) {
+    console.error('Error cancelling sync:', err)
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : 'Failed to cancel sync' },
       { status: 500 }
     )
   }
