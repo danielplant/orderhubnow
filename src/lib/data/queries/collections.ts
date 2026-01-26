@@ -1,6 +1,6 @@
 import { prisma } from '@/lib/prisma'
-import { parsePrice, getBaseSku, resolveColor } from '@/lib/utils'
-import { sortBySize, extractSize, loadSizeOrderConfig } from '@/lib/utils/size-sort'
+import { parsePrice, getBaseSku } from '@/lib/utils'
+import { sortBySize, loadSizeOrderConfig, loadSizeAliasConfig } from '@/lib/utils/size-sort'
 import type { Product, ProductVariant } from '@/lib/types'
 import type {
   Collection,
@@ -426,6 +426,11 @@ export async function getCollectionName(collectionId: number): Promise<string | 
 /**
  * Get SKUs by collection ID, grouped into Products
  * Equivalent to getSkusByCategory but uses CollectionID
+ * 
+ * Grouping: Uses ShopifyProductId (Shopify product GID) as the stable grouping key.
+ * Size: Uses Sku.Size (variant metafield only, no title fallback).
+ * Color: Uses Sku.SkuColor (product metafield only, no fallback).
+ * Image: Uses product-level image (canonical, not per-variant).
  */
 export async function getSkusByCollection(collectionId: number): Promise<Product[]> {
   const skus = await prisma.sku.findMany({
@@ -443,16 +448,16 @@ export async function getSkusByCollection(collectionId: number): Promise<Product
     ],
   })
 
-  // Group SKUs by BaseSku + ImageURL
+  // Group SKUs by ShopifyProductId (stable product-level key)
   const grouped = new Map<string, Array<typeof skus[0] & { baseSku: string; size: string }>>()
 
   for (const sku of skus) {
     const baseSku = getBaseSku(sku.SkuID, sku.Size)
-    const size = extractSize(sku.Size || '')
+    const size = sku.Size || ''
     const skuWithParsed = { ...sku, baseSku, size }
 
-    const imageUrl = sku.ShopifyImageURL ?? ''
-    const groupKey = `${baseSku}::${imageUrl}`
+    // Use ShopifyProductId as group key; fall back to baseSku if not available
+    const groupKey = sku.ShopifyProductId ?? baseSku
 
     if (!grouped.has(groupKey)) {
       grouped.set(groupKey, [])
@@ -460,8 +465,8 @@ export async function getSkusByCollection(collectionId: number): Promise<Product
     grouped.get(groupKey)!.push(skuWithParsed)
   }
 
-  // Load size order config from DB before sorting
-  await loadSizeOrderConfig()
+  // Load size order and alias config from DB before sorting
+  await Promise.all([loadSizeOrderConfig(), loadSizeAliasConfig()])
 
   // Transform each group into a Product
   const products: Product[] = []
@@ -487,7 +492,8 @@ export async function getSkusByCollection(collectionId: number): Promise<Product
       skuBase: baseSku,
       title,
       fabric: first.FabricContent ?? '',
-      color: resolveColor(first.SkuColor, first.SkuID, title),
+      // Color: product metafield only, no fallback
+      color: (first.SkuColor || '').trim(),
       productType: first.ProductType ?? '',
       priceCad: parsePrice(first.PriceCAD),
       priceUsd: parsePrice(first.PriceUSD),
@@ -504,6 +510,11 @@ export async function getSkusByCollection(collectionId: number): Promise<Product
 
 /**
  * Get PreOrder products by collection ID (line sheet/catalog - no stock filter)
+ * 
+ * Grouping: Uses ShopifyProductId (Shopify product GID) as the stable grouping key.
+ * Size: Uses Sku.Size (variant metafield only, no title fallback).
+ * Color: Uses Sku.SkuColor (product metafield only, no fallback).
+ * Image: Uses product-level image (canonical, not per-variant).
  */
 export async function getPreOrderProductsByCollection(collectionId: number): Promise<Product[]> {
   const skus = await prisma.sku.findMany({
@@ -517,16 +528,16 @@ export async function getPreOrderProductsByCollection(collectionId: number): Pro
     ],
   })
 
-  // Group SKUs by BaseSku + ImageURL
+  // Group SKUs by ShopifyProductId (stable product-level key)
   const grouped = new Map<string, Array<typeof skus[0] & { baseSku: string; size: string }>>()
 
   for (const sku of skus) {
     const baseSku = getBaseSku(sku.SkuID, sku.Size)
-    const size = extractSize(sku.Size || '')
+    const size = sku.Size || ''
     const skuWithParsed = { ...sku, baseSku, size }
 
-    const imageUrl = sku.ShopifyImageURL ?? ''
-    const groupKey = `${baseSku}::${imageUrl}`
+    // Use ShopifyProductId as group key; fall back to baseSku if not available
+    const groupKey = sku.ShopifyProductId ?? baseSku
 
     if (!grouped.has(groupKey)) {
       grouped.set(groupKey, [])
@@ -534,8 +545,8 @@ export async function getPreOrderProductsByCollection(collectionId: number): Pro
     grouped.get(groupKey)!.push(skuWithParsed)
   }
 
-  // Load size order config from DB before sorting
-  await loadSizeOrderConfig()
+  // Load size order and alias config from DB before sorting
+  await Promise.all([loadSizeOrderConfig(), loadSizeAliasConfig()])
 
   // Transform each group into a Product
   const products: Product[] = []
@@ -561,7 +572,8 @@ export async function getPreOrderProductsByCollection(collectionId: number): Pro
       skuBase: baseSku,
       title,
       fabric: first.FabricContent ?? '',
-      color: resolveColor(first.SkuColor, first.SkuID, title),
+      // Color: product metafield only, no fallback
+      color: (first.SkuColor || '').trim(),
       productType: first.ProductType ?? '',
       priceCad: parsePrice(first.PriceCAD),
       priceUsd: parsePrice(first.PriceUSD),

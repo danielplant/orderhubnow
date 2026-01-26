@@ -13,7 +13,7 @@
 
 import { prisma } from '@/lib/prisma'
 import type { Product, ProductVariant } from '@/lib/types/inventory'
-import { sortBySize, extractSize, loadSizeOrderConfig } from '@/lib/utils/size-sort'
+import { sortBySize, loadSizeOrderConfig, loadSizeAliasConfig } from '@/lib/utils/size-sort'
 import { resolveColor, getBaseSku } from '@/lib/utils'
 
 // ============================================================================
@@ -168,8 +168,8 @@ export async function getPreOrderProductsWithVariants(
     productMap.get(groupKey)!.skus.push(sku)
   }
 
-  // Load size order config from DB before sorting
-  await loadSizeOrderConfig()
+  // Load size order and alias config from DB before sorting
+  await Promise.all([loadSizeOrderConfig(), loadSizeAliasConfig()])
 
   // Convert to Product[] format
   const products: Product[] = []
@@ -187,7 +187,7 @@ export async function getPreOrderProductsWithVariants(
 
     // Build variants - extract clean size from variant title (removes color suffix)
     const variants: ProductVariant[] = variantSkus.map((sku) => ({
-      size: extractSize(sku.Size || ''),
+      size: sku.Size || '',
       sku: sku.SkuID,
       available: sku.Quantity ?? 0,
       onRoute: sku.OnRoute ?? 0,

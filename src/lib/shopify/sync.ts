@@ -6,6 +6,7 @@
 
 import { prisma } from '@/lib/prisma'
 import { getStatusCascadeConfig } from '@/lib/data/queries/sync-config'
+import { getSyncSettings } from '@/lib/data/queries/settings'
 import { parseUnitsFromSku, calculateUnitPrice } from '@/lib/utils/units'
 
 // ============================================================================
@@ -132,13 +133,13 @@ export const BULK_OPERATION_QUERY = `
               title
               image { url }
               mfSize: metafield(namespace: "custom", key: "size") { value }
-              mfColor: metafield(namespace: "custom", key: "color") { value }
               product {
                 id
                 title
                 status
                 productType
                 featuredMedia { preview { image { url } } }
+                images(first: 1) { edges { node { url } } }
                 mfOrderEntryCollection: metafield(namespace: "custom", key: "order_entry_collection") { value }
                 mfOrderEntryDescription: metafield(namespace: "custom", key: "label_title") { value }
                 mfFabric: metafield(namespace: "custom", key: "fabric") { value }
@@ -461,8 +462,8 @@ export async function upsertShopifyVariant(data: ShopifyVariantData): Promise<vo
     where: { RawShopifyId: data.gid },
   })
 
-  // Use variant image if available, otherwise fall back to product featured image
-  const imageUrl = data.variantImageUrl || data.imageUrl || null
+  // Use product-level featured image only (canonical image, not variant-specific)
+  const imageUrl = data.imageUrl || null
 
   const updateData = {
     SkuID: data.sku || '',
@@ -557,6 +558,13 @@ interface ProductData {
       }
     }
   }
+  images?: {
+    edges?: Array<{
+      node?: {
+        url?: string
+      }
+    }>
+  }
   mfOrderEntryCollection?: ProductMetafield
   mfOrderEntryDescription?: ProductMetafield
   mfFabric?: ProductMetafield
@@ -595,7 +603,8 @@ interface QuantityData {
  * - Status filtering happens at SKU table transform via skuAllowed
  */
 async function processJsonlItem(
-  item: Record<string, unknown>
+  item: Record<string, unknown>,
+  options?: { useProductImageGallery?: boolean }
 ): Promise<boolean> {
   const itemId = item.id as string | undefined
   const parentId = item.__parentId as string | undefined
@@ -609,18 +618,17 @@ async function processJsonlItem(
     const variantImage = item.image as { url?: string } | undefined
     const productStatus = product?.status ?? null
 
-    // Extract variant-level metafields (size and color)
+    // Extract variant-level metafield (size only)
     const variantMfSize = item.mfSize as ProductMetafield | undefined
-    const variantMfColor = item.mfColor as ProductMetafield | undefined
 
     // Extract metafield values safely
-    // Color: variant metafield → product metafield fallback
-    // Size: variant metafield → variant title fallback
+    // Color: product metafield ONLY (no variant fallback)
+    // Size: variant metafield ONLY (no title fallback)
     const metafields = {
       order_entry_collection: product?.mfOrderEntryCollection?.value ?? undefined,
       order_entry_description: product?.mfOrderEntryDescription?.value ?? undefined,
       fabric: product?.mfFabric?.value ?? undefined,
-      color: variantMfColor?.value ?? product?.mfColor?.value ?? undefined,
+      color: product?.mfColor?.value ?? undefined, // Product metafield only
       features: product?.mfFeatures?.value ?? undefined,
       msrp: product?.mfMSRP?.value ?? undefined,
       cad_ws_price: product?.mfCADWSPrice?.value ?? undefined,
@@ -632,8 +640,23 @@ async function processJsonlItem(
     // Extract weight data
     const weight = inventoryItem?.measurement?.weight
 
-    // Extract size: variant metafield → variant title fallback
-    const size = variantMfSize?.value || (item.title as string) || ''
+    // Extract size: variant metafield only (no fallback to title)
+    const size = variantMfSize?.value || ''
+
+    // Image selection decision tree with fallback
+    // Extract both image sources
+    const featuredImageUrl = product?.featuredMedia?.preview?.image?.url
+    const galleryImageUrl = product?.images?.edges?.[0]?.node?.url
+
+    // Apply decision tree based on toggle setting
+    let canonicalImageUrl: string | undefined
+    if (options?.useProductImageGallery) {
+      // Gallery mode: prefer gallery, fallback to featured
+      canonicalImageUrl = galleryImageUrl || featuredImageUrl
+    } else {
+      // Featured mode (default): prefer featured, fallback to gallery
+      canonicalImageUrl = featuredImageUrl || galleryImageUrl
+    }
 
     await upsertShopifyVariant({
       gid: itemId,
@@ -646,7 +669,7 @@ async function processJsonlItem(
       productGid: product?.id,
       productType: product?.productType,
       productStatus: productStatus ?? undefined,
-      imageUrl: product?.featuredMedia?.preview?.image?.url,
+      imageUrl: canonicalImageUrl,
       variantImageUrl: variantImage?.url,
       // Inventory item ID for linking to incoming quantities (OnRoute)
       inventoryItemGid: inventoryItem?.id,
@@ -704,7 +727,8 @@ async function processJsonlItem(
  */
 export async function processJsonlStream(
   response: Response,
-  onProgress?: (processed: number) => void
+  onProgress?: (processed: number) => void,
+  options?: { useProductImageGallery?: boolean }
 ): Promise<{ processed: number; errors: number }> {
   const reader = response.body?.getReader()
   if (!reader) {
@@ -729,7 +753,7 @@ export async function processJsonlStream(
         if (!line.trim()) continue
         try {
           const item = JSON.parse(line)
-          const wasProcessed = await processJsonlItem(item)
+          const wasProcessed = await processJsonlItem(item, options)
           if (wasProcessed) {
             processed++
             if (onProgress && processed % 100 === 0) {
@@ -747,7 +771,7 @@ export async function processJsonlStream(
     if (buffer.trim()) {
       try {
         const item = JSON.parse(buffer)
-        const wasProcessed = await processJsonlItem(item)
+        const wasProcessed = await processJsonlItem(item, options)
         if (wasProcessed) {
           processed++
         }
@@ -769,7 +793,8 @@ export async function processJsonlStream(
  */
 export async function processJsonlLines(
   jsonlText: string,
-  onProgress?: (processed: number) => void
+  onProgress?: (processed: number) => void,
+  options?: { useProductImageGallery?: boolean }
 ): Promise<{ processed: number; errors: number }> {
   const lines = jsonlText.trim().split('\n').filter(Boolean)
   let processed = 0
@@ -778,7 +803,7 @@ export async function processJsonlLines(
   for (const line of lines) {
     try {
       const item = JSON.parse(line)
-      const wasProcessed = await processJsonlItem(item)
+      const wasProcessed = await processJsonlItem(item, options)
       if (wasProcessed) {
         processed++
         if (onProgress && processed % 100 === 0) {
@@ -1009,6 +1034,7 @@ export async function transformToSkuTable(options?: { skipBackup?: boolean }): P
       Quantity: number | null
       Size: string | null
       ProductType: string | null
+      productId: string | null
       metafield_fabric: string | null
       metafield_color: string | null
       metafield_cad_ws_price_test: string | null
@@ -1022,7 +1048,7 @@ export async function transformToSkuTable(options?: { skipBackup?: boolean }): P
       CommittedQuantity: number | null
     }>>(`
       SELECT r.SkuID, r.ShopifyId, r.DisplayName, r.Quantity, r.Size, r.ProductType,
-             r.metafield_fabric, r.metafield_color, r.metafield_cad_ws_price_test,
+             r.productId, r.metafield_fabric, r.metafield_color, r.metafield_cad_ws_price_test,
              r.metafield_usd_ws_price, r.metafield_msrp_cad, r.metafield_msrp_us,
              r.metafield_order_entry_collection, r.metafield_order_entry_description,
              r.ShopifyProductImageURL,
@@ -1068,6 +1094,7 @@ export async function transformToSkuTable(options?: { skipBackup?: boolean }): P
       UnitPriceUSD: number | null
       DisplayPriority: number
       ShopifyProductVariantId: bigint | null
+      ShopifyProductId: string | null
       ShopifyImageURL: string | null
       OnRoute: number | null
     }> = []
@@ -1119,6 +1146,7 @@ export async function transformToSkuTable(options?: { skipBackup?: boolean }): P
             UnitPriceUSD: unitPriceUSD,
             DisplayPriority: 10000,
             ShopifyProductVariantId: r.ShopifyId,
+            ShopifyProductId: r.productId,
             ShopifyImageURL: r.ShopifyProductImageURL,
             // OnRoute = incoming - committed (PO Quantity - Sold Quantity)
             OnRoute: Math.max(0, (r.Incoming ?? 0) - (r.CommittedQuantity ?? 0)),
@@ -1225,6 +1253,10 @@ export async function runFullSync(options?: {
   const onProgress = options?.onProgress ?? ((step, details) => console.log(`Sync: ${step}${details ? ` - ${details}` : ''}`))
   const maxWaitMs = options?.maxWaitMs ?? 300000 // 5 minutes default
   const pollIntervalMs = options?.pollIntervalMs ?? 3000 // 3 seconds default
+
+  // Read sync settings for image source preference
+  const syncSettings = await getSyncSettings()
+  const useProductImageGallery = syncSettings.useProductImageGallery ?? false
 
   let operationId: string | undefined
 
@@ -1424,7 +1456,8 @@ export async function runFullSync(options?: {
             totalRecords: objectCount,
           })
         }
-      }
+      },
+      { useProductImageGallery }
     )
     onProgress('Step 3/5', `Complete - ${processResult.processed} variants processed`)
     await updateSyncProgress(operationId, {

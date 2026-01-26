@@ -4,9 +4,16 @@ import {
   getInventorySettings,
   getCompanySettings,
   getSizeOrderConfig,
+  getDistinctSizes,
+  getMissingSizeSkus,
+  getSizeAliases,
+  getSyncSettings,
+  getMissingImageProducts,
+  getMissingColorProducts,
 } from '@/lib/data/queries/settings'
 import { SettingsForm } from '@/components/admin/settings-form'
 import { SizeOrderConfig } from '@/components/admin/size-order-config'
+import { MissingShopifyDataPanels } from '@/components/admin/missing-shopify-data-panels'
 
 export const dynamic = 'force-dynamic'
 
@@ -16,24 +23,41 @@ export default async function SettingsPage() {
     redirect('/admin/login')
   }
 
-  const [settings, companySettings, sizeOrderConfig] = await Promise.all([
+  const [settings, companySettings, sizeOrderConfig, distinctSizes, missingSizeSkus, aliases, syncSettings, missingImages, missingColors] = await Promise.all([
     getInventorySettings(),
     getCompanySettings(),
     getSizeOrderConfig(),
+    getDistinctSizes(),
+    getMissingSizeSkus(),
+    getSizeAliases(),
+    getSyncSettings(),
+    getMissingImageProducts(),
+    getMissingColorProducts(),
   ])
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">Settings</h1>
+        <h1 className="text-3xl font-bold tracking-tight">Size Mapping and Order</h1>
         <p className="text-muted-foreground">
-          System configuration (InventorySettings.aspx parity)
+          Configure how sizes are mapped and sorted across the system
         </p>
       </div>
 
       <SettingsForm initial={settings} companySettings={companySettings} />
 
-      <SizeOrderConfig initialSizes={sizeOrderConfig.Sizes} />
+      <SizeOrderConfig
+        initialSizes={sizeOrderConfig.Sizes}
+        distinctSizes={distinctSizes}
+        missingSizeSkus={missingSizeSkus}
+        aliases={aliases}
+      />
+
+      <MissingShopifyDataPanels
+        missingImages={missingImages}
+        missingColors={missingColors}
+        shopifyStoreDomain={syncSettings.shopifyStoreDomain}
+      />
     </div>
   )
 }

@@ -15,7 +15,6 @@ import { auth } from '@/lib/auth/providers'
 import { prisma } from '@/lib/prisma'
 import { generatePdf, wrapHtml, formatDate } from '@/lib/pdf/generate'
 import { getEffectiveQuantity, parsePrice, getBaseSku, resolveColor } from '@/lib/utils'
-import { extractSize } from '@/lib/utils/size-sort'
 import { getCompanySettings } from '@/lib/data/queries/settings'
 import { getImageDataUrl } from '@/lib/utils/pdf-images'
 
@@ -97,7 +96,7 @@ export async function GET(
 
     for (const sku of skus) {
       const baseSku = getBaseSku(sku.SkuID, sku.Size)
-      const size = extractSize(sku.Size || '')
+      const size = sku.Size || ''
       const qty = sku.Quantity ?? 0
       const effectiveQty = getEffectiveQuantity(sku.SkuID, qty)
 

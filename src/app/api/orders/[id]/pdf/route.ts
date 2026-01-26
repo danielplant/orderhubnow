@@ -14,7 +14,6 @@ import { prisma } from '@/lib/prisma'
 import { generatePdf } from '@/lib/pdf/generate'
 import { generateOrderConfirmationHtml } from '@/lib/pdf/order-confirmation'
 import { parsePrice, resolveColor } from '@/lib/utils'
-import { extractSize } from '@/lib/utils/size-sort'
 import { getCompanySettings } from '@/lib/data/queries/settings'
 import { getImageDataUrl } from '@/lib/utils/pdf-images'
 
@@ -244,7 +243,7 @@ export async function GET(
           discount: discount,
           // Enhanced SKU details
           imageUrl,
-          size: extractSize(sku?.Size || ''),
+          size: sku?.Size || '',
           description: description,
           category: sku?.SkuCategories?.Name || '',
           color: resolveColor(sku?.SkuColor || null, skuId, description),

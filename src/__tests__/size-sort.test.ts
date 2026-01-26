@@ -1,68 +1,15 @@
 /**
  * Size Sort Tests
  *
- * Verifies size ordering and extraction logic for Limeapple products.
+ * Verifies size ordering logic for Limeapple products.
  * Tests cover:
  * - Full size range from baby months to adult letters
- * - Normalization of hyphenated month sizes (12-18M → 12/18M)
- * - Extraction from combined "Color / Size" variant titles
+ * - Raw string matching (no normalization)
+ * - Unknown sizes sort to the end
  */
 
 import { describe, it, expect } from 'vitest'
-import { extractSize, sortBySize } from '@/lib/utils/size-sort'
-
-describe('extractSize', () => {
-  it('should return size as-is when no separator', () => {
-    expect(extractSize('5/6')).toBe('5/6')
-    expect(extractSize('M')).toBe('M')
-    expect(extractSize('12/18M')).toBe('12/18M')
-  })
-
-  it('should normalize hyphenated month sizes to slashes', () => {
-    expect(extractSize('12-18M')).toBe('12/18M')
-    expect(extractSize('0-6M')).toBe('0/6M')
-    expect(extractSize('6-12M')).toBe('6/12M')
-    expect(extractSize('18-24M')).toBe('18/24M')
-  })
-
-  it('should extract size from "Size / Color" format', () => {
-    expect(extractSize('5/6 / Black')).toBe('5/6')
-    expect(extractSize('12/18M / Pink')).toBe('12/18M')
-    expect(extractSize('XS / Navy')).toBe('XS')
-  })
-
-  it('should extract size from "Color / Size" format', () => {
-    expect(extractSize('Fuchsia / 4')).toBe('4')
-    expect(extractSize('Pink / 12/18M')).toBe('12/18M')
-    expect(extractSize('Navy / XXL')).toBe('XXL')
-  })
-
-  it('should normalize hyphenated sizes in combined format', () => {
-    expect(extractSize('Pink / 12-18M')).toBe('12/18M')
-    expect(extractSize('6-12M / Blue')).toBe('6/12M')
-  })
-
-  it('should handle empty input', () => {
-    expect(extractSize('')).toBe('')
-  })
-
-  it('should strip prepack suffix (PP 2pc)', () => {
-    expect(extractSize('10/12(PP 2pc)')).toBe('10/12')
-    expect(extractSize('6/6X(PP 2pc)')).toBe('6/6X')
-    expect(extractSize('2/3(PP 2pc)')).toBe('2/3')
-    expect(extractSize('14/16(PP 2pc)')).toBe('14/16')
-  })
-
-  it('should strip prepack suffix with varying pc counts', () => {
-    expect(extractSize('7/8(PP 3pc)')).toBe('7/8')
-    expect(extractSize('4/5(PP 4pc)')).toBe('4/5')
-  })
-
-  it('should handle prepack suffix with spaces', () => {
-    expect(extractSize('10/12 (PP 2pc)')).toBe('10/12')
-    expect(extractSize('6/6X  (PP 2pc)')).toBe('6/6X')
-  })
-})
+import { sortBySize } from '@/lib/utils/size-sort'
 
 describe('sortBySize', () => {
   it('should sort baby month sizes correctly', () => {
@@ -74,18 +21,6 @@ describe('sortBySize', () => {
     ]
     const sorted = sortBySize(items)
     expect(sorted.map(i => i.size)).toEqual(['0/6M', '6/12M', '12/18M', '18/24M'])
-  })
-
-  it('should sort hyphenated month sizes correctly (after normalization)', () => {
-    const items = [
-      { size: '12-18M', sku: 'A' },
-      { size: '0-6M', sku: 'B' },
-      { size: '18-24M', sku: 'C' },
-      { size: '6-12M', sku: 'D' },
-    ]
-    const sorted = sortBySize(items)
-    // After normalization, should be in correct order
-    expect(sorted.map(i => i.sku)).toEqual(['B', 'D', 'A', 'C'])
   })
 
   it('should sort toddler sizes correctly', () => {
@@ -135,18 +70,14 @@ describe('sortBySize', () => {
     expect(sorted.map(i => i.size)).toEqual(['6/12M', '18/24M', '2T', '3T', '4'])
   })
 
-  it('should handle LULU-FC style sizes (from Devika email)', () => {
-    // Simulating the sizes shown in the screenshot: 2T, 3T, 12-18M, 18-24M, 6-12M
+  it('should be case-insensitive when matching sizes', () => {
     const items = [
-      { size: '2T', sku: 'A' },
-      { size: '3T', sku: 'B' },
-      { size: '12-18M', sku: 'C' },
-      { size: '18-24M', sku: 'D' },
-      { size: '6-12M', sku: 'E' },
+      { size: 'l', sku: 'A' },
+      { size: 's', sku: 'B' },
+      { size: 'm', sku: 'C' },
     ]
     const sorted = sortBySize(items)
-    // Expected order: 6/12M, 12/18M, 18/24M, 2T, 3T
-    expect(sorted.map(i => i.sku)).toEqual(['E', 'C', 'D', 'A', 'B'])
+    expect(sorted.map(i => i.size)).toEqual(['s', 'm', 'l'])
   })
 
   it('should put unknown sizes at the end', () => {
@@ -157,6 +88,16 @@ describe('sortBySize', () => {
     ]
     const sorted = sortBySize(items)
     expect(sorted.map(i => i.size)).toEqual(['S', 'M', 'UNKNOWN-SIZE'])
+  })
+
+  it('should handle empty sizes by putting them at the end', () => {
+    const items = [
+      { size: 'M', sku: 'A' },
+      { size: '', sku: 'B' },
+      { size: 'S', sku: 'C' },
+    ]
+    const sorted = sortBySize(items)
+    expect(sorted.map(i => i.size)).toEqual(['S', 'M', ''])
   })
 
   it('should not mutate the original array', () => {

@@ -9,7 +9,7 @@ export type {
 } from "@/lib/types";
 
 import type { Product, ProductVariant, DashboardMetrics } from "@/lib/types";
-import { sortBySize, loadSizeOrderConfig } from "@/lib/utils/size-sort";
+import { sortBySize, loadSizeOrderConfig, loadSizeAliasConfig } from "@/lib/utils/size-sort";
 import { getBaseSku } from "@/lib/utils";
 
 // Internal Shopify API types (not exported)
@@ -545,8 +545,8 @@ export async function getProductsByCategory(category: string): Promise<Product[]
   console.log(`Found ${products.length} products (grouped by base SKU)`);
   console.log("-----------------------------------\n");
 
-  // Load size order config from DB before sorting
-  await loadSizeOrderConfig();
+  // Load size order and alias config from DB before sorting
+  await Promise.all([loadSizeOrderConfig(), loadSizeAliasConfig()]);
 
   // Sort variants by size using Limeapple's specific size sequence
   return products.map((product) => ({
@@ -872,8 +872,8 @@ export async function getPreOrderProductsByCategory(category: string): Promise<P
   console.log(`Matched products: ${products.length}`);
   console.log("----------------------------------------------\n");
 
-  // Load size order config from DB before sorting
-  await loadSizeOrderConfig();
+  // Load size order and alias config from DB before sorting
+  await Promise.all([loadSizeOrderConfig(), loadSizeAliasConfig()]);
 
   // Sort variants by size using Limeapple's specific size sequence
   return products.map((product) => ({

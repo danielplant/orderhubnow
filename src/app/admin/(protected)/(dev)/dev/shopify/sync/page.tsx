@@ -53,6 +53,8 @@ interface SyncSettings {
   cleanupStaleBackups: boolean;
   syncMaxWaitMs: number;
   syncPollIntervalMs: number;
+  useProductImageGallery: boolean;
+  shopifyStoreDomain: string | null;
 }
 
 // Pipeline steps for visualization
@@ -757,6 +759,36 @@ export default function SyncDashboardPage() {
                     {(settingsForm.syncPollIntervalMs ?? 3000) / 1000} seconds between status checks
                   </p>
                 </div>
+
+                <h3 className="font-medium text-sm text-muted-foreground uppercase tracking-wider mt-6">Image Source</h3>
+
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={settingsForm.useProductImageGallery ?? false}
+                    onChange={e => setSettingsForm(prev => ({ ...prev, useProductImageGallery: e.target.checked }))}
+                    className="rounded border-border"
+                  />
+                  <span className="text-sm">Use product image gallery</span>
+                </label>
+                <p className="text-xs text-muted-foreground">
+                  {settingsForm.useProductImageGallery
+                    ? 'Using first image from product gallery'
+                    : 'Using product featured image (default)'}
+                </p>
+
+                <h3 className="font-medium text-sm text-muted-foreground uppercase tracking-wider mt-6">Shopify Store Domain</h3>
+
+                <input
+                  type="text"
+                  value={settingsForm.shopifyStoreDomain ?? ''}
+                  onChange={e => setSettingsForm(prev => ({ ...prev, shopifyStoreDomain: e.target.value || null }))}
+                  placeholder="e.g., limeappleonline.myshopify.com"
+                  className="w-full px-3 py-2 text-sm border rounded-md border-border bg-background"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Used to build Shopify admin links in the Missing Data panels.
+                </p>
               </div>
             </div>
 

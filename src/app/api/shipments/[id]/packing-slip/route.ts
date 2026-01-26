@@ -12,7 +12,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { generatePdf } from '@/lib/pdf/generate'
 import { generatePackingSlipHtml } from '@/lib/pdf/packing-slip'
-import { extractSize } from '@/lib/utils/size-sort'
 import { getDocument, getDocumentMetadata } from '@/lib/storage/document-storage'
 
 interface RouteContext {
@@ -159,7 +158,7 @@ export async function GET(
       return {
         sku: orderItem?.SKU || 'Unknown',
         productName: sku?.OrderEntryDescription || sku?.Description || orderItem?.SKU || 'Unknown Product',
-        size: extractSize(sku?.Size || ''),
+        size: sku?.Size || '',
         color: sku?.SkuColor || undefined,
         quantity: item.QuantityShipped || 0,
       }

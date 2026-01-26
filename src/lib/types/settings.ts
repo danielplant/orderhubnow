@@ -152,6 +152,14 @@ export type SyncSettingsRecord = {
   syncMaxWaitMs: number
   syncPollIntervalMs: number
 
+  // Image Source Settings
+  // false = use product.featuredMedia (single featured image)
+  // true = use product.images gallery (first image from gallery)
+  useProductImageGallery: boolean
+
+  // Shopify Store Domain (for building admin links in Missing Data panels)
+  shopifyStoreDomain: string | null
+
   updatedAt: Date
 }
 
@@ -199,6 +207,8 @@ export const SYNC_SETTINGS_DEFAULTS: SyncSettingsEditableFields = {
   cleanupStaleBackups: true,
   syncMaxWaitMs: 600000,
   syncPollIntervalMs: 3000,
+  useProductImageGallery: false, // Default: use featured image only
+  shopifyStoreDomain: null, // Set to e.g. "limeappleonline.myshopify.com" for Shopify admin links
 }
 
 // ============================================================================

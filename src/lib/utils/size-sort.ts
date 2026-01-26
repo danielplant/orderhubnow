@@ -1,13 +1,9 @@
 /**
  * Size ordering utility for Limeapple products.
- * Matches .NET logic from Utilities/Utilities.cs
- *
- * Updated to include full size range per Devika's list:
- * - Baby/Toddler months: 0/6M, 6/12M, 12/18M, 18/24M
- * - Toddler/Kids: 2T, 2/3, 3T, 4, 4/5, 5, 5/6, 6, 6/6X, 6/7, 7, 7/8, 8, 10, 10/12, 12, 14, 14/16, 16
- * - Women/Girls letters: XXS, XS, S, M, L, XL, XXL
  *
  * Configurable via Admin Settings → Size Order.
+ * Uses raw size strings from Shopify metafields (no normalization).
+ * Supports aliases for mapping format variants without modifying stored data.
  * When no config exists, falls back to DEFAULT_SIZE_ORDER.
  */
 
@@ -103,108 +99,85 @@ export async function loadSizeOrderConfig(): Promise<void> {
   }
 }
 
+// ============================================================================
+// Runtime Cache for Size Aliases
+// ============================================================================
+
 /**
- * Normalize a size string for consistent matching.
- * - Converts hyphens to slashes in month sizes: "12-18M" → "12/18M"
- * - Trims whitespace
- * - Converts to uppercase
+ * Cached alias map from database config.
+ * Maps raw Shopify size strings to canonical sizes for sorting.
+ * Set to null when cache should be invalidated.
  */
-function normalizeSize(raw: string): string {
-  if (!raw) return '';
+let cachedAliasMap: Map<string, string> | null = null;
 
-  let s = raw.trim().toUpperCase();
-
-  // Convert hyphenated month sizes to slash format: 0-6M → 0/6M, 12-18M → 12/18M, etc.
-  // Pattern: digit(s) + hyphen + digit(s) + M
-  s = s.replace(/^(\d+)-(\d+M)$/i, '$1/$2');
-
-  return s;
+/**
+ * Invalidate the size alias cache.
+ * Call this after admin saves/deletes an alias.
+ */
+export function invalidateSizeAliasCache(): void {
+  cachedAliasMap = null;
 }
 
 /**
- * Check if a string is a known size.
- * Normalizes before checking against current size order (cached or default).
+ * Set the size alias cache directly.
+ * Used by loadSizeAliasConfig() after fetching from DB.
  */
-function isKnownSize(s: string): boolean {
-  const normalized = normalizeSize(s);
-  return getSizeOrder().some(size => size.toUpperCase() === normalized);
+export function setSizeAliasCache(aliases: { raw: string; canonical: string }[]): void {
+  cachedAliasMap = new Map(aliases.map(a => [a.raw, a.canonical]));
 }
 
 /**
- * Strip prepack suffix like "(PP 2pc)" from size strings.
- * Examples:
- * - "10/12(PP 2pc)" → "10/12"
- * - "6/6X(PP 2pc)" → "6/6X"
- * - "O/S" → "O/S" (unchanged)
+ * Get the current alias map (cached or empty).
+ * Synchronous for use in sorting functions.
  */
-function stripPrepackSuffix(size: string): string {
-  // Remove (PP Xpc) suffix - matches patterns like "(PP 2pc)", "(PP 3pc)", etc.
-  return size.replace(/\s*\(PP\s*\d+pc\)\s*$/i, '').trim();
+function getAliasMap(): Map<string, string> {
+  return cachedAliasMap ?? new Map();
 }
 
 /**
- * Extract just the size from a Shopify variant title.
- * Shopify variant titles may be formatted as:
- * - "5/6 / Black" (Size / Color)
- * - "Fuchsia / 4" (Color / Size)
- * - "5/6" (Size only)
- * - "10/12(PP 2pc)" (Size with prepack suffix)
+ * Load size alias configuration from database and cache it.
+ * Call this before sortBySize() in query functions to ensure
+ * the admin-configured aliases are used.
  *
- * This function detects which part is the size and returns just that.
- * Also normalizes the size (e.g., "12-18M" → "12/18M") and strips prepack suffixes.
+ * Safe to call multiple times - only loads if cache is empty.
  */
-export function extractSize(variantTitle: string): string {
-  if (!variantTitle) return '';
+export async function loadSizeAliasConfig(): Promise<void> {
+  // Skip if already cached
+  if (cachedAliasMap !== null) return;
 
-  // First strip any prepack suffix
-  const cleaned = stripPrepackSuffix(variantTitle);
-
-  // If it doesn't contain " / ", normalize and return as-is
-  if (!cleaned.includes(' / ')) {
-    return normalizeSize(cleaned);
+  try {
+    const rows = await prisma.sizeAlias.findMany({
+      select: { RawSize: true, CanonicalSize: true },
+    });
+    cachedAliasMap = new Map(rows.map(r => [r.RawSize, r.CanonicalSize]));
+  } catch (err) {
+    console.error('[loadSizeAliasConfig] Failed to load aliases:', err);
+    cachedAliasMap = new Map();
   }
+}
 
-  const parts = cleaned.split(' / ').map(p => p.trim());
+// ============================================================================
+// Sorting Logic
+// ============================================================================
 
-  // Helper to check if a part looks like a size (including parenthetical format like "XS(6/6X)")
-  const looksLikeSize = (s: string): boolean => {
-    // Check if it's a known size directly
-    if (isKnownSize(s)) return true;
-    // Check for parenthetical format: "XS(6/6X)", "S(7/8)", "M(10/12)", "L(14/16)"
-    const parenMatch = s.match(/^([A-Z]{1,3})\s*\(/i);
-    if (parenMatch && isKnownSize(parenMatch[1])) return true;
-    // Check if it starts with a number (like "6/6X", "7/8", "10/12")
-    if (/^\d/.test(s)) return true;
-    return false;
-  };
-
-  // Check first part - if it looks like a size, use it
-  if (parts[0] && looksLikeSize(parts[0])) {
-    return normalizeSize(parts[0]);
-  }
-
-  // Check second part - if it looks like a size, use it (reversed format: Color / Size)
-  if (parts[1] && looksLikeSize(parts[1])) {
-    return normalizeSize(parts[1]);
-  }
-
-  // Neither is a standard size (e.g., "M/L - size 7 to 16 / Black")
-  // Return first part normalized as fallback
-  return normalizeSize(parts[0]) || variantTitle.trim();
+/**
+ * Get the canonical size for a raw size string.
+ * Uses alias mapping if one exists, otherwise returns raw size.
+ */
+function getCanonicalSize(raw: string): string {
+  return getAliasMap().get(raw) ?? raw;
 }
 
 /**
  * Get the sort index for a size string.
- * Automatically extracts and normalizes the size from variant titles.
- * Uses current size order (cached or default).
+ * Applies alias mapping, then looks up in the size order list (case-insensitive).
  * Returns a high number for unknown sizes so they sort to the end.
  */
 function getSizeIndex(size: string): number {
-  // Extract clean size from variant titles like "5/6 / Black"
-  const cleanSize = extractSize(size);
-  // Already normalized by extractSize, but normalize again for safety
-  const normalized = normalizeSize(cleanSize);
-  const index = getSizeOrder().findIndex(s => s.toUpperCase() === normalized);
+  if (!size) return 9999;
+  const canonical = getCanonicalSize(size);
+  const upper = canonical.toUpperCase();
+  const index = getSizeOrder().findIndex(s => s.toUpperCase() === upper);
   return index >= 0 ? index : 9999;
 }
 

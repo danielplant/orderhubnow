@@ -9,7 +9,6 @@ import { generatePdf } from '@/lib/pdf/generate'
 import { generatePackingSlipHtml } from '@/lib/pdf/packing-slip'
 import { generateShippingInvoiceHtml } from '@/lib/pdf/shipping-invoice'
 import { storeDocument, type DocumentMetadata } from '@/lib/storage/document-storage'
-import { extractSize } from '@/lib/utils/size-sort'
 import { getCompanySettings } from '@/lib/data/queries/settings'
 
 interface GenerateDocumentsInput {
@@ -173,7 +172,7 @@ export async function generateShipmentDocuments(
     return {
       sku: orderItem?.SKU || 'Unknown',
       productName: sku?.OrderEntryDescription || sku?.Description || orderItem?.SKU || 'Unknown Product',
-      size: extractSize(sku?.Size || ''),
+      size: sku?.Size || '',
       color: sku?.SkuColor || undefined,
       quantity: item.QuantityShipped || 0,
     }
@@ -188,7 +187,7 @@ export async function generateShipmentDocuments(
     return {
       sku: orderItem?.SKU || 'Unknown',
       productName: sku?.OrderEntryDescription || sku?.Description || orderItem?.SKU || 'Unknown Product',
-      size: extractSize(sku?.Size || ''),
+      size: sku?.Size || '',
       quantity: item.QuantityShipped || 0,
       unitPrice: price,
       lineTotal: price * (item.QuantityShipped || 0),

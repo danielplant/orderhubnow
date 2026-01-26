@@ -10,7 +10,6 @@ import { auth } from '@/lib/auth/providers'
 import { prisma } from '@/lib/prisma'
 import { formatCurrency } from '@/lib/utils'
 import { parseOrdersListInput } from '@/lib/data/queries/orders'
-import { extractSize } from '@/lib/utils/size-sort'
 import type { OrderStatus } from '@/lib/types/order'
 
 // ============================================================================
@@ -369,7 +368,7 @@ async function generateQBExport(orders: OrderForExport[]): Promise<ExcelJS.Buffe
 
     for (const item of orderItems) {
       // Get size from Sku table (canonical source)
-      const size = extractSize(skuSizeMap.get(item.SKU) || '')
+      const size = skuSizeMap.get(item.SKU) || ''
 
       sheet.addRow({
         brand: 'Limeapple',

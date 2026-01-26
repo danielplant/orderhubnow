@@ -10,7 +10,7 @@ import type {
   SyncSettingsEditableFields,
 } from '@/lib/types/settings'
 import { SYNC_SETTINGS_DEFAULTS } from '@/lib/types/settings'
-import { invalidateSizeOrderCache, setSizeOrderCache } from '@/lib/utils/size-sort'
+import { invalidateSizeOrderCache, setSizeOrderCache, invalidateSizeAliasCache } from '@/lib/utils/size-sort'
 
 /**
  * Parse a value that may be number or string to a valid number, or null.
@@ -449,19 +449,27 @@ export async function updateSizeOrderConfig(
   updatedBy?: string
 ): Promise<ActionResult> {
   try {
-    // Clean and normalize: trim, uppercase, filter empty
+    // Preserve raw sizes exactly as-is from Shopify, only filter out empty strings
     const cleaned = sizes
-      .map(s => s.trim().toUpperCase())
-      .filter(Boolean)
+      .map(s => (s ?? '').toString())
+      .filter(s => s !== '')
 
     if (cleaned.length === 0) {
       return { success: false, error: 'At least one size is required' }
     }
 
-    // Check for duplicates
-    const unique = [...new Set(cleaned)]
+    // Check for duplicates (case-insensitive)
+    const seenUpper = new Set<string>()
+    const unique: string[] = []
+    for (const s of cleaned) {
+      const upper = s.toUpperCase()
+      if (!seenUpper.has(upper)) {
+        seenUpper.add(upper)
+        unique.push(s)
+      }
+    }
     if (unique.length !== cleaned.length) {
-      return { success: false, error: 'Duplicate sizes detected' }
+      return { success: false, error: 'Duplicate sizes detected (case-insensitive check)' }
     }
 
     const existing = await prisma.sizeOrderConfig.findFirst()
@@ -489,5 +497,137 @@ export async function updateSizeOrderConfig(
   } catch (err) {
     console.error('[updateSizeOrderConfig] Error:', err)
     return { success: false, error: 'Sorry, there was an error updating size order.' }
+  }
+}
+
+// ============================================================================
+// Size Alias Actions
+// ============================================================================
+
+/**
+ * Create or update a size alias.
+ * Maps a raw Shopify size to a canonical size for sorting.
+ */
+export async function upsertSizeAlias(
+  raw: string,
+  canonical: string,
+  updatedBy?: string
+): Promise<ActionResult> {
+  try {
+    if (!raw || !canonical) {
+      return { success: false, error: 'Both raw size and canonical size are required' }
+    }
+
+    await prisma.sizeAlias.upsert({
+      where: { RawSize: raw },
+      update: { CanonicalSize: canonical, UpdatedBy: updatedBy ?? 'admin' },
+      create: { RawSize: raw, CanonicalSize: canonical, UpdatedBy: updatedBy ?? 'admin' },
+    })
+
+    // Invalidate alias cache so next sort uses new mapping
+    invalidateSizeAliasCache()
+
+    revalidatePath('/admin/settings')
+    return { success: true, message: 'Size alias saved.' }
+  } catch (err) {
+    console.error('[upsertSizeAlias] Error:', err)
+    return { success: false, error: 'Sorry, there was an error saving the size alias.' }
+  }
+}
+
+/**
+ * Delete a size alias.
+ */
+export async function deleteSizeAlias(raw: string): Promise<ActionResult> {
+  try {
+    if (!raw) {
+      return { success: false, error: 'Raw size is required' }
+    }
+
+    await prisma.sizeAlias.delete({ where: { RawSize: raw } })
+
+    // Invalidate alias cache
+    invalidateSizeAliasCache()
+
+    revalidatePath('/admin/settings')
+    return { success: true, message: 'Size alias deleted.' }
+  } catch (err) {
+    console.error('[deleteSizeAlias] Error:', err)
+    return { success: false, error: 'Sorry, there was an error deleting the size alias.' }
+  }
+}
+
+/**
+ * Remove a canonical size and its associated aliases atomically.
+ * Uses a database transaction to ensure all-or-nothing behavior.
+ */
+export async function removeCanonicalSizeWithAliases(
+  aliasRawSizes: string[],
+  newSizeOrder: string[],
+  updatedBy?: string
+): Promise<ActionResult> {
+  try {
+    // Validate new size order
+    const cleaned = newSizeOrder
+      .map(s => (s ?? '').toString())
+      .filter(s => s !== '')
+
+    if (cleaned.length === 0) {
+      return { success: false, error: 'At least one size is required' }
+    }
+
+    // Check for duplicates (case-insensitive)
+    const seenUpper = new Set<string>()
+    const unique: string[] = []
+    for (const s of cleaned) {
+      const upper = s.toUpperCase()
+      if (!seenUpper.has(upper)) {
+        seenUpper.add(upper)
+        unique.push(s)
+      }
+    }
+    if (unique.length !== cleaned.length) {
+      return { success: false, error: 'Duplicate sizes detected (case-insensitive check)' }
+    }
+
+    // Execute both operations in a transaction
+    await prisma.$transaction(async (tx) => {
+      // 1. Delete all affected aliases
+      if (aliasRawSizes.length > 0) {
+        await tx.sizeAlias.deleteMany({
+          where: { RawSize: { in: aliasRawSizes } }
+        })
+      }
+
+      // 2. Update size order config
+      const existing = await tx.sizeOrderConfig.findFirst()
+      const data = {
+        Sizes: JSON.stringify(unique),
+        UpdatedBy: updatedBy || 'admin',
+      }
+
+      if (existing) {
+        await tx.sizeOrderConfig.update({
+          where: { ID: existing.ID },
+          data,
+        })
+      } else {
+        await tx.sizeOrderConfig.create({ data })
+      }
+    })
+
+    // Invalidate both caches
+    invalidateSizeAliasCache()
+    invalidateSizeOrderCache()
+    setSizeOrderCache(unique)
+
+    revalidatePath('/admin/settings')
+    return {
+      success: true,
+      message: `Size removed and ${aliasRawSizes.length} alias(es) deleted.`
+    }
+  } catch (err) {
+    console.error('[removeCanonicalSizeWithAliases] Error:', err)
+    return { success: false, error: 'Sorry, there was an error removing the size. No changes were made.' }
   }
 }

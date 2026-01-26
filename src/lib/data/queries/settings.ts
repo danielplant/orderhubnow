@@ -258,3 +258,131 @@ export async function getSizeOrderConfig(): Promise<SizeOrderConfigRecord> {
     UpdatedBy: row.UpdatedBy,
   }
 }
+
+/**
+ * Get distinct sizes from SKU table with counts.
+ * Used by the Size Order admin UI to show unmapped sizes from Shopify.
+ */
+export async function getDistinctSizes(): Promise<{ size: string; count: number }[]> {
+  const result = await prisma.$queryRaw<{ size: string; count: bigint }[]>`
+    SELECT Size as size, COUNT(*) as count
+    FROM Sku
+    WHERE Size IS NOT NULL AND Size != ''
+    GROUP BY Size
+    ORDER BY count DESC
+  `
+  // Convert BigInt count to number
+  return result.map(r => ({ size: r.size, count: Number(r.count) }))
+}
+
+/**
+ * Get SKUs that have missing (NULL or empty) size field.
+ * Used by the Missing Sizes panel to show which variants need the size metafield set in Shopify.
+ */
+export async function getMissingSizeSkus(): Promise<{
+  skuId: string
+  shopifyVariantId: string | null
+  description: string | null
+}[]> {
+  const rows = await prisma.sku.findMany({
+    where: { OR: [{ Size: null }, { Size: '' }] },
+    select: {
+      SkuID: true,
+      ShopifyProductVariantId: true,
+      OrderEntryDescription: true,
+    },
+    orderBy: { SkuID: 'asc' },
+  })
+  return rows.map(r => ({
+    skuId: r.SkuID,
+    shopifyVariantId: r.ShopifyProductVariantId?.toString() ?? null,
+    description: r.OrderEntryDescription,
+  }))
+}
+
+// ============================================================================
+// Size Alias Configuration
+// ============================================================================
+
+/**
+ * Get all size aliases for mapping raw sizes to canonical sizes.
+ * Used by size sorting to handle format variants.
+ */
+export async function getSizeAliases(): Promise<{ raw: string; canonical: string }[]> {
+  const rows = await prisma.sizeAlias.findMany({
+    select: { RawSize: true, CanonicalSize: true },
+    orderBy: { RawSize: 'asc' },
+  })
+  return rows.map(r => ({ raw: r.RawSize, canonical: r.CanonicalSize }))
+}
+
+// ============================================================================
+// Missing Data Queries (for Missing Images/Colors panels)
+// ============================================================================
+
+export interface MissingDataItem {
+  shopifyProductId: string | null
+  title: string
+  variantCount: number
+  exampleSku: string
+}
+
+/**
+ * Get products that have missing (NULL or empty) image field.
+ * Groups by ShopifyProductId to show at product level (not variant level).
+ * Used by the Missing Images panel on the Settings page.
+ */
+export async function getMissingImageProducts(): Promise<MissingDataItem[]> {
+  const result = await prisma.$queryRaw<Array<{
+    shopifyProductId: string | null
+    title: string
+    variantCount: bigint
+    exampleSku: string
+  }>>`
+    SELECT
+      ShopifyProductId as shopifyProductId,
+      MIN(COALESCE(OrderEntryDescription, Description, SkuID)) AS title,
+      COUNT(*) AS variantCount,
+      MIN(SkuID) AS exampleSku
+    FROM Sku
+    WHERE ShopifyImageURL IS NULL OR LTRIM(RTRIM(ShopifyImageURL)) = ''
+    GROUP BY ShopifyProductId
+    ORDER BY COUNT(*) DESC
+  `
+  return result.map(r => ({
+    shopifyProductId: r.shopifyProductId,
+    title: r.title,
+    variantCount: Number(r.variantCount),
+    exampleSku: r.exampleSku,
+  }))
+}
+
+/**
+ * Get products that have missing (NULL or empty) color field.
+ * Groups by ShopifyProductId to show at product level (not variant level).
+ * Used by the Missing Colors panel on the Settings page.
+ */
+export async function getMissingColorProducts(): Promise<MissingDataItem[]> {
+  const result = await prisma.$queryRaw<Array<{
+    shopifyProductId: string | null
+    title: string
+    variantCount: bigint
+    exampleSku: string
+  }>>`
+    SELECT
+      ShopifyProductId as shopifyProductId,
+      MIN(COALESCE(OrderEntryDescription, Description, SkuID)) AS title,
+      COUNT(*) AS variantCount,
+      MIN(SkuID) AS exampleSku
+    FROM Sku
+    WHERE SkuColor IS NULL OR LTRIM(RTRIM(SkuColor)) = ''
+    GROUP BY ShopifyProductId
+    ORDER BY COUNT(*) DESC
+  `
+  return result.map(r => ({
+    shopifyProductId: r.shopifyProductId,
+    title: r.title,
+    variantCount: Number(r.variantCount),
+    exampleSku: r.exampleSku,
+  }))
+}

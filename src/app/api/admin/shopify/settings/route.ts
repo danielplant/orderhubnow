@@ -43,6 +43,8 @@ export async function PUT(request: Request) {
       cleanupStaleBackups,
       syncMaxWaitMs,
       syncPollIntervalMs,
+      useProductImageGallery,
+      shopifyStoreDomain,
     } = body
 
     const result = await updateSyncSettings({
@@ -61,6 +63,8 @@ export async function PUT(request: Request) {
       cleanupStaleBackups,
       syncMaxWaitMs,
       syncPollIntervalMs,
+      useProductImageGallery,
+      shopifyStoreDomain,
     })
 
     if (!result.success) {

@@ -5,7 +5,6 @@
 
 import { prisma } from '@/lib/prisma'
 import { parsePrice, getBaseSku, resolveColor } from '@/lib/utils'
-import { extractSize } from '@/lib/utils/size-sort'
 import type {
   ProductsListInput,
   ProductsListResult,
@@ -199,7 +198,7 @@ export async function getProducts(
       const skuId = r.SkuID
       const qty = r.Quantity ?? 0
       const baseSku = getBaseSku(skuId, r.Size)
-      const size = extractSize(r.Size || '')
+      const size = r.Size || ''
       const description = (r.OrderEntryDescription ?? r.Description ?? skuId) as string
       return {
         id: String(r.ID),
@@ -346,7 +345,7 @@ export async function getProductByBaseSku(baseSku: string) {
   const variants = skus.map((sku) => {
     return {
       sku: sku.SkuID,
-      size: extractSize(sku.Size || ''),
+      size: sku.Size || '',
       available: sku.Quantity ?? 0,
       onRoute: sku.OnRoute ?? 0,
       priceCad: parsePrice(sku.PriceCAD),

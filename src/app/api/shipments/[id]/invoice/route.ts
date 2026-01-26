@@ -12,7 +12,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { generatePdf } from '@/lib/pdf/generate'
 import { generateShippingInvoiceHtml } from '@/lib/pdf/shipping-invoice'
-import { extractSize } from '@/lib/utils/size-sort'
 import { getDocument, getDocumentMetadata } from '@/lib/storage/document-storage'
 import { getCompanySettings } from '@/lib/data/queries/settings'
 
@@ -214,7 +213,7 @@ export async function GET(
       return {
         sku: orderItem?.SKU || 'Unknown',
         productName: sku?.OrderEntryDescription || sku?.Description || orderItem?.SKU || 'Unknown Product',
-        size: extractSize(sku?.Size || ''),
+        size: sku?.Size || '',
         color: sku?.SkuColor || undefined,
         quantity,
         unitPrice,

@@ -420,6 +420,7 @@ model Sku {
   Season                  String?        @db.NVarChar(500)
   DisplayPriority         Int?
   ShopifyProductVariantId BigInt?
+  ShopifyProductId        String?        @db.NVarChar(500)
   SyncOrderTemp           Int?
   ShopifyImageURL         String?        @db.NVarChar(500)
   ThumbnailPath           String?        @db.NVarChar(500)
@@ -1198,6 +1199,14 @@ model SyncSettings {
   syncMaxWaitMs             Int      @default(600000) @map("SyncMaxWaitMs")
   syncPollIntervalMs        Int      @default(3000) @map("SyncPollIntervalMs")
 
+  // Image Source Settings
+  // false = use product.featuredMedia (single featured image)
+  // true = use product.images gallery (first image from gallery)
+  useProductImageGallery    Boolean  @default(false) @map("UseProductImageGallery")
+
+  // Shopify Store Domain (for building admin links in Missing Data panels)
+  shopifyStoreDomain        String?  @db.NVarChar(200) @map("ShopifyStoreDomain")
+
   updatedAt                 DateTime @default(now()) @updatedAt @map("UpdatedAt")
 
   // Relation to history
@@ -1256,4 +1265,24 @@ model SizeOrderConfig {
   Sizes     String   @db.NVarChar(Max)  // JSON array of size strings
   UpdatedAt DateTime @default(now()) @updatedAt
   UpdatedBy String?  @db.NVarChar(255)
+}
+
+// ============================================================================
+// Size Alias Configuration
+// ============================================================================
+// Maps raw size strings to canonical sizes for sorting.
+// Allows format variants (e.g., "XS/S (6-8)" vs "XS/S(6-8)") to sort identically
+// without modifying the stored raw values.
+// ============================================================================
+
+/// Size alias - maps raw Shopify size to canonical size for sorting
+model SizeAlias {
+  ID            Int      @id(map: "PK_SizeAlias") @default(autoincrement())
+  RawSize       String   @unique @db.NVarChar(100)  // Exact string from Shopify
+  CanonicalSize String   @db.NVarChar(100)          // Mapped size for sorting
+  UpdatedAt     DateTime @default(now()) @updatedAt
+  UpdatedBy     String?  @db.NVarChar(255)
+
+  @@index([CanonicalSize])
+  @@map("SizeAlias")
 }
