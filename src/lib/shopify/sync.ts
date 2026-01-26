@@ -132,7 +132,7 @@ export const BULK_OPERATION_QUERY = `
               displayName
               title
               image { url }
-              mfSize: metafield(namespace: "custom", key: "size") { value }
+              selectedOptions { name value }
               product {
                 id
                 title
@@ -618,12 +618,13 @@ async function processJsonlItem(
     const variantImage = item.image as { url?: string } | undefined
     const productStatus = product?.status ?? null
 
-    // Extract variant-level metafield (size only)
-    const variantMfSize = item.mfSize as ProductMetafield | undefined
+    // Extract size from selectedOptions (standard Shopify variant option)
+    const selectedOptions = item.selectedOptions as Array<{ name: string; value: string }> | undefined
+    const sizeOption = selectedOptions?.find(opt => opt.name.toLowerCase() === 'size')
+    const size = sizeOption?.value || ''
 
     // Extract metafield values safely
     // Color: product metafield ONLY (no variant fallback)
-    // Size: variant metafield ONLY (no title fallback)
     const metafields = {
       order_entry_collection: product?.mfOrderEntryCollection?.value ?? undefined,
       order_entry_description: product?.mfOrderEntryDescription?.value ?? undefined,
@@ -639,9 +640,6 @@ async function processJsonlItem(
 
     // Extract weight data
     const weight = inventoryItem?.measurement?.weight
-
-    // Extract size: variant metafield only (no fallback to title)
-    const size = variantMfSize?.value || ''
 
     // Image selection decision tree with fallback
     // Extract both image sources
