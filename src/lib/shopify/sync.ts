@@ -244,26 +244,42 @@ export async function isSyncInProgress(
 
 /**
  * Clean up orphaned sync runs.
- * Marks runs that have been "started" for more than 30 minutes as "timeout".
- * This handles cases where webhooks never arrive.
+ * Uses heartbeat staleness to detect dead processes:
+ * - If LastHeartbeat is > 5 minutes old (or null and StartedAt > 5 min), process is dead
+ * - Marks such runs as "timeout"
+ *
+ * This is more accurate than the old 30-minute StartedAt check because
+ * it detects processes that died mid-sync rather than just long-running ones.
  */
 export async function cleanupOrphanedRuns(): Promise<number> {
+  const staleThreshold = new Date(Date.now() - 5 * 60 * 1000) // 5 minutes
+  const legacyThreshold = new Date(Date.now() - 30 * 60 * 1000) // 30 minutes for runs without heartbeat
+
+  // Find runs with stale heartbeat OR legacy runs without heartbeat
   const result = await prisma.shopifySyncRun.updateMany({
     where: {
       Status: 'started',
-      StartedAt: { lt: new Date(Date.now() - 30 * 60 * 1000) },
+      OR: [
+        // Heartbeat-based detection: heartbeat is stale
+        { LastHeartbeat: { lt: staleThreshold } },
+        // Legacy detection: no heartbeat AND started > 30 min ago
+        {
+          LastHeartbeat: null,
+          StartedAt: { lt: legacyThreshold },
+        },
+      ],
     },
     data: {
       Status: 'timeout',
       CompletedAt: new Date(),
-      ErrorMessage: 'Sync timed out - webhook never received',
+      ErrorMessage: 'Sync timed out - process died or became unresponsive',
     },
   })
-  
+
   if (result.count > 0) {
     console.log(`Cleaned up ${result.count} orphaned sync run(s)`)
   }
-  
+
   return result.count
 }
 
@@ -274,15 +290,28 @@ export async function createSyncRun(
   syncType: 'scheduled' | 'on-demand',
   operationId?: string
 ): Promise<bigint> {
+  const now = new Date()
   const run = await prisma.shopifySyncRun.create({
     data: {
       SyncType: syncType,
       Status: 'started',
       OperationId: operationId ?? null,
-      StartedAt: new Date(),
+      StartedAt: now,
+      LastHeartbeat: now, // Initialize heartbeat
     },
   })
   return run.ID
+}
+
+/**
+ * Update heartbeat for a running sync.
+ * Should be called periodically during processing to indicate the process is alive.
+ */
+export async function updateHeartbeat(operationId: string): Promise<void> {
+  await prisma.shopifySyncRun.updateMany({
+    where: { OperationId: operationId, Status: 'started' },
+    data: { LastHeartbeat: new Date() },
+  })
 }
 
 /**
@@ -308,6 +337,7 @@ export async function completeSyncRun(
 
 /**
  * Update sync run progress for real-time dashboard.
+ * Also updates LastHeartbeat to indicate the process is alive.
  */
 export async function updateSyncProgress(
   operationId: string,
@@ -327,6 +357,7 @@ export async function updateSyncProgress(
       ProgressPercent: progress.percent,
       RecordsProcessed: progress.recordsProcessed ?? null,
       TotalRecords: progress.totalRecords ?? null,
+      LastHeartbeat: new Date(), // Keep heartbeat fresh
     },
   })
 }
@@ -348,6 +379,8 @@ export async function getLatestSyncRun(): Promise<{
   progressPercent: number | null
   recordsProcessed: number | null
   totalRecords: number | null
+  // Heartbeat
+  lastHeartbeat: Date | null
 } | null> {
   const run = await prisma.shopifySyncRun.findFirst({
     orderBy: { StartedAt: 'desc' },
@@ -369,6 +402,8 @@ export async function getLatestSyncRun(): Promise<{
     progressPercent: run.ProgressPercent,
     recordsProcessed: run.RecordsProcessed,
     totalRecords: run.TotalRecords,
+    // Heartbeat
+    lastHeartbeat: run.LastHeartbeat,
   }
 }
 

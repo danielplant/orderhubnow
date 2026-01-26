@@ -388,6 +388,7 @@ model ShopifySyncRun {
   ProgressPercent   Int?                          // 0-100
   RecordsProcessed  Int?                          // Current count processed
   TotalRecords      Int?                          // Expected total (from bulk op)
+  LastHeartbeat     DateTime? @db.DateTime        // Updated during processing to detect dead processes
 
   @@index([Status, StartedAt], map: "IX_ShopifySyncRun_Status_StartedAt")
 }

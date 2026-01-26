@@ -43,6 +43,8 @@ export async function GET() {
             progressPercent: latestRun.progressPercent,
             recordsProcessed: latestRun.recordsProcessed,
             totalRecords: latestRun.totalRecords,
+            // Heartbeat for stale detection
+            lastHeartbeat: latestRun.lastHeartbeat?.toISOString() ?? null,
           }
         : null,
       syncInProgress,

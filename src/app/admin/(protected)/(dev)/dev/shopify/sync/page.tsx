@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Play, RefreshCw, CheckCircle, XCircle, Clock, Zap, Database, ArrowRight, Settings, ChevronDown, ChevronUp, History } from 'lucide-react';
+import { Play, RefreshCw, CheckCircle, XCircle, Clock, Zap, Database, ArrowRight, Settings, ChevronDown, ChevronUp, History, StopCircle, AlertTriangle } from 'lucide-react';
 import Link from 'next/link';
 import { formatDate } from '@/lib/utils/format';
 
@@ -27,6 +27,7 @@ interface SyncStatus {
     progressPercent: number | null;
     recordsProcessed: number | null;
     totalRecords: number | null;
+    lastHeartbeat: string | null;
   } | null;
   productCount?: number;
 }
@@ -111,9 +112,26 @@ function formatHistoryDate(isoString: string): string {
   });
 }
 
+/**
+ * Check if the heartbeat is stale (no update for 2+ minutes).
+ * Returns the number of minutes since last heartbeat, or null if not applicable.
+ */
+function getHeartbeatStaleness(lastHeartbeat: string | null): number | null {
+  if (!lastHeartbeat) return null;
+  const heartbeatTime = new Date(lastHeartbeat).getTime();
+  const minutesSinceHeartbeat = (Date.now() - heartbeatTime) / 60000;
+  return minutesSinceHeartbeat;
+}
+
+function isHeartbeatStale(lastHeartbeat: string | null): boolean {
+  const minutes = getHeartbeatStaleness(lastHeartbeat);
+  return minutes !== null && minutes > 2; // Stale if > 2 minutes
+}
+
 export default function SyncDashboardPage() {
   const [status, setStatus] = useState<SyncStatus | null>(null);
   const [isStarting, setIsStarting] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
   const [result, setResult] = useState<SyncResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [history, setHistory] = useState<SyncHistoryEntry[]>([]);
@@ -206,6 +224,36 @@ export default function SyncDashboardPage() {
       setError(err instanceof Error ? err.message : 'Sync failed');
     } finally {
       setIsStarting(false);
+    }
+  };
+
+  // Cancel sync
+  const cancelSync = async () => {
+    if (!confirm('Are you sure you want to cancel the current sync? This will stop the sync and mark it as cancelled.')) {
+      return;
+    }
+
+    setIsCancelling(true);
+    setError(null);
+
+    try {
+      const res = await fetch('/api/admin/sync-shopify', {
+        method: 'DELETE',
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to cancel sync');
+      }
+
+      // Refresh status and history
+      await fetchStatus();
+      await fetchHistory();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to cancel sync');
+    } finally {
+      setIsCancelling(false);
     }
   };
 
@@ -366,6 +414,24 @@ export default function SyncDashboardPage() {
           </div>
         </div>
 
+        {/* Stale Heartbeat Warning */}
+        {inProgress && normalizedLastRun && isHeartbeatStale(normalizedLastRun.lastHeartbeat) && (
+          <div className="mt-6 p-4 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
+            <div className="flex items-center gap-3">
+              <AlertTriangle className="h-5 w-5 text-amber-600 dark:text-amber-400 flex-shrink-0" />
+              <div>
+                <p className="text-sm font-medium text-amber-700 dark:text-amber-300">
+                  Sync may be stuck
+                </p>
+                <p className="text-xs text-amber-600 dark:text-amber-400 mt-0.5">
+                  No heartbeat for {Math.round(getHeartbeatStaleness(normalizedLastRun.lastHeartbeat) ?? 0)} minutes.
+                  The process may have died. Use Cancel Sync to reset.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Error Message - only show during/right after a failed sync */}
         {normalizedLastRun?.errorMessage && inProgress && (
           <div className="mt-6 p-4 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
@@ -429,28 +495,56 @@ export default function SyncDashboardPage() {
         <div className="rounded-2xl border bg-card p-6">
           <h2 className="text-lg font-semibold mb-4">Sync Control</h2>
 
-          <button
-            onClick={startSync}
-            disabled={inProgress}
-            className="w-full inline-flex items-center justify-center gap-3 px-6 py-4 text-base font-medium rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-          >
-            {inProgress ? (
-              <>
+          {inProgress ? (
+            <div className="space-y-3">
+              <button
+                disabled
+                className="w-full inline-flex items-center justify-center gap-3 px-6 py-4 text-base font-medium rounded-xl bg-primary text-primary-foreground opacity-50 cursor-not-allowed"
+              >
                 <RefreshCw className="h-5 w-5 animate-spin" />
                 Sync in Progress...
-              </>
-            ) : (
-              <>
-                <Play className="h-5 w-5" />
-                Start Full Sync
-              </>
-            )}
-          </button>
+              </button>
 
-          {inProgress && (
-            <p className="text-xs text-muted-foreground mt-4 text-center">
-              Progress updates automatically every 2 seconds
-            </p>
+              <button
+                onClick={cancelSync}
+                disabled={isCancelling}
+                className="w-full inline-flex items-center justify-center gap-3 px-6 py-3 text-sm font-medium rounded-xl border-2 border-red-300 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+              >
+                {isCancelling ? (
+                  <>
+                    <RefreshCw className="h-4 w-4 animate-spin" />
+                    Cancelling...
+                  </>
+                ) : (
+                  <>
+                    <StopCircle className="h-4 w-4" />
+                    Cancel Sync
+                  </>
+                )}
+              </button>
+
+              <p className="text-xs text-muted-foreground text-center">
+                Progress updates automatically every 2 seconds
+              </p>
+            </div>
+          ) : (
+            <button
+              onClick={startSync}
+              disabled={isStarting}
+              className="w-full inline-flex items-center justify-center gap-3 px-6 py-4 text-base font-medium rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+            >
+              {isStarting ? (
+                <>
+                  <RefreshCw className="h-5 w-5 animate-spin" />
+                  Starting...
+                </>
+              ) : (
+                <>
+                  <Play className="h-5 w-5" />
+                  Start Full Sync
+                </>
+              )}
+            </button>
           )}
 
           {error && (
