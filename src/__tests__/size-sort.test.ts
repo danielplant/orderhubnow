@@ -8,8 +8,12 @@
  * - Unknown sizes sort to the end
  */
 
-import { describe, it, expect } from 'vitest'
-import { sortBySize } from '@/lib/utils/size-sort'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import {
+  sortBySize,
+  setSizeAliasCache,
+  invalidateSizeAliasCache
+} from '@/lib/utils/size-sort'
 
 describe('sortBySize', () => {
   it('should sort baby month sizes correctly', () => {
@@ -109,4 +113,68 @@ describe('sortBySize', () => {
     sortBySize(items)
     expect(items).toEqual(originalOrder)
   })
+})
+
+describe('alias resolution', () => {
+  beforeEach(() => {
+    // Set up alias cache with test data
+    setSizeAliasCache([
+      { raw: 'M/L - size 7 to 16', canonical: 'M/L' },
+      { raw: 'XL/XXL(14-16)', canonical: 'XL' },
+    ])
+  })
+
+  afterEach(() => {
+    invalidateSizeAliasCache()
+  })
+
+  it('should resolve aliased sizes to their canonical form for sorting', () => {
+    const items = [
+      { size: 'M/L - size 7 to 16', sku: 'A' },  // Should resolve to M/L
+      { size: 'S', sku: 'B' },
+      { size: 'XL/XXL(14-16)', sku: 'C' },        // Should resolve to XL
+    ]
+    const sorted = sortBySize(items)
+    expect(sorted.map(i => i.size)).toEqual(['S', 'M/L - size 7 to 16', 'XL/XXL(14-16)'])
+  })
+
+  it('should handle aliased size mixed with canonical sizes', () => {
+    const items = [
+      { size: 'XL', sku: 'A' },
+      { size: 'M/L - size 7 to 16', sku: 'B' },  // Alias for M/L
+      { size: 'M/L', sku: 'C' },                  // Direct canonical
+    ]
+    const sorted = sortBySize(items)
+    // Both M/L variants should sort together (M/L position), before XL
+    expect(sorted.map(i => i.size)).toEqual(['M/L - size 7 to 16', 'M/L', 'XL'])
+  })
+})
+
+describe('orphaned alias handling', () => {
+  beforeEach(() => {
+    // Set up alias pointing to a canonical that doesn't exist in the default order
+    setSizeAliasCache([
+      { raw: 'Weird-Size', canonical: 'NonExistent' },
+    ])
+  })
+
+  afterEach(() => {
+    invalidateSizeAliasCache()
+  })
+
+  it('should sort orphaned aliases to the end', () => {
+    const items = [
+      { size: 'S', sku: 'A' },
+      { size: 'Weird-Size', sku: 'B' },  // Alias to "NonExistent" which isn't in order
+      { size: 'M', sku: 'C' },
+    ]
+    const sorted = sortBySize(items)
+    // Orphaned alias should be at the end (index 9999)
+    expect(sorted.map(i => i.size)).toEqual(['S', 'M', 'Weird-Size'])
+  })
+
+  // Note: console.warn logging is verified manually via stderr output in test runs.
+  // The module captures console at import time, making it difficult to mock in tests.
+  // The behavioral test above ("should sort orphaned aliases to the end") verifies
+  // the important functionality - orphaned aliases sort to position 9999 (end).
 })

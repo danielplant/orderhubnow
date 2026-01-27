@@ -246,14 +246,22 @@ export async function getSizeOrderConfig(): Promise<SizeOrderConfigRecord> {
     return {
       ID: 0,
       Sizes: DEFAULT_SIZE_ORDER,
+      ValidatedSizes: DEFAULT_SIZE_ORDER, // All default sizes are validated
       UpdatedAt: new Date(),
       UpdatedBy: null,
     }
   }
 
+  const sizes = JSON.parse(row.Sizes) as string[]
+  // Backward compat: if ValidatedSizes is NULL, treat all existing sizes as validated
+  const validatedSizes = row.ValidatedSizes
+    ? (JSON.parse(row.ValidatedSizes) as string[])
+    : sizes
+
   return {
     ID: row.ID,
-    Sizes: JSON.parse(row.Sizes) as string[],
+    Sizes: sizes,
+    ValidatedSizes: validatedSizes,
     UpdatedAt: row.UpdatedAt,
     UpdatedBy: row.UpdatedBy,
   }
@@ -276,18 +284,28 @@ export async function getDistinctSizes(): Promise<{ size: string; count: number 
 }
 
 /**
- * Get SKUs that have missing (NULL or empty) size field.
- * Used by the Missing Sizes panel to show which variants need the size metafield set in Shopify.
+ * Item returned by getMissingSizeVariants().
+ * Includes both product and variant IDs for building Shopify admin links.
  */
-export async function getMissingSizeSkus(): Promise<{
+export interface MissingSizeItem {
   skuId: string
-  shopifyVariantId: string | null
+  shopifyProductId: string | null  // GID format: gid://shopify/Product/123
+  shopifyVariantId: string | null  // Numeric string (BigInt converted)
   description: string | null
-}[]> {
+}
+
+/**
+ * Get SKUs that have missing (NULL or empty) size field.
+ * Returns variant-level data with both ShopifyProductId and ShopifyProductVariantId
+ * for building complete Shopify admin variant URLs.
+ * Used by the Missing Sizes panel in MissingShopifyDataPanels.
+ */
+export async function getMissingSizeVariants(): Promise<MissingSizeItem[]> {
   const rows = await prisma.sku.findMany({
     where: { OR: [{ Size: null }, { Size: '' }] },
     select: {
       SkuID: true,
+      ShopifyProductId: true,
       ShopifyProductVariantId: true,
       OrderEntryDescription: true,
     },
@@ -295,6 +313,7 @@ export async function getMissingSizeSkus(): Promise<{
   })
   return rows.map(r => ({
     skuId: r.SkuID,
+    shopifyProductId: r.ShopifyProductId ?? null,
     shopifyVariantId: r.ShopifyProductVariantId?.toString() ?? null,
     description: r.OrderEntryDescription,
   }))

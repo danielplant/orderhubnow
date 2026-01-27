@@ -5,7 +5,7 @@ import {
   getCompanySettings,
   getSizeOrderConfig,
   getDistinctSizes,
-  getMissingSizeSkus,
+  getMissingSizeVariants,
   getSizeAliases,
   getSyncSettings,
   getMissingImageProducts,
@@ -23,12 +23,12 @@ export default async function SettingsPage() {
     redirect('/admin/login')
   }
 
-  const [settings, companySettings, sizeOrderConfig, distinctSizes, missingSizeSkus, aliases, syncSettings, missingImages, missingColors] = await Promise.all([
+  const [settings, companySettings, sizeOrderConfig, distinctSizes, missingSizeVariants, aliases, syncSettings, missingImages, missingColors] = await Promise.all([
     getInventorySettings(),
     getCompanySettings(),
     getSizeOrderConfig(),
     getDistinctSizes(),
-    getMissingSizeSkus(),
+    getMissingSizeVariants(),
     getSizeAliases(),
     getSyncSettings(),
     getMissingImageProducts(),
@@ -48,14 +48,15 @@ export default async function SettingsPage() {
 
       <SizeOrderConfig
         initialSizes={sizeOrderConfig.Sizes}
+        initialValidatedSizes={sizeOrderConfig.ValidatedSizes}
         distinctSizes={distinctSizes}
-        missingSizeSkus={missingSizeSkus}
         aliases={aliases}
       />
 
       <MissingShopifyDataPanels
         missingImages={missingImages}
         missingColors={missingColors}
+        missingSizes={missingSizeVariants}
         shopifyStoreDomain={syncSettings.shopifyStoreDomain}
       />
     </div>

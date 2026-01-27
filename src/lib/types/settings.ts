@@ -103,6 +103,7 @@ export type ActionResult =
 export type SizeOrderConfigRecord = {
   ID: number
   Sizes: string[]
+  ValidatedSizes: string[]
   UpdatedAt: Date
   UpdatedBy: string | null
 }

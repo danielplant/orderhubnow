@@ -178,6 +178,16 @@ function getSizeIndex(size: string): number {
   const canonical = getCanonicalSize(size);
   const upper = canonical.toUpperCase();
   const index = getSizeOrder().findIndex(s => s.toUpperCase() === upper);
+
+  if (index < 0) {
+    // Log warning if this was an aliased size (orphaned alias)
+    if (canonical !== size) {
+      console.warn(
+        `[size-sort] Orphaned alias detected: "${size}" → "${canonical}" (canonical not in size order)`
+      );
+    }
+  }
+
   return index >= 0 ? index : 9999;
 }
 

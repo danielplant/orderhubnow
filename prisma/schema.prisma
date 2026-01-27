@@ -1261,10 +1261,11 @@ model ThumbnailGenerationRun {
 
 /// Size ordering configuration - defines how sizes sort across the system
 model SizeOrderConfig {
-  ID        Int      @id(map: "PK_SizeOrderConfig") @default(autoincrement())
-  Sizes     String   @db.NVarChar(Max)  // JSON array of size strings
-  UpdatedAt DateTime @default(now()) @updatedAt
-  UpdatedBy String?  @db.NVarChar(255)
+  ID             Int      @id(map: "PK_SizeOrderConfig") @default(autoincrement())
+  Sizes          String   @db.NVarChar(Max)  // JSON array of ALL size strings in order
+  ValidatedSizes String?  @db.NVarChar(Max)  // JSON array of validated size strings (subset of Sizes)
+  UpdatedAt      DateTime @default(now()) @updatedAt
+  UpdatedBy      String?  @db.NVarChar(255)
 }
 
 // ============================================================================

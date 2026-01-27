@@ -443,9 +443,11 @@ export async function restoreSyncSettings(
  * Update size order configuration.
  * Validates for duplicates and empty list.
  * Invalidates runtime cache after save.
+ * Now accepts validatedSizes as second parameter.
  */
 export async function updateSizeOrderConfig(
   sizes: string[],
+  validatedSizes?: string[],
   updatedBy?: string
 ): Promise<ActionResult> {
   try {
@@ -472,10 +474,22 @@ export async function updateSizeOrderConfig(
       return { success: false, error: 'Duplicate sizes detected (case-insensitive check)' }
     }
 
+    // Clean validatedSizes if provided
+    const cleanedValidated = validatedSizes
+      ? validatedSizes.map(s => (s ?? '').toString()).filter(s => s !== '')
+      : undefined
+
     const existing = await prisma.sizeOrderConfig.findFirst()
-    const data = {
+    
+    // Build data object
+    const data: { Sizes: string; ValidatedSizes?: string; UpdatedBy: string } = {
       Sizes: JSON.stringify(unique),
       UpdatedBy: updatedBy || 'admin',
+    }
+    
+    // Only update ValidatedSizes if explicitly provided
+    if (cleanedValidated !== undefined) {
+      data.ValidatedSizes = JSON.stringify(cleanedValidated)
     }
 
     if (existing) {
@@ -484,6 +498,10 @@ export async function updateSizeOrderConfig(
         data,
       })
     } else {
+      // For new records, if no validatedSizes provided, default to all sizes being validated
+      if (cleanedValidated === undefined) {
+        data.ValidatedSizes = JSON.stringify(unique)
+      }
       await prisma.sizeOrderConfig.create({ data })
     }
 
@@ -554,6 +572,63 @@ export async function deleteSizeAlias(raw: string): Promise<ActionResult> {
   } catch (err) {
     console.error('[deleteSizeAlias] Error:', err)
     return { success: false, error: 'Sorry, there was an error deleting the size alias.' }
+  }
+}
+
+/**
+ * Create or update alias with custom canonical size atomically.
+ * Saves both the alias and adds the canonical to size order in a single transaction.
+ * Handles both creating new aliases and editing existing aliases to point to new custom canonicals.
+ */
+export async function upsertSizeAliasWithCustomCanonical(
+  raw: string,
+  canonical: string,
+  currentSizeOrder: string[],
+  updatedBy?: string
+): Promise<ActionResult> {
+  try {
+    if (!raw || !canonical) {
+      return { success: false, error: 'Both raw size and canonical size are required' }
+    }
+
+    // Build new size order with custom canonical added (if not already present)
+    const newSizeOrder = [...currentSizeOrder]
+    if (!newSizeOrder.some(s => s.toUpperCase() === canonical.toUpperCase())) {
+      newSizeOrder.push(canonical)
+    }
+
+    // Execute both in transaction - all or nothing
+    await prisma.$transaction(async (tx) => {
+      // 1. Upsert alias (works for both create and edit)
+      await tx.sizeAlias.upsert({
+        where: { RawSize: raw },
+        update: { CanonicalSize: canonical, UpdatedBy: updatedBy ?? 'admin' },
+        create: { RawSize: raw, CanonicalSize: canonical, UpdatedBy: updatedBy ?? 'admin' },
+      })
+
+      // 2. Update size order
+      const existing = await tx.sizeOrderConfig.findFirst()
+      const data = {
+        Sizes: JSON.stringify(newSizeOrder),
+        UpdatedBy: updatedBy || 'admin',
+      }
+      if (existing) {
+        await tx.sizeOrderConfig.update({ where: { ID: existing.ID }, data })
+      } else {
+        await tx.sizeOrderConfig.create({ data })
+      }
+    })
+
+    // Invalidate caches
+    invalidateSizeAliasCache()
+    invalidateSizeOrderCache()
+    setSizeOrderCache(newSizeOrder)
+
+    revalidatePath('/admin/settings')
+    return { success: true, message: 'Alias and canonical size saved.' }
+  } catch (err) {
+    console.error('[upsertSizeAliasWithCustomCanonical] Error:', err)
+    return { success: false, error: 'Sorry, there was an error. No changes were made.' }
   }
 }
 
@@ -629,5 +704,168 @@ export async function removeCanonicalSizeWithAliases(
   } catch (err) {
     console.error('[removeCanonicalSizeWithAliases] Error:', err)
     return { success: false, error: 'Sorry, there was an error removing the size. No changes were made.' }
+  }
+}
+
+// ============================================================================
+// Validated Sizes Actions
+// ============================================================================
+
+/**
+ * Mark a size as validated (amber -> green).
+ * Adds the size to ValidatedSizes if not already present.
+ */
+export async function validateSize(size: string): Promise<ActionResult> {
+  try {
+    if (!size) {
+      return { success: false, error: 'Size is required' }
+    }
+
+    const existing = await prisma.sizeOrderConfig.findFirst()
+    if (!existing) {
+      return { success: false, error: 'Size order config not found' }
+    }
+
+    const sizes = JSON.parse(existing.Sizes) as string[]
+    const validatedSizes = existing.ValidatedSizes
+      ? (JSON.parse(existing.ValidatedSizes) as string[])
+      : sizes // Backward compat
+
+    // Check if already validated (case-insensitive)
+    const upperSize = size.toUpperCase()
+    if (validatedSizes.some(s => s.toUpperCase() === upperSize)) {
+      return { success: true, message: 'Size is already validated.' }
+    }
+
+    // Add to validated sizes
+    const newValidatedSizes = [...validatedSizes, size]
+
+    await prisma.sizeOrderConfig.update({
+      where: { ID: existing.ID },
+      data: {
+        ValidatedSizes: JSON.stringify(newValidatedSizes),
+        UpdatedBy: 'admin',
+      },
+    })
+
+    invalidateSizeOrderCache()
+    revalidatePath('/admin/settings')
+    return { success: true, message: 'Size validated.' }
+  } catch (err) {
+    console.error('[validateSize] Error:', err)
+    return { success: false, error: 'Sorry, there was an error validating the size.' }
+  }
+}
+
+/**
+ * Remove validation from a size (green -> amber).
+ * Also deletes any aliases pointing TO this size (they would become orphaned).
+ */
+export async function unvalidateSize(size: string): Promise<ActionResult> {
+  try {
+    if (!size) {
+      return { success: false, error: 'Size is required' }
+    }
+
+    const existing = await prisma.sizeOrderConfig.findFirst()
+    if (!existing) {
+      return { success: false, error: 'Size order config not found' }
+    }
+
+    const validatedSizes = existing.ValidatedSizes
+      ? (JSON.parse(existing.ValidatedSizes) as string[])
+      : (JSON.parse(existing.Sizes) as string[])
+
+    // Remove from validated sizes (case-insensitive match, preserve original case)
+    const upperSize = size.toUpperCase()
+    const newValidatedSizes = validatedSizes.filter(s => s.toUpperCase() !== upperSize)
+
+    // Execute in transaction: remove validation + delete aliases pointing to this size
+    await prisma.$transaction(async (tx) => {
+      // Delete aliases pointing TO this size (they would be orphaned)
+      await tx.sizeAlias.deleteMany({
+        where: { CanonicalSize: size }
+      })
+
+      // Update validated sizes
+      await tx.sizeOrderConfig.update({
+        where: { ID: existing.ID },
+        data: {
+          ValidatedSizes: JSON.stringify(newValidatedSizes),
+          UpdatedBy: 'admin',
+        },
+      })
+    })
+
+    invalidateSizeOrderCache()
+    invalidateSizeAliasCache()
+    revalidatePath('/admin/settings')
+    return { success: true, message: 'Size unvalidated. Any aliases pointing to it have been deleted.' }
+  } catch (err) {
+    console.error('[unvalidateSize] Error:', err)
+    return { success: false, error: 'Sorry, there was an error unvalidating the size.' }
+  }
+}
+
+/**
+ * Remove a member from a group (delete alias) and insert the raw size
+ * back into the sizes array right after the canonical.
+ */
+export async function removeMemberFromGroup(
+  rawSize: string,
+  canonicalSize: string
+): Promise<ActionResult> {
+  try {
+    if (!rawSize || !canonicalSize) {
+      return { success: false, error: 'Both raw size and canonical size are required' }
+    }
+
+    const existing = await prisma.sizeOrderConfig.findFirst()
+    if (!existing) {
+      return { success: false, error: 'Size order config not found' }
+    }
+
+    const sizes = JSON.parse(existing.Sizes) as string[]
+    const validatedSizes = existing.ValidatedSizes
+      ? (JSON.parse(existing.ValidatedSizes) as string[])
+      : sizes
+
+    // Find position of canonical in sizes
+    const canonicalIndex = sizes.findIndex(s => s.toUpperCase() === canonicalSize.toUpperCase())
+    if (canonicalIndex === -1) {
+      return { success: false, error: 'Canonical size not found in order' }
+    }
+
+    // Insert rawSize right after canonical
+    const newSizes = [...sizes]
+    newSizes.splice(canonicalIndex + 1, 0, rawSize)
+
+    // Execute in transaction
+    await prisma.$transaction(async (tx) => {
+      // 1. Delete the alias
+      await tx.sizeAlias.delete({
+        where: { RawSize: rawSize }
+      })
+
+      // 2. Update sizes array (rawSize is now back in the order)
+      // Note: rawSize is NOT added to validatedSizes - it's amber
+      await tx.sizeOrderConfig.update({
+        where: { ID: existing.ID },
+        data: {
+          Sizes: JSON.stringify(newSizes),
+          ValidatedSizes: JSON.stringify(validatedSizes), // Keep validated unchanged
+          UpdatedBy: 'admin',
+        },
+      })
+    })
+
+    invalidateSizeOrderCache()
+    invalidateSizeAliasCache()
+    setSizeOrderCache(newSizes)
+    revalidatePath('/admin/settings')
+    return { success: true, message: 'Member removed from group.' }
+  } catch (err) {
+    console.error('[removeMemberFromGroup] Error:', err)
+    return { success: false, error: 'Sorry, there was an error removing the member.' }
   }
 }
