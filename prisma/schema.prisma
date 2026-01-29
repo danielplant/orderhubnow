@@ -375,7 +375,8 @@ model ShopifySyncLog {
 /// Note: This table must be created in production by DBA - see SQL script in plan.
 model ShopifySyncRun {
   ID                BigInt    @id(map: "PK_ShopifySyncRun") @default(autoincrement())
-  SyncType          String    @db.NVarChar(20)
+  SyncType          String    @db.NVarChar(20)   // 'scheduled' | 'on-demand'
+  EntityType        String    @default("product") @db.NVarChar(20)  // 'product' | 'customer'
   Status            String    @db.NVarChar(20)
   OperationId       String?   @db.NVarChar(255)
   StartedAt         DateTime  @db.DateTime
@@ -1054,6 +1055,151 @@ model SyncConfigAudit {
   @@index([changedBy])
 }
 
+/// Field-level mapping: Shopify GraphQL field -> SQL column with transforms.
+/// Used by the schema graph UI for configuring how individual fields sync.
+/// Separate from SyncFieldConfig (which tracks field discovery/selection).
+model ShopifyFieldMapping {
+  id              Int       @id @default(autoincrement())
+
+  /// Connection/tenant identifier for multi-tenant support
+  connectionId    String    @default("default") @db.NVarChar(100)
+
+  // Source (Shopify GraphQL field)
+  /// The root entity type (e.g., "ProductVariant", "Product", "InventoryItem")
+  entityType      String    @db.NVarChar(50)
+  /// The field path within the entity (e.g., "price", "price.amount", "inventoryItem.measurement.weight")
+  fieldPath       String    @db.NVarChar(200)
+  /// Full path from root: entityType + "." + fieldPath (stored for query convenience)
+  fullPath        String    @db.NVarChar(255)
+  /// Nesting depth: 1 for direct fields, 2+ for nested (e.g., "price" = 1, "price.amount" = 2)
+  depth           Int
+
+  // Target (SQL destination)
+  /// Target database table (e.g., "Sku", "RawSkusFromShopify")
+  targetTable     String?   @db.NVarChar(100)
+  /// Target column in the table (e.g., "Price", "ShopifyProductVariantId")
+  targetColumn    String?   @db.NVarChar(100)
+
+  // Transform
+  /// How to transform the value before writing
+  transformType   String    @default("direct") @db.NVarChar(20) // direct, parseFloat, parseInt, lookup, custom
+  /// Additional transform configuration as JSON (e.g., lookup table name, custom function)
+  transformConfig String?   @db.NVarChar(Max)
+
+  // Status
+  /// Whether this mapping is active (included in sync)
+  enabled         Boolean   @default(false)
+  /// Protected fields cannot be disabled (id, sku, price, etc.)
+  isProtected     Boolean   @default(false)
+  /// Access verification status from introspection probing
+  accessStatus    String    @default("untested") @db.NVarChar(20) // accessible, restricted, untested
+
+  // ===== QUERY GENERATION METADATA =====
+
+  /// Which sync service uses this field: 'bulk_sync', 'customer_sync', etc.
+  /// NULL means field is not yet assigned to any service
+  serviceName         String?   @db.NVarChar(50)
+
+  /// For metafield accessors: the Shopify metafield namespace
+  /// Example: "custom" for metafield(namespace: "custom", key: "fabric")
+  metafieldNamespace  String?   @db.NVarChar(100)
+
+  /// For metafield accessors: the Shopify metafield key
+  /// Example: "fabric" for metafield(namespace: "custom", key: "fabric")
+  metafieldKey        String?   @db.NVarChar(100)
+
+  /// For connection fields: the pagination limit
+  /// Example: 10 for inventoryLevels(first: 10)
+  paginationLimit     Int?
+
+  /// For fields with arguments: JSON-encoded arguments
+  /// Example: '{"names": ["incoming", "committed"]}' for quantities(names: [...])
+  queryArguments      String?   @db.NVarChar(500)
+
+  /// Field type for query generation logic
+  /// - 'scalar': Direct field (product.title)
+  /// - 'connection': Has edges/node structure (inventoryLevels)
+  /// - 'metafield': Uses alias: metafield(...) accessor
+  /// - 'object': Inline object (selectedOptions { name value })
+  fieldType           String    @default("scalar") @db.NVarChar(20)
+
+  /// Order in generated query (preserves exact hardcoded query order)
+  /// 1 = first field, 2 = second, etc.
+  sortOrder           Int?
+
+  // Timestamps
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  // Constraints
+  @@unique([connectionId, entityType, fieldPath])
+  @@index([entityType])
+  @@index([fullPath])
+  @@index([enabled])
+  @@index([connectionId])
+  @@index([serviceName])
+
+  @@map("ShopifyFieldMapping")
+}
+
+/// Unified cache for Shopify schema: types, enums, and metafields.
+/// Replaces ShopifySchemaCache with full-depth introspection.
+model ShopifyTypeCache {
+  id            Int       @id @default(autoincrement())
+
+  /// Connection/tenant identifier for multi-tenant support
+  connectionId  String    @default("default") @db.NVarChar(100)
+
+  /// Unique key: "type:Product", "enum:CurrencyCode", "metafield:PRODUCT:custom:fabric"
+  cacheKey      String    @db.NVarChar(300)
+
+  /// Category discriminator
+  category      String    @db.NVarChar(20)   // "entity", "object_type", "enum", "metafield"
+
+  /// For entities/object_types/enums: the GraphQL type name
+  typeName      String?   @db.NVarChar(100)
+
+  /// For entities/object_types: IntrospectionField[] as JSON
+  schemaJson    String?   @db.NVarChar(Max)
+
+  /// For enums: JSON array of values ["USD", "CAD", "EUR"]
+  enumValues    String?   @db.NVarChar(Max)
+
+  /// For metafields: owner type (PRODUCT, PRODUCTVARIANT, etc.)
+  ownerType     String?   @db.NVarChar(50)
+
+  /// For metafields: namespace
+  namespace     String?   @db.NVarChar(100)
+
+  /// For metafields: key
+  key           String?   @db.NVarChar(100)
+
+  /// For metafields: human-readable name from definition
+  displayName   String?   @db.NVarChar(200)
+
+  /// For metafields: data type (single_line_text_field, number_decimal, etc.)
+  dataType      String?   @db.NVarChar(100)
+
+  /// For metafields: description
+  description   String?   @db.NVarChar(500)
+
+  /// For metafields: discovery source
+  source        String?   @db.NVarChar(20)   // "definition" | "sampled" | "manual"
+
+  /// Shopify API version
+  apiVersion    String    @db.NVarChar(20)
+
+  /// When cached
+  fetchedAt     DateTime  @default(now())
+
+  @@unique([connectionId, cacheKey])
+  @@index([category])
+  @@index([ownerType])
+  @@index([typeName])
+  @@index([connectionId])
+  @@map("ShopifyTypeCache")
+}
+
 // ============================================================================
 // Sync Service: ETL Pipeline (Mapping & Scheduling)
 // ============================================================================
@@ -1206,6 +1352,10 @@ model SyncSettings {
 
   // Shopify Store Domain (for building admin links in Missing Data panels)
   shopifyStoreDomain        String?  @db.NVarChar(200) @map("ShopifyStoreDomain")
+
+  // Schema Introspection Settings
+  introspectRecordSampleSize  Int      @default(250) @map("IntrospectRecordSampleSize")
+  introspectMetafieldLimit    Int      @default(100) @map("IntrospectMetafieldLimit")
 
   updatedAt                 DateTime @default(now()) @updatedAt @map("UpdatedAt")
 

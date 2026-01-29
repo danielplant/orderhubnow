@@ -84,3 +84,18 @@ export type {
   ResolvedImageUrl,
   ImageLocationId,
 } from "./image-config";
+
+// Schema graph types
+export type {
+  SchemaNodeType,
+  EntityNodeData,
+  FieldNodeData,
+  FieldMapping,
+  SchemaNodeData,
+  SchemaNode,
+  SchemaEdgeType,
+  SchemaEdgeData,
+  SchemaEdge,
+  SchemaGraphData,
+} from "./schema-graph";
+export { isEntityNode, isFieldNode, isRelationshipField } from "./schema-graph";
