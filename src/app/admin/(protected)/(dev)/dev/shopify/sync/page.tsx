@@ -1,9 +1,10 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Play, RefreshCw, CheckCircle, XCircle, Clock, Zap, Database, ArrowRight, Settings, ChevronDown, ChevronUp, History, StopCircle, AlertTriangle } from 'lucide-react';
+import { Play, RefreshCw, CheckCircle, XCircle, Clock, Zap, Database, ArrowRight, Settings, ChevronDown, ChevronUp, History, StopCircle, AlertTriangle, Users, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import { formatDate } from '@/lib/utils/format';
+import { SYNC_STEPS } from '@/lib/shopify/sync';
 
 /**
  * Sync Dashboard
@@ -45,6 +46,7 @@ interface SyncHistoryEntry {
   syncTime: string;
   itemCount: number;
   status: 'completed' | 'failed' | 'in_progress';
+  entityType?: 'product' | 'customer';
 }
 
 interface SyncSettings {
@@ -57,13 +59,20 @@ interface SyncSettings {
   shopifyStoreDomain: string | null;
 }
 
-// Pipeline steps for visualization
-const PIPELINE_STEPS = [
-  { id: 1, name: 'Initialize', icon: Zap, description: 'Start bulk operation' },
-  { id: 2, name: 'Fetch', icon: RefreshCw, description: 'Poll Shopify API' },
-  { id: 3, name: 'Ingest', icon: Database, description: 'Process variants' },
-  { id: 4, name: 'Transform', icon: ArrowRight, description: 'Build SKU table' },
-];
+// Icon mapping for pipeline steps (keyed by step id)
+const STEP_ICONS: Record<number, typeof Zap> = {
+  1: Zap,
+  2: RefreshCw,
+  3: Database,
+  4: ArrowRight,
+  5: Trash2,
+};
+
+// Pipeline steps derived from shared SYNC_STEPS with icons
+const PIPELINE_STEPS = SYNC_STEPS.map((step) => ({
+  ...step,
+  icon: STEP_ICONS[step.id] || Zap,
+}));
 
 function getStepNumber(currentStep: string | null): number {
   if (!currentStep) return 0;
@@ -141,6 +150,8 @@ export default function SyncDashboardPage() {
   const [showSettings, setShowSettings] = useState(false);
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsForm, setSettingsForm] = useState<Partial<SyncSettings>>({});
+  const [isCustomerSyncing, setIsCustomerSyncing] = useState(false);
+  const [customerResult, setCustomerResult] = useState<{ success: boolean; count?: number; error?: string } | null>(null);
 
   // Fetch current status
   const fetchStatus = useCallback(async () => {
@@ -226,6 +237,32 @@ export default function SyncDashboardPage() {
       setError(err instanceof Error ? err.message : 'Sync failed');
     } finally {
       setIsStarting(false);
+    }
+  };
+
+  // Start customer sync
+  const startCustomerSync = async () => {
+    setIsCustomerSyncing(true);
+    setCustomerResult(null);
+
+    try {
+      const res = await fetch('/api/admin/shopify/sync-customers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Customer sync failed');
+      }
+
+      setCustomerResult({ success: true, count: data.count });
+      await fetchHistory();
+    } catch (err) {
+      setCustomerResult({ success: false, error: err instanceof Error ? err.message : 'Customer sync failed' });
+    } finally {
+      setIsCustomerSyncing(false);
     }
   };
 
@@ -549,6 +586,39 @@ export default function SyncDashboardPage() {
             </button>
           )}
 
+          {/* Customer Sync Button */}
+          <div className="mt-4 pt-4 border-t border-border">
+            <p className="text-xs text-muted-foreground uppercase tracking-wider mb-2">
+              Customer Data
+            </p>
+            <button
+              onClick={startCustomerSync}
+              disabled={isCustomerSyncing || inProgress}
+              className="w-full inline-flex items-center justify-center gap-3 px-4 py-3 text-sm font-medium rounded-xl border-2 border-border hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+            >
+              {isCustomerSyncing ? (
+                <>
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                  Syncing Customers...
+                </>
+              ) : (
+                <>
+                  <Users className="h-4 w-4" />
+                  Sync Customers
+                </>
+              )}
+            </button>
+
+            {/* Customer Sync Result */}
+            {customerResult && (
+              <div className={`mt-2 p-3 rounded-lg text-sm ${customerResult.success ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300' : 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300'}`}>
+                {customerResult.success
+                  ? `Synced ${customerResult.count} customers`
+                  : `${customerResult.error}`}
+              </div>
+            )}
+          </div>
+
           {error && (
             <div className="mt-4 p-4 rounded-lg border border-red-200 bg-red-50 dark:bg-red-900/20 dark:border-red-800">
               <div className="flex items-center gap-2 text-red-700 dark:text-red-300">
@@ -656,6 +726,9 @@ export default function SyncDashboardPage() {
                     <RefreshCw className="w-4 h-4 text-amber-500 animate-spin" />
                   )}
                   <span className="text-sm">{formatHistoryDate(entry.syncTime)}</span>
+                  <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                    {entry.entityType === 'customer' ? 'Customers' : 'Products'}
+                  </span>
                 </div>
                 <div className="flex items-center gap-4 text-sm">
                   <span className={entry.status === 'completed' ? 'text-foreground' : entry.status === 'failed' ? 'text-red-500' : 'text-amber-500'}>

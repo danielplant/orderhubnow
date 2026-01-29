@@ -8,6 +8,44 @@ import { prisma } from '@/lib/prisma'
 import { getStatusCascadeConfig } from '@/lib/data/queries/sync-config'
 import { getSyncSettings } from '@/lib/data/queries/settings'
 import { parseUnitsFromSku, calculateUnitPrice } from '@/lib/utils/units'
+import { generateQueryFromConfig, normalizeQuery, computeLineDiff } from './query-generator'
+
+// ============================================================================
+// HARDCODE_MODE - Controls query generation behavior
+// ============================================================================
+
+/**
+ * Controls whether sync uses hardcoded query or config-driven generation.
+ *
+ * PHASE 1 (current): Always true
+ *   - Sync uses BULK_OPERATION_QUERY constant (no behavior change)
+ *   - UI validation compares generated vs hardcoded
+ *
+ * PHASE 2 (future): Can be toggled via env var
+ *   - SYNC_HARDCODE_MODE=false enables config-driven sync
+ *   - Allows A/B testing before full switch
+ *
+ * Default: true (hardcoded mode, safe for production)
+ */
+export const HARDCODE_MODE = process.env.SYNC_HARDCODE_MODE !== 'false'
+
+// ============================================================================
+// Sync Pipeline Steps - Single source of truth for step count and metadata
+// ============================================================================
+
+/**
+ * Sync pipeline steps definition.
+ * UI imports this to stay in sync with backend step count.
+ */
+export const SYNC_STEPS = [
+  { id: 1, name: 'Initialize', description: 'Start bulk operation' },
+  { id: 2, name: 'Fetch', description: 'Poll Shopify API' },
+  { id: 3, name: 'Ingest', description: 'Process variants' },
+  { id: 4, name: 'Transform', description: 'Build SKU table' },
+  { id: 5, name: 'Cleanup', description: 'Remove old backups' },
+] as const
+
+export const TOTAL_SYNC_STEPS = SYNC_STEPS.length
 
 // ============================================================================
 // GID Parsing
@@ -176,6 +214,32 @@ export const BULK_OPERATION_QUERY = `
 `
 
 /**
+ * Customer bulk operation query for syncing customer emails.
+ * This is a separate operation from variant sync.
+ */
+export const CUSTOMER_BULK_OPERATION_QUERY = `
+  mutation {
+    bulkOperationRunQuery(
+      query: """
+      {
+        customers {
+          edges {
+            node {
+              id
+              email
+            }
+          }
+        }
+      }
+      """
+    ) {
+      bulkOperation { id status }
+      userErrors { field message }
+    }
+  }
+`
+
+/**
  * GraphQL query to check current bulk operation status.
  */
 export const CURRENT_BULK_OPERATION_QUERY = `
@@ -289,12 +353,14 @@ export async function cleanupOrphanedRuns(): Promise<number> {
  */
 export async function createSyncRun(
   syncType: 'scheduled' | 'on-demand',
+  entityType: 'product' | 'customer',
   operationId?: string
 ): Promise<bigint> {
   const now = new Date()
   const run = await prisma.shopifySyncRun.create({
     data: {
       SyncType: syncType,
+      EntityType: entityType,
       Status: 'started',
       OperationId: operationId ?? null,
       StartedAt: now,
@@ -343,7 +409,7 @@ export async function completeSyncRun(
 export async function updateSyncProgress(
   operationId: string,
   progress: {
-    step: string           // e.g., "Step 2/5"
+    step: string           // e.g., "Step 2/5" (derived from TOTAL_SYNC_STEPS)
     detail: string         // e.g., "Polling: RUNNING, 12,450 objects"
     percent: number        // 0-100
     recordsProcessed?: number
@@ -369,6 +435,7 @@ export async function updateSyncProgress(
 export async function getLatestSyncRun(): Promise<{
   id: bigint
   syncType: string
+  entityType: string
   status: string
   startedAt: Date
   completedAt: Date | null
@@ -392,6 +459,7 @@ export async function getLatestSyncRun(): Promise<{
   return {
     id: run.ID,
     syncType: run.SyncType,
+    entityType: run.EntityType ?? 'product',
     status: run.Status,
     startedAt: run.StartedAt,
     completedAt: run.CompletedAt,
@@ -971,6 +1039,7 @@ export async function transformToSkuTable(options?: { skipBackup?: boolean }): P
   errors: number
   skipped: number
   unmappedValues: number
+  missingSkuCount?: number
   backupSetId?: number
 }> {
   console.log('Starting transform: RawSkusFromShopify → Sku table (using Collections)')
@@ -1053,7 +1122,7 @@ export async function transformToSkuTable(options?: { skipBackup?: boolean }): P
              inv.Incoming,
              inv.CommittedQuantity
       FROM RawSkusFromShopify r
-      LEFT JOIN RawSkusInventoryLevelFromShopify inv ON CAST(r.ShopifyId AS VARCHAR) = inv.ParentId
+      LEFT JOIN RawSkusInventoryLevelFromShopify inv ON r.InventoryItemId = inv.ParentId
       WHERE r.SkuID LIKE '%-%'
         AND r.metafield_order_entry_collection IS NOT NULL
         AND LEN(r.metafield_order_entry_collection) > 0
@@ -1208,6 +1277,50 @@ export async function transformToSkuTable(options?: { skipBackup?: boolean }): P
     const count = await prisma.sku.count()
     console.log(`Transform complete: ${count} SKUs`)
 
+    // 10. Populate MissingShopifySkus - SKUs in Raw that didn't make it to Sku
+    // These are products with inventory but missing required metafields (pricing, collection mapping)
+    console.log('Detecting missing SKUs...')
+
+    await prisma.$executeRawUnsafe(`DELETE FROM MissingShopifySkus`)
+
+    await prisma.$executeRawUnsafe(`
+      INSERT INTO MissingShopifySkus (
+        SkuID, [Description], Quantity, Price, FabricContent, SkuColor,
+        DateAdded, DateModified, CategoryID, PriceCAD, PriceUSD,
+        OrderEntryDescription, MSRPCAD, MSRPUSD, Season, IsReviewed,
+        ShopifyProductVariantId
+      )
+      SELECT
+        r.SkuID,
+        r.DisplayName,
+        r.Quantity,
+        '',  -- Price
+        '',  -- FabricContent
+        '',  -- SkuColor
+        GETUTCDATE(),
+        GETUTCDATE(),
+        -1,  -- CategoryID (unknown)
+        '',  -- PriceCAD
+        '',  -- PriceUSD
+        '',  -- OrderEntryDescription
+        CAST(CAST(FLOOR(r.Price * 1.3) AS decimal(10,2)) AS nvarchar(10)),  -- MSRPCAD estimate
+        CAST(CAST(FLOOR(r.Price) AS decimal(10,2)) AS nvarchar(10)),  -- MSRPUSD
+        '',  -- Season
+        0,   -- IsReviewed
+        r.ShopifyId
+      FROM RawSkusFromShopify r
+      WHERE r.Quantity > 0
+        AND r.SkuID <> 'Bundles'
+        AND r.SkuID LIKE '%-%'
+        AND NOT EXISTS (
+          SELECT 1 FROM Sku s
+          WHERE s.ShopifyProductVariantId = r.ShopifyId
+        )
+    `)
+
+    const missingCount = await prisma.missingShopifySkus.count()
+    console.log(`Found ${missingCount} missing SKUs`)
+
     // Count unmapped values for stats
     const unmappedCount = await prisma.shopifyValueMapping.count({
       where: { status: 'unmapped' },
@@ -1218,6 +1331,7 @@ export async function transformToSkuTable(options?: { skipBackup?: boolean }): P
       errors: 0,
       skipped: rawSkus.length - inserts.length,
       unmappedValues: unmappedCount,
+      missingSkuCount: missingCount,
       backupSetId,
     }
   } catch (err) {
@@ -1246,6 +1360,7 @@ export async function runFullSync(options?: {
   operationId?: string
   variantsProcessed?: number
   skusCreated?: number
+  customersProcessed?: number
   error?: string
 }> {
   const onProgress = options?.onProgress ?? ((step, details) => console.log(`Sync: ${step}${details ? ` - ${details}` : ''}`))
@@ -1300,9 +1415,47 @@ export async function runFullSync(options?: {
     }
 
     // Step 1: Start bulk operation (variant-rooted query - all variants with inline product data)
-    onProgress('Step 1/5', 'Starting bulk operation (all variants)')
-    // Note: Can't update progress yet - no operationId until after start
-    const result = await shopifyFetch(BULK_OPERATION_QUERY)
+    onProgress(`Step 1/${TOTAL_SYNC_STEPS}`, 'Starting bulk operation (all variants)')
+
+    // === Log which mode is active (helpful for debugging) ===
+    console.log(`[Sync] Starting with HARDCODE_MODE=${HARDCODE_MODE}`)
+
+    // === Query Selection with In-Process Validation ===
+    let queryToUse: string = BULK_OPERATION_QUERY
+
+    if (!HARDCODE_MODE) {
+      try {
+        const configQuery = await generateQueryFromConfig('bulk_sync')
+        const normalizedConfig = normalizeQuery(configQuery)
+        const normalizedHardcoded = normalizeQuery(BULK_OPERATION_QUERY)
+
+        if (normalizedConfig !== normalizedHardcoded) {
+          const differences = computeLineDiff(normalizedHardcoded, normalizedConfig)
+          console.error('[Sync] Config query does NOT match hardcoded! Aborting.')
+          console.error('[Sync] First 10 differences:', differences.slice(0, 10))
+          return {
+            success: false,
+            message: 'Config-driven query validation failed',
+            error: `Query mismatch: ${differences.length} line differences - check server logs`,
+          }
+        }
+
+        console.log('[Sync] Config-driven query validated - matches hardcoded')
+        queryToUse = configQuery
+      } catch (err) {
+        console.error('[Sync] Failed to generate config query:', err)
+        return {
+          success: false,
+          message: 'Failed to generate config-driven query',
+          error: err instanceof Error ? err.message : 'Unknown error',
+        }
+      }
+    } else {
+      console.log('[Sync] Using hardcoded BULK_OPERATION_QUERY')
+    }
+    // === End Query Selection ===
+
+    const result = await shopifyFetch(queryToUse)
 
     if (result.error) {
       return { success: false, message: 'Failed to start bulk operation', error: result.error }
@@ -1327,18 +1480,18 @@ export async function runFullSync(options?: {
     }
 
     operationId = bulkOp.id
-    await createSyncRun('on-demand', operationId)
-    onProgress('Step 1/5', `Bulk operation started: ${operationId}`)
+    await createSyncRun('on-demand', 'product', operationId)
+    onProgress(`Step 1/${TOTAL_SYNC_STEPS}`, `Bulk operation started: ${operationId}`)
     await updateSyncProgress(operationId, {
-      step: 'Step 1/5',
+      step: `Step 1/${TOTAL_SYNC_STEPS}`,
       detail: 'Bulk operation started',
       percent: 5,
     })
 
     // Step 2: Poll until complete
-    onProgress('Step 2/5', 'Polling for completion (this may take a few minutes)')
+    onProgress(`Step 2/${TOTAL_SYNC_STEPS}`, 'Polling for completion (this may take a few minutes)')
     await updateSyncProgress(operationId, {
-      step: 'Step 2/5',
+      step: `Step 2/${TOTAL_SYNC_STEPS}`,
       detail: 'Polling Shopify bulk operation...',
       percent: 10,
     })
@@ -1377,12 +1530,12 @@ export async function runFullSync(options?: {
       }
 
       const currentObjectCount = Number(op.objectCount) || 0
-      onProgress('Step 2/5', `Status: ${op.status}, Objects: ${currentObjectCount}`)
+      onProgress(`Step 2/${TOTAL_SYNC_STEPS}`, `Status: ${op.status}, Objects: ${currentObjectCount}`)
       // Update progress in DB - oscillate between 10-35% during polling
       const elapsed = Date.now() - startTime
       const pollPercent = Math.min(35, 10 + Math.floor(elapsed / maxWaitMs * 25))
       await updateSyncProgress(operationId, {
-        step: 'Step 2/5',
+        step: `Step 2/${TOTAL_SYNC_STEPS}`,
         detail: `Polling: ${op.status}, ${currentObjectCount} objects`,
         percent: pollPercent,
         totalRecords: currentObjectCount,
@@ -1417,18 +1570,18 @@ export async function runFullSync(options?: {
       return { success: false, message: 'Timeout waiting for bulk operation', operationId }
     }
 
-    onProgress('Step 2/5', `Complete - ${objectCount} objects`)
+    onProgress(`Step 2/${TOTAL_SYNC_STEPS}`, `Complete - ${objectCount} objects`)
     await updateSyncProgress(operationId, {
-      step: 'Step 2/5',
+      step: `Step 2/${TOTAL_SYNC_STEPS}`,
       detail: `Complete - ${objectCount} objects ready`,
       percent: 40,
       totalRecords: objectCount,
     })
 
     // Step 3: Download and process JSONL
-    onProgress('Step 3/5', 'Downloading and processing variants')
+    onProgress(`Step 3/${TOTAL_SYNC_STEPS}`, 'Downloading and processing variants')
     await updateSyncProgress(operationId, {
-      step: 'Step 3/5',
+      step: `Step 3/${TOTAL_SYNC_STEPS}`,
       detail: 'Downloading JSONL data...',
       percent: 42,
       totalRecords: objectCount,
@@ -1443,11 +1596,11 @@ export async function runFullSync(options?: {
       jsonlResponse,
       async (n) => {
         if (n % 500 === 0) {
-          onProgress('Step 3/5', `Processed ${n} variants`)
+          onProgress(`Step 3/${TOTAL_SYNC_STEPS}`, `Processed ${n} variants`)
           // Update progress: 42-70% range during JSONL processing
           const processPercent = Math.min(70, 42 + Math.floor((n / Math.max(objectCount, 1)) * 28))
           await updateSyncProgress(operationId!, {
-            step: 'Step 3/5',
+            step: `Step 3/${TOTAL_SYNC_STEPS}`,
             detail: `Processing variants: ${n.toLocaleString()} / ${objectCount.toLocaleString()}`,
             percent: processPercent,
             recordsProcessed: n,
@@ -1457,9 +1610,9 @@ export async function runFullSync(options?: {
       },
       { useProductImageGallery }
     )
-    onProgress('Step 3/5', `Complete - ${processResult.processed} variants processed`)
+    onProgress(`Step 3/${TOTAL_SYNC_STEPS}`, `Complete - ${processResult.processed} variants processed`)
     await updateSyncProgress(operationId, {
-      step: 'Step 3/5',
+      step: `Step 3/${TOTAL_SYNC_STEPS}`,
       detail: `Complete - ${processResult.processed.toLocaleString()} variants ingested`,
       percent: 70,
       recordsProcessed: processResult.processed,
@@ -1467,36 +1620,47 @@ export async function runFullSync(options?: {
     })
 
     // Step 4: Transform to Sku table
-    onProgress('Step 4/5', 'Transforming to Sku table')
+    onProgress(`Step 4/${TOTAL_SYNC_STEPS}`, 'Transforming to Sku table')
     await updateSyncProgress(operationId, {
-      step: 'Step 4/5',
+      step: `Step 4/${TOTAL_SYNC_STEPS}`,
       detail: 'Transforming raw data to SKU table...',
       percent: 72,
       recordsProcessed: processResult.processed,
     })
     const transformResult = await transformToSkuTable()
-    onProgress('Step 4/5', `Complete - ${transformResult.processed} SKUs created`)
+    onProgress(`Step 4/${TOTAL_SYNC_STEPS}`, `Complete - ${transformResult.processed} SKUs created`)
     await updateSyncProgress(operationId, {
-      step: 'Step 4/5',
+      step: `Step 4/${TOTAL_SYNC_STEPS}`,
       detail: `Complete - ${transformResult.processed.toLocaleString()} SKUs created`,
-      percent: 85,
+      percent: 80,
       recordsProcessed: transformResult.processed,
     })
 
-    // Mark sync as complete
-    await completeSyncRun(operationId, 'completed', transformResult.processed)
-
-    // Cleanup old backups (older than 7 days)
-    // This runs after successful sync to avoid accumulating backup data
+    // Step 5: Cleanup old backups (older than 7 days)
+    onProgress(`Step 5/${TOTAL_SYNC_STEPS}`, 'Cleaning up old backups')
+    await updateSyncProgress(operationId, {
+      step: `Step 5/${TOTAL_SYNC_STEPS}`,
+      detail: 'Cleaning up old backups...',
+      percent: 95,
+    })
     try {
       const cleanupResult = await cleanupOldBackups(7)
       if (cleanupResult.deletedCount > 0) {
-        onProgress('Cleanup', `Removed ${cleanupResult.deletedCount} old backups`)
+        onProgress(`Step 5/${TOTAL_SYNC_STEPS}`, `Removed ${cleanupResult.deletedCount} old backups`)
       }
     } catch (cleanupErr) {
       // Don't fail the sync if cleanup fails - just log it
       console.warn('Backup cleanup failed (non-fatal):', cleanupErr)
     }
+
+    // Mark sync as complete
+    await completeSyncRun(operationId, 'completed', transformResult.processed)
+    await updateSyncProgress(operationId, {
+      step: 'Complete',
+      detail: `${transformResult.processed} SKUs created`,
+      percent: 100,
+      recordsProcessed: transformResult.processed,
+    })
 
     return {
       success: true,
@@ -1512,5 +1676,200 @@ export async function runFullSync(options?: {
       await completeSyncRun(operationId, 'failed', 0, errorMessage)
     }
     return { success: false, message: 'Sync failed', error: errorMessage, operationId }
+  }
+}
+
+// ============================================================================
+// Customer Sync: Sync customers from Shopify (like .NET)
+// ============================================================================
+
+/**
+ * Sync customers from Shopify to CustomersFromShopify table.
+ * This is a separate bulk operation from variant sync.
+ */
+export async function syncShopifyCustomers(
+  onProgress?: (step: string, detail: string) => void
+): Promise<{ success: boolean; count: number; error?: string }> {
+  const storeDomain = process.env.SHOPIFY_STORE_DOMAIN
+  const accessToken = process.env.SHOPIFY_ACCESS_TOKEN
+  const apiVersion = process.env.SHOPIFY_API_VERSION || '2024-01'
+
+  if (!storeDomain || !accessToken) {
+    return { success: false, count: 0, error: 'Shopify not configured' }
+  }
+
+  let customerOperationId: string | undefined
+
+  const shopifyFetch = async (
+    query: string,
+    variables?: Record<string, unknown>
+  ): Promise<{ data?: unknown; error?: string }> => {
+    try {
+      const response = await fetch(
+        `https://${storeDomain}/admin/api/${apiVersion}/graphql.json`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Shopify-Access-Token': accessToken,
+          },
+          body: JSON.stringify({ query, variables }),
+        }
+      )
+
+      if (!response.ok) {
+        return { error: `Shopify API error: ${response.status} ${response.statusText}` }
+      }
+
+      const json = await response.json()
+      return { data: json.data }
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : 'Unknown error' }
+    }
+  }
+
+  try {
+    onProgress?.('Customers', 'Starting customer bulk operation')
+
+    // Start bulk operation
+    const result = await shopifyFetch(CUSTOMER_BULK_OPERATION_QUERY)
+    if (result.error) {
+      return { success: false, count: 0, error: result.error }
+    }
+
+    const data = result.data as {
+      bulkOperationRunQuery?: {
+        bulkOperation?: { id: string; status: string }
+        userErrors?: Array<{ field: string; message: string }>
+      }
+    }
+
+    const bulkOp = data?.bulkOperationRunQuery?.bulkOperation
+    const userErrors = data?.bulkOperationRunQuery?.userErrors
+
+    if (userErrors && userErrors.length > 0) {
+      return { success: false, count: 0, error: userErrors[0].message }
+    }
+
+    if (!bulkOp?.id) {
+      return { success: false, count: 0, error: 'No operation ID returned' }
+    }
+
+    // Create sync run record for customer sync
+    customerOperationId = bulkOp.id
+    await createSyncRun('on-demand', 'customer', customerOperationId)
+    onProgress?.('Customers', `Bulk operation started: ${customerOperationId}`)
+
+    // Poll for completion
+    const statusQuery = `
+      query($id: ID!) {
+        node(id: $id) {
+          ... on BulkOperation {
+            id
+            status
+            errorCode
+            objectCount
+            url
+          }
+        }
+      }
+    `
+
+    const maxWaitMs = 120000 // 2 minutes for customers
+    const pollIntervalMs = 2000
+    const startTime = Date.now()
+    let pollUrl: string | undefined
+
+    while (Date.now() - startTime < maxWaitMs) {
+      const pollResult = await shopifyFetch(statusQuery, { id: bulkOp.id })
+
+      if (pollResult.error) {
+        return { success: false, count: 0, error: pollResult.error }
+      }
+
+      const op = (pollResult.data as { node?: { status: string; url?: string; objectCount?: number } })?.node
+
+      if (!op) {
+        return { success: false, count: 0, error: 'Bulk operation not found' }
+      }
+
+      onProgress?.('Customers', `Polling: ${op.status}, ${op.objectCount || 0} objects`)
+
+      if (op.status === 'COMPLETED') {
+        if (!op.url) {
+          return { success: false, count: 0, error: 'Completed but no download URL' }
+        }
+        pollUrl = op.url
+        break
+      }
+
+      if (op.status === 'FAILED' || op.status === 'CANCELED') {
+        return { success: false, count: 0, error: `Bulk operation ${op.status.toLowerCase()}` }
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs))
+    }
+
+    if (!pollUrl) {
+      return { success: false, count: 0, error: 'Timeout waiting for customer bulk operation' }
+    }
+
+    // Download and process JSONL
+    onProgress?.('Customers', 'Downloading customer data')
+    const jsonlResponse = await fetch(pollUrl)
+    if (!jsonlResponse.ok) {
+      return { success: false, count: 0, error: `Failed to download JSONL: ${jsonlResponse.status}` }
+    }
+
+    const jsonlText = await jsonlResponse.text()
+    const lines = jsonlText.trim().split('\n').filter(Boolean)
+
+    // Process customers
+    let count = 0
+    for (const line of lines) {
+      try {
+        const item = JSON.parse(line)
+        if (item.id?.includes('/Customer/')) {
+          const customerId = parseShopifyGid(item.id)
+          const email = item.email
+
+          if (customerId && email) {
+            // Upsert to CustomersFromShopify - store full GID to match .NET
+            // ID is the numeric Shopify customer ID (not auto-increment)
+            const fullGid = item.id as string  // e.g., "gid://shopify/Customer/12345"
+            const numericId = BigInt(customerId)  // e.g., 12345
+
+            const existing = await prisma.customersFromShopify.findFirst({
+              where: { ShopifyID: fullGid },
+            })
+
+            if (existing) {
+              await prisma.customersFromShopify.update({
+                where: { ID: existing.ID },
+                data: { Email: email },
+              })
+            } else {
+              await prisma.customersFromShopify.create({
+                data: { ID: numericId, ShopifyID: fullGid, Email: email },
+              })
+            }
+            count++
+          }
+        }
+      } catch (err) {
+        console.error('Error processing customer line:', err)
+      }
+    }
+
+    // Complete the sync run successfully
+    await completeSyncRun(customerOperationId, 'completed', count)
+    onProgress?.('Customers', `Synced ${count} customers`)
+    return { success: true, count }
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : 'Unknown error'
+    if (customerOperationId) {
+      await completeSyncRun(customerOperationId, 'failed', 0, errorMessage)
+    }
+    return { success: false, count: 0, error: errorMessage }
   }
 }

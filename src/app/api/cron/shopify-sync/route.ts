@@ -186,7 +186,7 @@ export async function GET(request: Request) {
     }
 
     operationId = bulkOp.id
-    runId = Number(await createSyncRun('scheduled', operationId))
+    runId = Number(await createSyncRun('scheduled', 'product', operationId))
     console.log(`Step 1: Bulk operation started - operationId=${operationId}, runId=${runId}`)
 
     // Step 2: Poll until complete

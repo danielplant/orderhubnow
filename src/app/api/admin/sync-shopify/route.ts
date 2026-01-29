@@ -131,7 +131,7 @@ export async function POST() {
     }
 
     // Create sync run record
-    const runId = await createSyncRun('on-demand', bulkOp.id)
+    const runId = await createSyncRun('on-demand', 'product', bulkOp.id)
 
     return NextResponse.json({
       success: true,

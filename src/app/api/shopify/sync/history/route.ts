@@ -17,6 +17,7 @@ export async function GET(request: NextRequest) {
       select: {
         ID: true,
         SyncType: true,
+        EntityType: true,
         Status: true,
         StartedAt: true,
         CompletedAt: true,
@@ -38,6 +39,7 @@ export async function GET(request: NextRequest) {
       return {
         id: String(run.ID),
         syncType: run.SyncType,
+        entityType: run.EntityType ?? 'product',
         syncTime: run.CompletedAt ?? run.StartedAt,
         status:
           run.Status === 'completed'
