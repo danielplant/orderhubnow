@@ -59,3 +59,7 @@ session-manager-jan20.txt.rtf
 2026-01-20-i-am-having-a-lot-of-headaches-managing-the-develo.txt.rtf
 studio/
 public/logos/Unknown.jpeg
+
+# Debug/diagnostic scripts
+scripts/check-customers-table.ts
+prisma/migrations/manual/
