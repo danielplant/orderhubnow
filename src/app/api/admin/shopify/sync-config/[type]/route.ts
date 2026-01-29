@@ -120,8 +120,11 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const statusCascade = await getStatusCascadeConfig(type)
 
     // Get schema cache info
-    const schemaCache = await prisma.shopifySchemaCache.findUnique({
-      where: { entityType: type },
+    const schemaCache = await prisma.shopifyTypeCache.findFirst({
+      where: {
+        category: 'entity',
+        typeName: type,
+      },
     })
 
     return NextResponse.json({

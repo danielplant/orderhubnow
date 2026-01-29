@@ -48,6 +48,34 @@ export interface IntrospectionResult {
   isStale: boolean
 }
 
+// ============================================================================
+// Enhanced Cache Types
+// ============================================================================
+
+export type CacheCategory = 'entity' | 'object_type' | 'enum' | 'metafield'
+
+export interface MetafieldInfo {
+  namespace: string
+  key: string
+  displayName?: string
+  description?: string
+  dataType?: string
+  source: 'definition' | 'sampled' | 'manual'
+}
+
+export interface SchemaCacheResult {
+  entityCount: number
+  objectTypeCount: number
+  enumCount: number
+  metafieldCount: number
+  errors: string[]
+  durationMs: number
+}
+
+export interface ProgressCallback {
+  (step: string, current: number, total: number): void
+}
+
 // GraphQL introspection response types
 interface GraphQLTypeRef {
   kind: string
@@ -104,6 +132,55 @@ export const CATEGORY_DEFAULTS: Record<FieldCategory, boolean> = {
   contextual: false, // need args
   computed: false, // potentially expensive
   metafield: false, // optional metafields
+}
+
+// ============================================================================
+// Metafield Owner Types
+// ============================================================================
+
+export const METAFIELD_OWNER_TYPES = [
+  'ARTICLE', 'BLOG', 'COLLECTION', 'COMPANY', 'COMPANY_LOCATION',
+  'CUSTOMER', 'DISCOUNT', 'DRAFTORDER', 'LOCATION', 'MARKET',
+  'ORDER', 'PAGE', 'PRODUCT', 'PRODUCTVARIANT', 'SHOP'
+] as const
+
+export type MetafieldOwnerType = typeof METAFIELD_OWNER_TYPES[number]
+
+/**
+ * Maps MetafieldOwnerType to GraphQL query root field.
+ * SHOP is singleton (no collection query).
+ */
+export const OWNER_TYPE_QUERY_MAP: Record<MetafieldOwnerType, { query: string; isSingleton: boolean }> = {
+  ARTICLE: { query: 'articles', isSingleton: false },
+  BLOG: { query: 'blogs', isSingleton: false },
+  COLLECTION: { query: 'collections', isSingleton: false },
+  COMPANY: { query: 'companies', isSingleton: false },
+  COMPANY_LOCATION: { query: 'companyLocations', isSingleton: false },
+  CUSTOMER: { query: 'customers', isSingleton: false },
+  DISCOUNT: { query: 'discountNodes', isSingleton: false },
+  DRAFTORDER: { query: 'draftOrders', isSingleton: false },
+  LOCATION: { query: 'locations', isSingleton: false },
+  MARKET: { query: 'markets', isSingleton: false },
+  ORDER: { query: 'orders', isSingleton: false },
+  PAGE: { query: 'pages', isSingleton: false },
+  PRODUCT: { query: 'products', isSingleton: false },
+  PRODUCTVARIANT: { query: 'productVariants', isSingleton: false },
+  SHOP: { query: 'shop', isSingleton: true },
+}
+
+// Default connection ID for single-tenant mode
+export const DEFAULT_CONNECTION_ID = 'default'
+
+// ============================================================================
+// Introspection Settings Helper
+// ============================================================================
+
+async function getIntrospectionSettings(): Promise<{ recordSampleSize: number; metafieldLimit: number }> {
+  const settings = await prisma.syncSettings.findFirst()
+  return {
+    recordSampleSize: settings?.introspectRecordSampleSize ?? 250,
+    metafieldLimit: settings?.introspectMetafieldLimit ?? 100,
+  }
 }
 
 // ============================================================================
@@ -367,11 +444,14 @@ export async function introspectEntityType(
 
   // Check cache first (unless refresh requested)
   if (!options?.refresh) {
-    const cached = await prisma.shopifySchemaCache.findUnique({
-      where: { entityType },
+    const cached = await prisma.shopifyTypeCache.findFirst({
+      where: {
+        category: 'entity',
+        typeName: entityType,
+      },
     })
 
-    if (cached) {
+    if (cached && cached.schemaJson) {
       const cachedData = JSON.parse(cached.schemaJson) as IntrospectionField[]
       const isStale = cached.apiVersion !== apiVersion
 
@@ -439,17 +519,21 @@ export async function introspectEntityType(
 
   // Cache the result
   const now = new Date()
-  await prisma.shopifySchemaCache.upsert({
-    where: { entityType },
+  const cacheKey = buildCacheKey('entity', entityType)
+  await prisma.shopifyTypeCache.upsert({
+    where: { connectionId_cacheKey: { connectionId: DEFAULT_CONNECTION_ID, cacheKey } },
     update: {
-      apiVersion,
       schemaJson: JSON.stringify(fields),
+      apiVersion,
       fetchedAt: now,
     },
     create: {
-      entityType,
-      apiVersion,
+      connectionId: DEFAULT_CONNECTION_ID,
+      cacheKey,
+      category: 'entity',
+      typeName: entityType,
       schemaJson: JSON.stringify(fields),
+      apiVersion,
       fetchedAt: now,
     },
   })
@@ -514,6 +598,10 @@ export function getKnownEntities(): ShopifyEntity[] {
 export const PROTECTED_FIELDS: Record<string, string[]> = {
   Product: ['id', 'status', 'handle'],
   ProductVariant: ['id', 'sku', 'price', 'inventoryQuantity'],
+  Collection: ['id'],
+  Order: ['id', 'name'],
+  Customer: ['id', 'email'],
+  InventoryItem: ['id', 'sku'],
 }
 
 /**
@@ -522,4 +610,550 @@ export const PROTECTED_FIELDS: Record<string, string[]> = {
 export function isProtectedField(entityType: string, fieldPath: string): boolean {
   const protectedList = PROTECTED_FIELDS[entityType] || []
   return protectedList.includes(fieldPath)
+}
+
+// ============================================================================
+// Cache Key Helpers
+// ============================================================================
+
+function buildCacheKey(
+  category: CacheCategory,
+  typeName?: string,
+  ownerType?: string,
+  namespace?: string,
+  key?: string
+): string {
+  switch (category) {
+    case 'entity':
+    case 'object_type':
+      return `type:${typeName}`
+    case 'enum':
+      return `enum:${typeName}`
+    case 'metafield':
+      return `metafield:${ownerType}:${namespace}:${key}`
+  }
+}
+
+// ============================================================================
+// Type Introspection Functions
+// ============================================================================
+
+/**
+ * Introspect any GraphQL type (entity or object type).
+ * Returns IntrospectionField[] or null if type not found.
+ */
+async function introspectGraphQLType(typeName: string): Promise<IntrospectionField[] | null> {
+  const { data, error } = await shopifyGraphQL<IntrospectionResponse['data']>(
+    TYPE_INTROSPECTION_QUERY,
+    { name: typeName }
+  )
+
+  if (error || !data?.__type?.fields) {
+    return null
+  }
+
+  const rawFields = data.__type.fields
+  const fields: IntrospectionField[] = rawFields.map((f) => {
+    const base = unwrap(f.type)
+    const meta = categorize(f, base)
+    return {
+      name: f.name,
+      description: f.description,
+      kind: base.kind,
+      baseType: base.name,
+      category: meta.category,
+      reason: meta.reason,
+      isDeprecated: f.isDeprecated,
+      deprecationReason: f.deprecationReason || undefined,
+      hasRequiredArgs: Array.isArray(f.args) &&
+        f.args.some((a) => isNonNull(a.type) && a.defaultValue === null),
+    }
+  })
+
+  return fields
+}
+
+/**
+ * Introspect enum type and return its values.
+ */
+async function introspectEnumValues(enumTypeName: string): Promise<string[] | null> {
+  const { data, error } = await shopifyGraphQL<IntrospectionResponse['data']>(
+    TYPE_INTROSPECTION_QUERY,
+    { name: enumTypeName }
+  )
+
+  if (error || !data?.__type?.enumValues) {
+    return null
+  }
+
+  return data.__type.enumValues.map((v) => v.name)
+}
+
+/**
+ * Cache a type (entity or object_type) to ShopifyTypeCache.
+ */
+async function cacheType(
+  category: 'entity' | 'object_type',
+  typeName: string,
+  fields: IntrospectionField[],
+  apiVersion: string,
+  connectionId: string = DEFAULT_CONNECTION_ID
+): Promise<void> {
+  const cacheKey = buildCacheKey(category, typeName)
+  await prisma.shopifyTypeCache.upsert({
+    where: { connectionId_cacheKey: { connectionId, cacheKey } },
+    update: {
+      schemaJson: JSON.stringify(fields),
+      apiVersion,
+      fetchedAt: new Date(),
+    },
+    create: {
+      connectionId,
+      cacheKey,
+      category,
+      typeName,
+      schemaJson: JSON.stringify(fields),
+      apiVersion,
+      fetchedAt: new Date(),
+    },
+  })
+}
+
+/**
+ * Cache an enum to ShopifyTypeCache.
+ */
+async function cacheEnum(
+  typeName: string,
+  values: string[],
+  apiVersion: string,
+  connectionId: string = DEFAULT_CONNECTION_ID
+): Promise<void> {
+  const cacheKey = buildCacheKey('enum', typeName)
+  await prisma.shopifyTypeCache.upsert({
+    where: { connectionId_cacheKey: { connectionId, cacheKey } },
+    update: {
+      enumValues: JSON.stringify(values),
+      apiVersion,
+      fetchedAt: new Date(),
+    },
+    create: {
+      connectionId,
+      cacheKey,
+      category: 'enum',
+      typeName,
+      enumValues: JSON.stringify(values),
+      apiVersion,
+      fetchedAt: new Date(),
+    },
+  })
+}
+
+/**
+ * Recursively introspect a type and all referenced object types and enums.
+ * Stops at SCALAR types and already-visited types.
+ */
+async function introspectWithFullDepth(
+  typeName: string,
+  category: 'entity' | 'object_type',
+  visited: Set<string>,
+  apiVersion: string,
+  connectionId: string = DEFAULT_CONNECTION_ID
+): Promise<{ types: number; enums: number }> {
+  if (visited.has(typeName)) {
+    return { types: 0, enums: 0 }
+  }
+  visited.add(typeName)
+
+  const fields = await introspectGraphQLType(typeName)
+  if (!fields) {
+    return { types: 0, enums: 0 }
+  }
+
+  await cacheType(category, typeName, fields, apiVersion, connectionId)
+  let typesCount = 1
+  let enumsCount = 0
+
+  // Find all referenced types
+  for (const field of fields) {
+    if (field.kind === 'OBJECT' && !visited.has(field.baseType)) {
+      // Skip known entities - they'll be processed at top level
+      const isKnownEntity = getKnownEntities().some(e => e.name === field.baseType)
+      if (!isKnownEntity) {
+        const result = await introspectWithFullDepth(
+          field.baseType,
+          'object_type',
+          visited,
+          apiVersion,
+          connectionId
+        )
+        typesCount += result.types
+        enumsCount += result.enums
+      }
+    } else if (field.kind === 'ENUM' && !visited.has(field.baseType)) {
+      visited.add(field.baseType)
+      const values = await introspectEnumValues(field.baseType)
+      if (values) {
+        await cacheEnum(field.baseType, values, apiVersion, connectionId)
+        enumsCount++
+      }
+    }
+  }
+
+  return { types: typesCount, enums: enumsCount }
+}
+
+// ============================================================================
+// Metafield Discovery Functions
+// ============================================================================
+
+const METAFIELD_DEFINITIONS_QUERY = `
+query MetafieldDefinitions($ownerType: MetafieldOwnerType!) {
+  metafieldDefinitions(ownerType: $ownerType, first: 250) {
+    edges {
+      node {
+        namespace
+        key
+        name
+        description
+        type { name }
+      }
+    }
+  }
+}
+`
+
+async function queryMetafieldDefinitions(ownerType: MetafieldOwnerType): Promise<MetafieldInfo[]> {
+  const { data, error } = await shopifyGraphQL<{
+    metafieldDefinitions: {
+      edges: Array<{
+        node: {
+          namespace: string
+          key: string
+          name: string
+          description?: string
+          type: { name: string }
+        }
+      }>
+    }
+  }>(METAFIELD_DEFINITIONS_QUERY, { ownerType })
+
+  if (error || !data?.metafieldDefinitions?.edges) {
+    return []
+  }
+
+  return data.metafieldDefinitions.edges.map(({ node }) => ({
+    namespace: node.namespace,
+    key: node.key,
+    displayName: node.name,
+    description: node.description,
+    dataType: node.type.name,
+    source: 'definition' as const,
+  }))
+}
+
+function buildSamplingQuery(
+  ownerType: MetafieldOwnerType,
+  recordLimit: number,
+  metafieldLimit: number
+): string {
+  const config = OWNER_TYPE_QUERY_MAP[ownerType]
+  
+  if (config.isSingleton) {
+    // SHOP is singleton
+    return `
+      query SampleShopMetafields {
+        shop {
+          metafields(first: ${metafieldLimit}) {
+            edges {
+              node { namespace key type }
+            }
+          }
+        }
+      }
+    `
+  }
+
+  return `
+    query Sample${ownerType}Metafields {
+      ${config.query}(first: ${recordLimit}, reverse: true) {
+        edges {
+          node {
+            metafields(first: ${metafieldLimit}) {
+              edges {
+                node { namespace key type }
+              }
+            }
+          }
+        }
+      }
+    }
+  `
+}
+
+async function querySampleMetafields(
+  ownerType: MetafieldOwnerType,
+  recordLimit: number,
+  metafieldLimit: number
+): Promise<MetafieldInfo[]> {
+  const query = buildSamplingQuery(ownerType, recordLimit, metafieldLimit)
+  const config = OWNER_TYPE_QUERY_MAP[ownerType]
+
+  const { data, error } = await shopifyGraphQL<Record<string, unknown>>(query)
+
+  if (error || !data) {
+    return []
+  }
+
+  const seen = new Set<string>()
+  const results: MetafieldInfo[] = []
+
+  // Extract metafields from response
+  const extractMetafields = (node: { metafields?: { edges: Array<{ node: { namespace: string; key: string; type: string } }> } }) => {
+    if (!node.metafields?.edges) return
+    for (const { node: mf } of node.metafields.edges) {
+      const uniqueKey = `${mf.namespace}:${mf.key}`
+      if (!seen.has(uniqueKey)) {
+        seen.add(uniqueKey)
+        results.push({
+          namespace: mf.namespace,
+          key: mf.key,
+          dataType: mf.type,
+          source: 'sampled',
+        })
+      }
+    }
+  }
+
+  if (config.isSingleton) {
+    const shop = data[config.query] as { metafields?: { edges: Array<{ node: { namespace: string; key: string; type: string } }> } }
+    if (shop) extractMetafields(shop)
+  } else {
+    const collection = data[config.query] as { edges?: Array<{ node: { metafields?: { edges: Array<{ node: { namespace: string; key: string; type: string } }> } } }> }
+    if (collection?.edges) {
+      for (const { node } of collection.edges) {
+        extractMetafields(node)
+      }
+    }
+  }
+
+  return results
+}
+
+function mergeMetafields(definitions: MetafieldInfo[], sampled: MetafieldInfo[]): MetafieldInfo[] {
+  const merged = new Map<string, MetafieldInfo>()
+
+  // Definitions take priority (richer metadata)
+  for (const mf of definitions) {
+    merged.set(`${mf.namespace}:${mf.key}`, mf)
+  }
+
+  // Add sampled ones not in definitions
+  for (const mf of sampled) {
+    const key = `${mf.namespace}:${mf.key}`
+    if (!merged.has(key)) {
+      merged.set(key, mf)
+    }
+  }
+
+  return Array.from(merged.values())
+}
+
+async function cacheMetafields(
+  ownerType: MetafieldOwnerType,
+  metafields: MetafieldInfo[],
+  apiVersion: string,
+  connectionId: string = DEFAULT_CONNECTION_ID
+): Promise<void> {
+  for (const mf of metafields) {
+    const cacheKey = buildCacheKey('metafield', undefined, ownerType, mf.namespace, mf.key)
+    await prisma.shopifyTypeCache.upsert({
+      where: { connectionId_cacheKey: { connectionId, cacheKey } },
+      update: {
+        displayName: mf.displayName,
+        description: mf.description,
+        dataType: mf.dataType,
+        source: mf.source,
+        apiVersion,
+        fetchedAt: new Date(),
+      },
+      create: {
+        connectionId,
+        cacheKey,
+        category: 'metafield',
+        ownerType,
+        namespace: mf.namespace,
+        key: mf.key,
+        displayName: mf.displayName,
+        description: mf.description,
+        dataType: mf.dataType,
+        source: mf.source,
+        apiVersion,
+        fetchedAt: new Date(),
+      },
+    })
+  }
+}
+
+async function discoverMetafieldsForOwnerType(
+  ownerType: MetafieldOwnerType,
+  apiVersion: string,
+  connectionId: string,
+  recordSampleSize: number,
+  metafieldLimit: number
+): Promise<number> {
+  const definitions = await queryMetafieldDefinitions(ownerType)
+  const sampled = await querySampleMetafields(ownerType, recordSampleSize, metafieldLimit)
+  const merged = mergeMetafields(definitions, sampled)
+  await cacheMetafields(ownerType, merged, apiVersion, connectionId)
+  return merged.length
+}
+
+// ============================================================================
+// Manual Metafield Entry
+// ============================================================================
+
+/**
+ * Manually add a metafield to the cache.
+ * Use when a metafield isn't discovered by definitions or sampling.
+ */
+export async function addManualMetafield(
+  ownerType: MetafieldOwnerType,
+  namespace: string,
+  key: string,
+  options?: {
+    displayName?: string
+    dataType?: string
+    description?: string
+    connectionId?: string
+  }
+): Promise<void> {
+  const connectionId = options?.connectionId ?? DEFAULT_CONNECTION_ID
+  const apiVersion = process.env.SHOPIFY_API_VERSION || '2024-01'
+  const cacheKey = buildCacheKey('metafield', undefined, ownerType, namespace, key)
+
+  await prisma.shopifyTypeCache.upsert({
+    where: { connectionId_cacheKey: { connectionId, cacheKey } },
+    update: {
+      displayName: options?.displayName,
+      dataType: options?.dataType,
+      description: options?.description,
+      source: 'manual',
+      apiVersion,
+      fetchedAt: new Date(),
+    },
+    create: {
+      connectionId,
+      cacheKey,
+      category: 'metafield',
+      ownerType,
+      namespace,
+      key,
+      displayName: options?.displayName,
+      dataType: options?.dataType,
+      description: options?.description,
+      source: 'manual',
+      apiVersion,
+      fetchedAt: new Date(),
+    },
+  })
+}
+
+/**
+ * Delete a manually-added metafield from the cache.
+ */
+export async function deleteManualMetafield(
+  ownerType: MetafieldOwnerType,
+  namespace: string,
+  key: string,
+  connectionId: string = DEFAULT_CONNECTION_ID
+): Promise<void> {
+  const cacheKey = buildCacheKey('metafield', undefined, ownerType, namespace, key)
+
+  await prisma.shopifyTypeCache.deleteMany({
+    where: {
+      connectionId,
+      cacheKey,
+      source: 'manual',
+    },
+  })
+}
+
+// ============================================================================
+// Main Orchestration Function
+// ============================================================================
+
+/**
+ * Clear and rebuild the entire schema cache.
+ * Introspects all entities, object types, enums, and metafields.
+ */
+export async function refreshSchemaCache(
+  connectionId: string = DEFAULT_CONNECTION_ID,
+  onProgress?: ProgressCallback
+): Promise<SchemaCacheResult> {
+  const startTime = Date.now()
+  const refreshStartedAt = new Date()
+  const apiVersion = process.env.SHOPIFY_API_VERSION || '2024-01'
+  const errors: string[] = []
+  const visited = new Set<string>()
+
+  // Fetch introspection settings
+  const { recordSampleSize, metafieldLimit } = await getIntrospectionSettings()
+
+  let entityCount = 0
+  let objectTypeCount = 0
+  let enumCount = 0
+  let metafieldCount = 0
+
+  // Calculate total steps (estimate)
+  const entities = getKnownEntities()
+  const totalSteps = entities.length + METAFIELD_OWNER_TYPES.length * 2
+  let currentStep = 0
+
+  // NOTE: We no longer delete at start - upserts will update existing entries
+  // Stale entries are cleaned up at the end if no errors occurred
+
+  // 1. Introspect known entities with full depth
+  for (const entity of entities) {
+    try {
+      onProgress?.(`Introspecting ${entity.name}`, ++currentStep, totalSteps)
+      const result = await introspectWithFullDepth(entity.name, 'entity', visited, apiVersion, connectionId)
+      entityCount++
+      objectTypeCount += result.types - 1 // Subtract the entity itself
+      enumCount += result.enums
+    } catch (err) {
+      errors.push(`Failed to introspect ${entity.name}: ${err instanceof Error ? err.message : 'Unknown error'}`)
+    }
+  }
+
+  // 2. Discover metafields for each owner type
+  for (const ownerType of METAFIELD_OWNER_TYPES) {
+    try {
+      onProgress?.(`Fetching ${ownerType} metafield definitions`, ++currentStep, totalSteps)
+      onProgress?.(`Sampling ${ownerType} records`, ++currentStep, totalSteps)
+      const count = await discoverMetafieldsForOwnerType(ownerType, apiVersion, connectionId, recordSampleSize, metafieldLimit)
+      metafieldCount += count
+    } catch (err) {
+      errors.push(`Failed to discover ${ownerType} metafields: ${err instanceof Error ? err.message : 'Unknown error'}`)
+    }
+  }
+
+  // 3. Clean up stale entries (entries not touched in this refresh)
+  // Only delete if we had no critical errors
+  if (errors.length === 0) {
+    await prisma.shopifyTypeCache.deleteMany({
+      where: {
+        connectionId,
+        fetchedAt: { lt: refreshStartedAt },
+      },
+    })
+  }
+
+  return {
+    entityCount,
+    objectTypeCount,
+    enumCount,
+    metafieldCount,
+    errors,
+    durationMs: Date.now() - startTime,
+  }
 }
