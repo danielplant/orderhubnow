@@ -91,33 +91,15 @@ if echo "$DRIFT_OUTPUT" | grep -q "SCHEMA DRIFT DETECTED"; then
     echo ""
     echo "$DRIFT_OUTPUT"
     echo ""
-    
-    # Find the latest migration file
-    MIGRATION_FILE=$(ls -t sql-migrations/*-auto-migration.sql 2>/dev/null | head -1)
-    
-    if [ -n "$MIGRATION_FILE" ]; then
-        echo ""
-        read -p "Apply migration to production? (yes/no): " APPLY_CONFIRM
-        if [ "$APPLY_CONFIRM" = "yes" ]; then
-            echo ""
-            echo "Applying migration..."
-            bash scripts/apply-migration.sh "$MIGRATION_FILE"
-            echo "✓ Migration applied"
-            
-            # Re-run drift check to confirm
-            echo ""
-            echo "Verifying schema alignment..."
-            if bash scripts/check-schema-drift.sh 2>&1 | grep -q "No schema drift"; then
-                echo "✓ Schema aligned with production"
-            else
-                echo "⚠️  Schema still has drift. Please investigate."
-                exit 1
-            fi
-        else
-            echo "Aborted. Apply migrations before deploying."
-            exit 1
-        fi
-    fi
+    echo "❌ Deploy halted: schema drift requires action."
+    echo "   Apply the migration shown above, then re-run deploy."
+    exit 1
+elif echo "$DRIFT_OUTPUT" | grep -q "SCHEMA DRIFT (PROD AHEAD"; then
+    echo ""
+    echo "$DRIFT_OUTPUT"
+    echo ""
+    echo "⚠️  Proceeding with deploy despite production being ahead."
+    echo "    (This is typically safe for older code, but review the warning above.)"
 else
     echo "✓ No schema drift - production is aligned"
 fi

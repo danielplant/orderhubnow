@@ -46,10 +46,27 @@ if [ -z "$MIGRATION_SQL" ] || [ "$MIGRATION_SQL" = "-- This is an empty migratio
     rm -f "$TEMP_PROD_SCHEMA"
     exit 0
 else
-    echo "❌ SCHEMA DRIFT DETECTED!"
+    # Classify drift: allow "prod ahead" (drop-only) but fail when local is ahead
+    SQL_NO_COMMENTS=$(echo "$MIGRATION_SQL" | sed 's/--.*$//')
+    UNSAFE_PATTERN='CREATE[[:space:]]+TABLE|CREATE[[:space:]]+INDEX|ALTER[[:space:]]+TABLE[^;]*[[:space:]]ADD|ADD[[:space:]]+COLUMN|ADD[[:space:]]+CONSTRAINT|ALTER[[:space:]]+COLUMN'
+    if echo "$SQL_NO_COMMENTS" | grep -Eiq "$UNSAFE_PATTERN"; then
+        DRIFT_KIND="unsafe"
+    else
+        DRIFT_KIND="safe"
+    fi
+
+    if [ "$DRIFT_KIND" = "safe" ]; then
+        echo "⚠️ SCHEMA DRIFT (PROD AHEAD - DROP-ONLY)"
+        echo "  Production has schema objects not present locally."
+        echo "  This is usually safe for older code. A rollback SQL is provided below."
+        HEADER_TEXT="ROLLBACK SQL (prod ahead - do NOT apply unless intentionally rolling back)"
+    else
+        echo "❌ SCHEMA DRIFT DETECTED!"
+        HEADER_TEXT="MIGRATION SQL (run this on production)"
+    fi
     echo ""
     echo "=========================================="
-    echo "  MIGRATION SQL (run this on production)"
+    echo "  $HEADER_TEXT"
     echo "=========================================="
     echo ""
     echo "$MIGRATION_SQL"
@@ -74,13 +91,25 @@ else
     
     echo "Migration saved to: $MIGRATION_FILE"
     echo ""
-    echo "Next steps:"
-    echo "  1. Review the migration SQL above"
-    echo "  2. Run: npm run apply-migration $MIGRATION_FILE"
-    echo "     (or manually run the SQL on production)"
-    echo "  3. Deploy to EC2"
+    echo "Production schema saved to: $TEMP_PROD_SCHEMA"
     echo ""
-    
-    rm -f "$TEMP_PROD_SCHEMA"
-    exit 1
+    if [ "$DRIFT_KIND" = "safe" ]; then
+        echo "Next steps:"
+        echo "  1. Review the rollback SQL above (DO NOT apply unless you intend to roll back production schema)"
+        echo "  2. You may proceed with deploy (production is ahead, but this is backward-compatible)"
+        echo "  3. To align local schema without DB changes, run:"
+        echo "       cp $TEMP_PROD_SCHEMA $LOCAL_SCHEMA"
+        echo "       npx prisma format"
+        echo "       git add $LOCAL_SCHEMA"
+        echo ""
+        exit 0
+    else
+        echo "Next steps:"
+        echo "  1. Review the migration SQL above"
+        echo "  2. Run: npm run apply-migration $MIGRATION_FILE"
+        echo "     (or manually run the SQL on production)"
+        echo "  3. Deploy to EC2"
+        echo ""
+        exit 1
+    fi
 fi
