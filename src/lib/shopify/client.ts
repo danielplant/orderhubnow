@@ -170,6 +170,42 @@ async function shopifyFetch<T>(
 }
 
 // ============================================================================
+// GraphQL API
+// ============================================================================
+
+/**
+ * Execute a GraphQL query against Shopify Admin API.
+ * Used for schema introspection and query validation.
+ */
+export async function shopifyGraphQLFetch(
+  query: string,
+  variables?: Record<string, unknown>
+): Promise<{ data?: unknown; error?: string }> {
+  const config = getConfig()
+  const url = `https://${config.storeDomain}/admin/api/${config.apiVersion}/graphql.json`
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Shopify-Access-Token': config.accessToken,
+      },
+      body: JSON.stringify({ query, variables }),
+    })
+
+    if (!response.ok) {
+      return { error: `HTTP ${response.status}: ${response.statusText}` }
+    }
+
+    const data = await response.json()
+    return { data }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : 'Unknown error' }
+  }
+}
+
+// ============================================================================
 // Orders API
 // ============================================================================
 

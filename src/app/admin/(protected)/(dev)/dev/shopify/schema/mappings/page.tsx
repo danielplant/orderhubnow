@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, Suspense } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Loader2, AlertCircle, RefreshCw, Database, ArrowLeft } from 'lucide-react'
+import { Loader2, AlertCircle, RefreshCw, Database, ArrowLeft, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { MappingsTable } from '@/components/admin/schema-graph/MappingsTable'
 import { ServiceSelector } from '@/components/admin/schema-graph/ServiceSelector'
@@ -50,6 +50,15 @@ function MappingsPageInner() {
   const [error, setError] = useState<string | null>(null)
   const [isSeeding, setIsSeeding] = useState(false)
   const [seedResult, setSeedResult] = useState<{ created: number; skipped: number; updated?: number } | null>(null)
+
+  // Phase 3: Introspection state
+  const [isIntrospecting, setIsIntrospecting] = useState(false)
+  const [introspectResult, setIntrospectResult] = useState<{
+    success: boolean
+    message?: string
+    error?: string
+    stats?: { discovered: number; created: number; updated: number; markedRemoved: number; introspectedAt: string }
+  } | null>(null)
 
   // Handle service selection change
   const handleServiceChange = (service: string | null) => {
@@ -113,6 +122,58 @@ function MappingsPageInner() {
     }
   }, [fetchMappings])
 
+  // Phase 3: Toggle enabled state for metafields
+  const handleToggleEnabled = useCallback(async (id: number, currentEnabled: boolean, fieldType: string) => {
+    // Only allow toggling metafields
+    if (fieldType !== 'metafield') {
+      return
+    }
+    
+    try {
+      const res = await fetch(`/api/admin/shopify/schema/mappings/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: !currentEnabled }),
+      })
+      
+      if (!res.ok) {
+        const data = await res.json()
+        alert(`Update failed: ${data.error}`)
+        return
+      }
+      
+      // Refresh mappings
+      await fetchMappings()
+    } catch (err) {
+      alert('Failed to update mapping')
+    }
+  }, [fetchMappings])
+
+  // Phase 3: Introspect Shopify schema
+  const handleIntrospect = useCallback(async () => {
+    setIsIntrospecting(true)
+    setIntrospectResult(null)
+    
+    try {
+      const res = await fetch('/api/admin/shopify/schema/introspect', {
+        method: 'POST',
+      })
+      const data = await res.json()
+      setIntrospectResult(data)
+      
+      if (data.success) {
+        fetchMappings() // Refresh to show new/updated fields
+      }
+    } catch (err) {
+      setIntrospectResult({
+        success: false,
+        message: 'Network error during introspection',
+      })
+    } finally {
+      setIsIntrospecting(false)
+    }
+  }, [fetchMappings])
+
   // Load on mount and when service changes
   useEffect(() => {
     fetchMappings()
@@ -138,6 +199,14 @@ function MappingsPageInner() {
             </p>
           </div>
           <div className="flex gap-3">
+            <Button variant="default" onClick={handleIntrospect} disabled={isIntrospecting} className="bg-purple-600 hover:bg-purple-700">
+              {isIntrospecting ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
+                <Search className="w-4 h-4 mr-2" />
+              )}
+              {isIntrospecting ? 'Introspecting...' : 'Introspect Shopify'}
+            </Button>
             <Button variant="outline" onClick={handleSeed} disabled={isSeeding}>
               {isSeeding ? (
                 <Loader2 className="w-4 h-4 mr-2 animate-spin" />
@@ -152,6 +221,27 @@ function MappingsPageInner() {
             </Button>
           </div>
         </div>
+        
+        {/* Introspection result notification */}
+        {introspectResult && (
+          <div className={`mb-4 p-3 rounded-lg text-sm ${
+            introspectResult.success 
+              ? 'bg-purple-50 border border-purple-200 text-purple-800' 
+              : 'bg-red-50 border border-red-200 text-red-800'
+          }`}>
+            {introspectResult.success ? (
+              <>
+                <span className="font-medium">Introspection complete: </span>
+                {introspectResult.stats?.discovered} metafields found. 
+                Created: {introspectResult.stats?.created}, 
+                Updated: {introspectResult.stats?.updated}
+                {introspectResult.stats?.markedRemoved ? `, Removed: ${introspectResult.stats.markedRemoved}` : ''}
+              </>
+            ) : (
+              <span>{introspectResult.error || introspectResult.message}</span>
+            )}
+          </div>
+        )}
 
         {/* Service Filter and Stats */}
         <div className="flex items-center gap-4 mb-6">
@@ -223,7 +313,7 @@ function MappingsPageInner() {
         {/* Success State */}
         {loadState === 'success' && (
           <div className="border rounded-lg bg-white p-6">
-            <MappingsTable mappings={mappings} onRefresh={fetchMappings} />
+            <MappingsTable mappings={mappings} onRefresh={fetchMappings} onToggleEnabled={handleToggleEnabled} />
           </div>
         )}
       </div>

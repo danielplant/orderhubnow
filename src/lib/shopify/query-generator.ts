@@ -8,6 +8,7 @@
 
 import { prisma } from '@/lib/prisma'
 import { BULK_OPERATION_QUERY } from './sync'
+import { shopifyGraphQLFetch } from './client'
 
 // ============================================================================
 // SPIKE VERSION - Hardcoded field list, no database reads
@@ -268,13 +269,15 @@ function buildQueryBody(fields: FieldMapping[]): string {
     .filter((f) => f.fieldType === 'metafield')
     .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
 
-  // VALIDATION: Ensure exactly 10 metafields (matches hardcoded query)
-  if (metafields.length !== 10) {
+  // VALIDATION: Ensure at least one metafield (Phase 3: allow variable count)
+  if (metafields.length === 0) {
     throw new Error(
-      `Expected exactly 10 metafields for bulk_sync, found ${metafields.length}. ` +
-        `Check ShopifyFieldMapping table has correct fieldType='metafield' entries.`
+      `No enabled metafields found for bulk_sync. At least one metafield must be enabled.`
     )
   }
+
+  console.log(`[QueryGen] Building query with ${metafields.length} metafields:`,
+    metafields.map(m => m.fieldPath.split('.')[1]).join(', '))
 
   // Build metafield lines from database config
   const metafieldLines = metafields
@@ -365,5 +368,84 @@ export async function validateQueryGeneration(
     normalizedHardcoded,
     normalizedGenerated,
     differences: match ? [] : computeLineDiff(normalizedHardcoded, normalizedGenerated),
+  }
+}
+
+// ============================================================================
+// PHASE 3: Shopify Validation Functions
+// ============================================================================
+
+/**
+ * Generates a minimal validation query to test against Shopify.
+ * Uses productVariants(first: 1) instead of bulk operation wrapper.
+ * This tests that all configured fields are valid without fetching all data.
+ */
+export async function generateValidationQuery(
+  serviceName: string,
+  connectionId: string = 'default'
+): Promise<string> {
+  const fields = await prisma.shopifyFieldMapping.findMany({
+    where: { connectionId, serviceName, enabled: true },
+    orderBy: { sortOrder: 'asc' },
+    select: {
+      fieldPath: true,
+      fieldType: true,
+      sortOrder: true,
+      metafieldNamespace: true,
+      metafieldKey: true,
+    },
+  })
+
+  if (fields.length === 0) {
+    throw new Error(`No enabled fields found for service '${serviceName}'`)
+  }
+
+  // Build the same field selection as buildQueryBody but wrap differently
+  const queryBody = buildQueryBody(fields as FieldMapping[])
+
+  // Return a simple query (not bulk operation) for validation
+  return `{
+  productVariants(first: 1) {
+    edges {
+      node {
+${queryBody}
+      }
+    }
+  }
+}`
+}
+
+/**
+ * Validates the current config by sending a dry-run query to Shopify.
+ * Returns validation result with specific error if failed.
+ */
+export async function validateQueryAgainstShopify(
+  serviceName: string
+): Promise<{ valid: boolean; error?: string; metafieldCount?: number }> {
+  try {
+    const validationQuery = await generateValidationQuery(serviceName)
+    const metafieldCount = (validationQuery.match(/metafield\(/g) || []).length
+    
+    console.log('[Validate] Sending validation query to Shopify...')
+    
+    const result = await shopifyGraphQLFetch(validationQuery)
+    
+    if (result.error) {
+      return { valid: false, error: result.error }
+    }
+    
+    // Check for GraphQL errors in the response
+    const data = result.data as { errors?: Array<{ message: string }> } | undefined
+    if (data?.errors) {
+      const errors = data.errors.map((e) => e.message).join('; ')
+      return { valid: false, error: errors }
+    }
+    
+    return { valid: true, metafieldCount }
+  } catch (error) {
+    return { 
+      valid: false, 
+      error: error instanceof Error ? error.message : 'Unknown error' 
+    }
   }
 }

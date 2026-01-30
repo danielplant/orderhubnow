@@ -31,6 +31,7 @@ interface FieldMapping {
   enabled: boolean
   isProtected: boolean
   accessStatus: string
+  fieldType?: string // Phase 3: needed for toggle logic
   createdAt: string
   updatedAt: string
 }
@@ -38,13 +39,14 @@ interface FieldMapping {
 interface Props {
   mappings: FieldMapping[]
   onRefresh?: () => void
+  onToggleEnabled?: (id: number, currentEnabled: boolean, fieldType: string) => void
 }
 
 // ============================================================================
 // Main Component
 // ============================================================================
 
-export function MappingsTable({ mappings, onRefresh }: Props) {
+export function MappingsTable({ mappings, onRefresh, onToggleEnabled }: Props) {
   // Filters
   const [searchQuery, setSearchQuery] = useState('')
   const [entityFilter, setEntityFilter] = useState<string>('all')
@@ -187,10 +189,34 @@ export function MappingsTable({ mappings, onRefresh }: Props) {
                     <span className="capitalize">{mapping.transformType}</span>
                   </td>
                   <td className="p-3 text-center">
-                    {mapping.enabled ? (
-                      <Check className="w-4 h-4 text-green-600 mx-auto" />
+                    {onToggleEnabled ? (
+                      <div className="flex items-center justify-center gap-1">
+                        <input
+                          type="checkbox"
+                          checked={mapping.enabled}
+                          onChange={() => onToggleEnabled(mapping.id, mapping.enabled, mapping.fieldType || '')}
+                          disabled={mapping.isProtected || mapping.fieldType !== 'metafield'}
+                          className="rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                          title={
+                            mapping.isProtected 
+                              ? 'Protected field cannot be disabled' 
+                              : mapping.fieldType !== 'metafield'
+                                ? 'Only metafield fields can be toggled'
+                                : undefined
+                          }
+                        />
+                        {mapping.fieldType !== 'metafield' && !mapping.isProtected && (
+                          <span className="text-muted-foreground text-xs" title="Non-metafield fields are fixed">
+                            (fixed)
+                          </span>
+                        )}
+                      </div>
                     ) : (
-                      <X className="w-4 h-4 text-muted-foreground mx-auto" />
+                      mapping.enabled ? (
+                        <Check className="w-4 h-4 text-green-600 mx-auto" />
+                      ) : (
+                        <X className="w-4 h-4 text-muted-foreground mx-auto" />
+                      )
                     )}
                   </td>
                   <td className="p-3 text-center">

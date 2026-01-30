@@ -8,7 +8,7 @@ import { prisma } from '@/lib/prisma'
 import { getStatusCascadeConfig } from '@/lib/data/queries/sync-config'
 import { getSyncSettings } from '@/lib/data/queries/settings'
 import { parseUnitsFromSku, calculateUnitPrice } from '@/lib/utils/units'
-import { generateQueryFromConfig, normalizeQuery, computeLineDiff } from './query-generator'
+import { generateQueryFromConfig, normalizeQuery, computeLineDiff, validateQueryAgainstShopify } from './query-generator'
 
 // ============================================================================
 // HARDCODE_MODE - Controls query generation behavior
@@ -154,6 +154,9 @@ export async function getBulkOperationUrl(
  * Static bulk operation query for variant-rooted sync.
  * Uses productVariants as the root to get all variants with inline product data.
  * Status filtering happens at SKU table transform time via skuAllowed cascade config.
+ * 
+ * @deprecated Phase 3 removes the comparison to this constant.
+ * Kept for HARDCODE_MODE rollback. Delete in Phase 4 after config-driven is proven stable.
  */
 export const BULK_OPERATION_QUERY = `
   mutation {
@@ -1354,6 +1357,7 @@ export async function runFullSync(options?: {
   onProgress?: (step: string, details?: string) => void
   maxWaitMs?: number
   pollIntervalMs?: number
+  skipValidation?: boolean
 }): Promise<{
   success: boolean
   message: string
@@ -1426,21 +1430,26 @@ export async function runFullSync(options?: {
     if (!HARDCODE_MODE) {
       try {
         const configQuery = await generateQueryFromConfig('bulk_sync')
-        const normalizedConfig = normalizeQuery(configQuery)
-        const normalizedHardcoded = normalizeQuery(BULK_OPERATION_QUERY)
-
-        if (normalizedConfig !== normalizedHardcoded) {
-          const differences = computeLineDiff(normalizedHardcoded, normalizedConfig)
-          console.error('[Sync] Config query does NOT match hardcoded! Aborting.')
-          console.error('[Sync] First 10 differences:', differences.slice(0, 10))
-          return {
-            success: false,
-            message: 'Config-driven query validation failed',
-            error: `Query mismatch: ${differences.length} line differences - check server logs`,
+        
+        // Log query stats
+        const metafieldCount = (configQuery.match(/metafield\(/g) || []).length
+        console.log(`[Sync] Using config-driven query with ${metafieldCount} metafields`)
+        
+        // Pre-sync validation: dry-run against Shopify (can skip via options)
+        if (!options?.skipValidation) {
+          console.log('[Sync] Running pre-sync validation...')
+          const validationResult = await validateQueryAgainstShopify('bulk_sync')
+          if (!validationResult.valid) {
+            console.error('[Sync] Pre-sync validation failed:', validationResult.error)
+            return {
+              success: false,
+              message: 'Pre-sync validation failed',
+              error: validationResult.error || 'Query rejected by Shopify',
+            }
           }
+          console.log('[Sync] Pre-sync validation passed')
         }
-
-        console.log('[Sync] Config-driven query validated - matches hardcoded')
+        
         queryToUse = configQuery
       } catch (err) {
         console.error('[Sync] Failed to generate config query:', err)

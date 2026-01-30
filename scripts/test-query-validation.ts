@@ -149,6 +149,32 @@ async function main() {
   console.log()
 
   // ─────────────────────────────────────────────────────────────
+  // Check 5: Phase 3 - Validation query generation
+  // ─────────────────────────────────────────────────────────────
+  console.log('5. [Phase 3] Validation query generation')
+  try {
+    const { generateValidationQuery } = await import('../src/lib/shopify/query-generator')
+    const validationQuery = await generateValidationQuery('bulk_sync')
+    const validationQueryOk = validationQuery.length > 0 && validationQuery.includes('productVariants(first: 1)')
+    console.log(`   Query length: ${validationQuery.length} chars`)
+    console.log(`   Contains first: 1: ${validationQuery.includes('productVariants(first: 1)')}`)
+    console.log(`   Status: ${validationQueryOk ? '✓' : '✗'} Validation query generated correctly`)
+    results.push({
+      check: '[Phase 3] Validation query',
+      passed: validationQueryOk,
+      detail: validationQueryOk ? 'Validation query generated correctly' : 'Validation query generation failed',
+    })
+  } catch (err) {
+    console.log(`   Status: ✗ Error generating validation query`)
+    results.push({
+      check: '[Phase 3] Validation query',
+      passed: false,
+      detail: err instanceof Error ? err.message : 'Unknown error',
+    })
+  }
+  console.log()
+
+  // ─────────────────────────────────────────────────────────────
   // Summary
   // ─────────────────────────────────────────────────────────────
   console.log('═'.repeat(60))

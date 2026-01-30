@@ -153,6 +153,15 @@ export default function SyncDashboardPage() {
   const [isCustomerSyncing, setIsCustomerSyncing] = useState(false);
   const [customerResult, setCustomerResult] = useState<{ success: boolean; count?: number; error?: string } | null>(null);
 
+  // Phase 3: Pre-flight validation state
+  const [validationResult, setValidationResult] = useState<{
+    valid?: boolean;
+    message?: string;
+    error?: string;
+    stats?: { metafieldCount: number; testedAt: string };
+  } | null>(null);
+  const [isValidating, setIsValidating] = useState(false);
+
   // Fetch current status
   const fetchStatus = useCallback(async () => {
     try {
@@ -237,6 +246,28 @@ export default function SyncDashboardPage() {
       setError(err instanceof Error ? err.message : 'Sync failed');
     } finally {
       setIsStarting(false);
+    }
+  };
+
+  // Phase 3: Validate query against Shopify
+  const handleValidateQuery = async () => {
+    setIsValidating(true);
+    setValidationResult(null);
+    
+    try {
+      const res = await fetch('/api/admin/shopify/sync/validate', {
+        method: 'POST',
+      });
+      const data = await res.json();
+      setValidationResult(data);
+    } catch (error) {
+      setValidationResult({
+        valid: false,
+        error: 'Network error',
+        message: 'Failed to reach validation endpoint',
+      });
+    } finally {
+      setIsValidating(false);
     }
   };
 
@@ -353,6 +384,59 @@ export default function SyncDashboardPage() {
         <p className="text-muted-foreground mt-1">
           Shopify → Database Pipeline
         </p>
+      </div>
+
+      {/* Pre-Flight Check Panel */}
+      <div className="bg-white dark:bg-slate-900 rounded-lg border p-6 mb-6">
+        <h3 className="text-lg font-semibold mb-4">Pre-Flight Check</h3>
+        
+        <div className="flex items-center gap-4">
+          <button
+            onClick={handleValidateQuery}
+            disabled={isValidating || inProgress}
+            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isValidating ? 'Validating...' : 'Validate Query'}
+          </button>
+          <span className="text-sm text-muted-foreground">
+            Test query against Shopify without syncing
+          </span>
+        </div>
+        
+        {validationResult && (
+          <div className={`mt-4 p-4 rounded-lg ${
+            validationResult.valid 
+              ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800' 
+              : 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800'
+          }`}>
+            {validationResult.valid ? (
+              <>
+                <div className="flex items-center text-green-700 dark:text-green-400">
+                  <CheckCircle className="w-5 h-5 mr-2" />
+                  <span className="font-medium">Query validated successfully</span>
+                </div>
+                {validationResult.stats && (
+                  <p className="text-sm text-green-600 dark:text-green-500 mt-1 ml-7">
+                    {validationResult.stats.metafieldCount} metafields | 
+                    Tested: {new Date(validationResult.stats.testedAt).toLocaleString()}
+                  </p>
+                )}
+              </>
+            ) : (
+              <>
+                <div className="flex items-center text-red-700 dark:text-red-400">
+                  <XCircle className="w-5 h-5 mr-2" />
+                  <span className="font-medium">{validationResult.message || 'Validation failed'}</span>
+                </div>
+                {validationResult.error && (
+                  <p className="text-sm text-red-600 dark:text-red-500 mt-1 ml-7">
+                    Error: {validationResult.error}
+                  </p>
+                )}
+              </>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Main Status Card */}
