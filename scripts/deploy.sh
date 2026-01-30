@@ -48,6 +48,13 @@ else
     echo "✓ Working directory clean"
 fi
 
+# Guardrail: only allow deploys from main
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+if [[ "$CURRENT_BRANCH" != "main" ]]; then
+    echo "❌ ERROR: You are on branch '$CURRENT_BRANCH'. Deploys are only allowed from 'main'."
+    exit 1
+fi
+
 # Step 2: Type check
 echo ""
 echo "[2/8] Running type check..."
@@ -70,6 +77,9 @@ echo "✓ Hydration check passed"
 echo ""
 echo "[5/8] Running build..."
 npm run build
+# Stamp the build with the git commit so we can verify deploy alignment
+BUILD_COMMIT=$(git rev-parse HEAD)
+echo "$BUILD_COMMIT" > .next/BUILD_COMMIT
 echo "✓ Build passed"
 
 # Step 6: Schema drift check
@@ -118,6 +128,29 @@ echo ""
 echo "[7/8] Pushing to GitHub..."
 git push origin main --no-verify
 echo "✓ Pushed to GitHub"
+
+# Step 7.5: Verify deploy commit and build alignment
+echo ""
+echo "[7.5/8] Verifying deploy commit matches origin/main and build..."
+git fetch origin main >/dev/null 2>&1 || true
+LOCAL_COMMIT=$(git rev-parse HEAD)
+REMOTE_COMMIT=$(git rev-parse origin/main)
+if [[ "$LOCAL_COMMIT" != "$REMOTE_COMMIT" ]]; then
+    echo "❌ ERROR: Local HEAD ($LOCAL_COMMIT) does not match origin/main ($REMOTE_COMMIT)."
+    echo "   Please pull/rebase and re-run deploy so build artifacts match origin/main."
+    exit 1
+fi
+if [[ ! -f .next/BUILD_COMMIT ]]; then
+    echo "❌ ERROR: Missing .next/BUILD_COMMIT. Re-run 'npm run build' to stamp the build."
+    exit 1
+fi
+STAMPED_COMMIT=$(cat .next/BUILD_COMMIT)
+if [[ "$STAMPED_COMMIT" != "$LOCAL_COMMIT" ]]; then
+    echo "❌ ERROR: .next was built from $STAMPED_COMMIT but current HEAD is $LOCAL_COMMIT."
+    echo "   Re-run 'npm run build' so .next matches the deploy commit."
+    exit 1
+fi
+echo "✓ Deploy commit and build are aligned"
 
 # Step 8: Deploy to EC2 (rsync pre-built artifacts, no rebuild)
 echo ""
