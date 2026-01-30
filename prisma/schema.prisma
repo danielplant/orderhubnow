@@ -77,6 +77,7 @@ model CustomerOrders {
   CustomerOrdersComments     CustomerOrdersComments[]
   CustomerOrdersItems        CustomerOrdersItems[]
   Shipments                  Shipments[]
+  PlannedShipments           PlannedShipment[]
 
   @@index([CustomerID], map: "IX_CustomerOrders_CustomerID")
   @@index([OrderDate], map: "IX_CustomerOrders_OrderDate")
@@ -108,12 +109,15 @@ model CustomerOrdersItems {
   Status          String?         @default("Open") @db.NVarChar(20) // Open | Shipped | Cancelled
   CancelledQty    Int?            @default(0)
   CancelledReason String?         @db.NVarChar(100) // "Out of stock", "Discontinued", "Customer request", etc.
-  CancelledAt     DateTime?       @db.DateTime
-  CancelledBy     String?         @db.NVarChar(255)
-  CustomerOrders  CustomerOrders  @relation(fields: [CustomerOrderID], references: [ID], onUpdate: NoAction, map: "FK_CustomerOrdersItems_CustomerOrders")
-  ShipmentItems   ShipmentItems[]
+  CancelledAt       DateTime?         @db.DateTime
+  CancelledBy       String?           @db.NVarChar(255)
+  PlannedShipmentID BigInt?
+  CustomerOrders    CustomerOrders    @relation(fields: [CustomerOrderID], references: [ID], onUpdate: NoAction, map: "FK_CustomerOrdersItems_CustomerOrders")
+  PlannedShipment   PlannedShipment?  @relation(fields: [PlannedShipmentID], references: [ID], onDelete: SetNull, map: "FK_CustomerOrdersItems_PlannedShipment")
+  ShipmentItems     ShipmentItems[]
 
   @@index([CustomerOrderID], map: "IX_CustomerOrdersItems_CustomerOrderID")
+  @@index([PlannedShipmentID], map: "IX_CustomerOrdersItems_PlannedShipmentID")
 }
 
 model Customers {
@@ -814,6 +818,9 @@ model Shipments {
   VoidedBy         String?            @db.NVarChar(255)
   VoidReason       String?            @db.NVarChar(100)
   VoidNotes        String?            @db.NVarChar(Max)
+  // Phase 6: Link to PlannedShipment this fulfillment satisfies
+  PlannedShipmentID BigInt?
+  PlannedShipment   PlannedShipment?  @relation(fields: [PlannedShipmentID], references: [ID], onDelete: SetNull, map: "FK_Shipments_PlannedShipment")
   CustomerOrders   CustomerOrders     @relation(fields: [CustomerOrderID], references: [ID], onUpdate: NoAction, map: "FK_Shipments_CustomerOrders")
   ShipmentItems    ShipmentItems[]
   ShipmentTracking ShipmentTracking[]
@@ -821,6 +828,7 @@ model Shipments {
 
   @@index([CustomerOrderID], map: "IX_Shipments_CustomerOrderID")
   @@index([VoidedAt], map: "IX_Shipments_VoidedAt")
+  @@index([PlannedShipmentID], map: "IX_Shipments_PlannedShipmentID")
 }
 
 /// Line items included in a shipment - links to order items with quantity shipped
@@ -1436,4 +1444,34 @@ model SizeAlias {
 
   @@index([CanonicalSize])
   @@map("SizeAlias")
+}
+
+// ============================================================================
+// Planned Shipments
+// ============================================================================
+// Groups order items by collection with specific ship date windows.
+// Created at order time to represent customer's requested delivery windows.
+// Separate from fulfillment Shipments - this is what customer requested,
+// Shipments is what was actually shipped.
+// ============================================================================
+
+/// Planned shipment - groups items by collection with specific ship dates
+model PlannedShipment {
+  ID                BigInt              @id(map: "PK_PlannedShipment") @default(autoincrement())
+  CustomerOrderID   BigInt
+  CollectionID      Int?                // Nullable for combined/ATS shipments
+  CollectionName    String?             @db.NVarChar(500)
+  PlannedShipStart  DateTime            @db.DateTime
+  PlannedShipEnd    DateTime            @db.DateTime
+  Status            String              @default("Planned") @db.NVarChar(20) // Planned|PartiallyFulfilled|Fulfilled|Cancelled
+  CreatedAt         DateTime            @default(now()) @db.DateTime
+  UpdatedAt         DateTime?           @db.DateTime
+
+  CustomerOrders    CustomerOrders      @relation(fields: [CustomerOrderID], references: [ID], onDelete: Cascade, map: "FK_PlannedShipment_CustomerOrders")
+  Items             CustomerOrdersItems[]
+  Shipments         Shipments[]  // Phase 6: Back-relation to linked fulfillments
+
+  @@index([CustomerOrderID], map: "IX_PlannedShipment_CustomerOrderID")
+  @@index([Status], map: "IX_PlannedShipment_Status")
+  @@map("PlannedShipments")
 }

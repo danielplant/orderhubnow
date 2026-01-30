@@ -16,6 +16,12 @@ import { formatCurrency } from '@/lib/utils'
 import { updateOrderCurrency } from '@/lib/data/actions/orders'
 import { Trash2 } from 'lucide-react'
 import type { OrderForEditing } from '@/lib/data/queries/orders'
+import type { CartPlannedShipment } from '@/lib/types/planned-shipment'
+import {
+  getATSDefaultDates,
+  validateShipDates,
+  type CollectionWindow,
+} from '@/lib/validation/ship-window'
 
 interface SkuData {
   skuVariantId: number
@@ -64,6 +70,11 @@ export function MyOrderClient({
     setEditOrderCurrency,
     isEditMode: contextIsEditMode,
     isValidatingEditState,
+    shipmentDateOverrides,
+    updateShipmentDates,
+    // Phase 5: Edit mode shipments
+    editModeShipments,
+    isEditModeWithShipments,
   } = useOrder()
   const { currency, setCurrency } = useCurrency()
   const hasLoadedOrderRef = useRef(false)
@@ -180,22 +191,184 @@ export function MyOrderClient({
     return items
   }, [orders, skuMap, effectiveCurrency])
 
-  // Detect if order will be split by Collection (for UI warning)
-  // CollectionID is the grouping key (what users see on pre-order pages)
-  const shipWindowGroups = useMemo(() => {
-    const groups = new Map<string, typeof cartItems>()
-    for (const item of cartItems) {
-      // Group by collectionId, else default
-      const key = item.collectionId
-        ? `collection-${item.collectionId}`
-        : 'default'
-      if (!groups.has(key)) groups.set(key, [])
-      groups.get(key)!.push(item)
-    }
-    return groups
-  }, [cartItems])
+  // Compute planned shipments from cart items + date overrides
+  // Phase 5: In edit mode, reconcile loaded shipments with current cart items
+  const plannedShipments = useMemo((): CartPlannedShipment[] => {
+    if (cartItems.length === 0) return []
 
-  const willSplitOrder = shipWindowGroups.size > 1
+    const atsDefaults = getATSDefaultDates()
+    const shipments: CartPlannedShipment[] = []
+
+    // Phase 5: Edit mode with loaded shipments - reconcile with cart
+    if (isEditModeWithShipments && editModeShipments.size > 0) {
+      const processedSkus = new Set<string>()
+
+      // Find existing ATS shipment for date inheritance
+      let existingATSShipment: { plannedShipStart: string; plannedShipEnd: string } | null = null
+      for (const [, shipment] of editModeShipments) {
+        if (shipment.collectionId === null) {
+          existingATSShipment = {
+            plannedShipStart: shipment.plannedShipStart,
+            plannedShipEnd: shipment.plannedShipEnd,
+          }
+          break
+        }
+      }
+
+      // 1. Process existing shipments from edit mode
+      for (const [shipmentId, shipment] of editModeShipments) {
+        // Find items still in cart that belong to this shipment
+        const shipmentItems = cartItems.filter((item) =>
+          shipment.itemSkus.includes(item.sku)
+        )
+
+        if (shipmentItems.length > 0) {
+          const first = shipmentItems[0]
+          // Use date overrides if user changed dates, otherwise use loaded dates
+          const override = shipmentDateOverrides.get(shipmentId)
+
+          shipments.push({
+            id: shipmentId,
+            collectionId: shipment.collectionId,
+            collectionName: shipment.collectionName,
+            itemIds: shipmentItems.map((i) => i.sku),
+            plannedShipStart: override?.start ?? shipment.plannedShipStart,
+            plannedShipEnd: override?.end ?? shipment.plannedShipEnd,
+            minAllowedStart: first.shipWindowStart,
+            minAllowedEnd: first.shipWindowEnd,
+          })
+          shipmentItems.forEach((item) => processedSkus.add(item.sku))
+        }
+        // If no items remain, shipment will be deleted on save
+      }
+
+      // 2. Find items not in any loaded shipment (new items added during edit)
+      const newItems = cartItems.filter((item) => !processedSkus.has(item.sku))
+
+      if (newItems.length > 0) {
+        // Group new items by collectionId
+        const groups = new Map<number | null, typeof cartItems>()
+        for (const item of newItems) {
+          const key = item.collectionId ?? null
+          if (!groups.has(key)) groups.set(key, [])
+          groups.get(key)!.push(item)
+        }
+
+        // 3. Create new shipments for new collections
+        groups.forEach((items, collectionId) => {
+          const first = items[0]
+          const shipmentId = `new-${collectionId ?? 'ats'}`
+
+          // Check for user overrides on new shipments
+          const override = shipmentDateOverrides.get(shipmentId)
+
+          // Phase 5: ATS date preservation - inherit from existing ATS shipment
+          let defaultStart: string
+          let defaultEnd: string
+
+          if (collectionId === null && existingATSShipment) {
+            // Inherit dates from existing ATS shipment
+            defaultStart = existingATSShipment.plannedShipStart
+            defaultEnd = existingATSShipment.plannedShipEnd
+          } else {
+            // Use collection defaults or ATS defaults
+            defaultStart = first.shipWindowStart ?? atsDefaults.start
+            defaultEnd = first.shipWindowEnd ?? atsDefaults.end
+          }
+
+          shipments.push({
+            id: shipmentId,
+            collectionId,
+            collectionName: first.collectionName ?? null,
+            itemIds: items.map((i) => i.sku),
+            plannedShipStart: override?.start ?? defaultStart,
+            plannedShipEnd: override?.end ?? defaultEnd,
+            minAllowedStart: first.shipWindowStart,
+            minAllowedEnd: first.shipWindowEnd,
+          })
+        })
+      }
+    } else {
+      // New order mode: compute from cart items (existing logic)
+      const groups = new Map<number | null, typeof cartItems>()
+      for (const item of cartItems) {
+        const key = item.collectionId ?? null
+        if (!groups.has(key)) groups.set(key, [])
+        groups.get(key)!.push(item)
+      }
+
+      groups.forEach((items, collectionId) => {
+        const first = items[0]
+        const shipmentId =
+          collectionId !== null ? `shipment-${collectionId}` : 'shipment-default'
+
+        // Check for user overrides
+        const override = shipmentDateOverrides.get(shipmentId)
+
+        // Default dates: collection window or ATS defaults
+        const defaultStart = first.shipWindowStart ?? atsDefaults.start
+        const defaultEnd = first.shipWindowEnd ?? atsDefaults.end
+
+        shipments.push({
+          id: shipmentId,
+          collectionId,
+          collectionName: first.collectionName ?? null,
+          itemIds: items.map((i) => i.sku),
+          plannedShipStart: override?.start ?? defaultStart,
+          plannedShipEnd: override?.end ?? defaultEnd,
+          minAllowedStart: first.shipWindowStart,
+          minAllowedEnd: first.shipWindowEnd,
+        })
+      })
+    }
+
+    // Sort by ship start date
+    return shipments.sort((a, b) =>
+      a.plannedShipStart.localeCompare(b.plannedShipStart)
+    )
+  }, [cartItems, shipmentDateOverrides, isEditModeWithShipments, editModeShipments])
+
+  const hasMultipleShipments = plannedShipments.length > 1
+
+  // Validate all shipments for submit blocking
+  const shipmentValidationErrors = useMemo(() => {
+    const errors = new Map<string, { start?: string; end?: string }>()
+
+    for (const shipment of plannedShipments) {
+      const collections: CollectionWindow[] =
+        shipment.minAllowedStart || shipment.minAllowedEnd
+          ? [
+              {
+                id: shipment.collectionId ?? 0,
+                name: shipment.collectionName ?? 'Collection',
+                shipWindowStart: shipment.minAllowedStart,
+                shipWindowEnd: shipment.minAllowedEnd,
+              },
+            ]
+          : []
+
+      const result = validateShipDates(
+        shipment.plannedShipStart,
+        shipment.plannedShipEnd,
+        collections
+      )
+
+      if (!result.valid) {
+        const startError = result.errors.find((e) => e.field === 'start')
+        const endError = result.errors.find((e) => e.field === 'end')
+        if (startError || endError) {
+          errors.set(shipment.id, {
+            start: startError?.message,
+            end: endError?.message,
+          })
+        }
+      }
+    }
+
+    return errors
+  }, [plannedShipments])
+
+  const hasShipmentValidationErrors = shipmentValidationErrors.size > 0
 
   // Detect items missing CollectionID - these block checkout
   const itemsMissingCollection = useMemo(() => {
@@ -238,9 +411,6 @@ export function MyOrderClient({
   // Don't redirect while processing stale edit state
   useEffect(() => {
     if (!isEditMode && totalItems === 0 && !shouldShowEditError) {
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/a5fde547-ac60-4379-a83d-f48710b84ace',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'buyer-my-order-client.tsx:redirect',message:'Redirecting due to empty cart',data:{totalItems,isEditMode,shouldShowEditError},timestamp:Date.now(),sessionId:'debug-session',runId:'pre-fix',hypothesisId:'H5'})}).catch(()=>{});
-      // #endregion
       router.replace(`/buyer/select-journey${navigationQuery}`)
     }
   }, [totalItems, router, isEditMode, navigationQuery, shouldShowEditError])
@@ -364,10 +534,10 @@ export function MyOrderClient({
                 </div>
               </div>
 
-              {/* Split order warning - only shown when items have different ship windows */}
-              {willSplitOrder && !isEditMode && (
-                <div className="p-3 bg-amber-50 border border-amber-200 rounded-md text-sm text-amber-800">
-                  <strong>Note:</strong> Your order will be split into {shipWindowGroups.size} separate orders based on delivery window.
+              {/* Multiple shipments info - only shown when items have different ship windows */}
+              {hasMultipleShipments && !isEditMode && (
+                <div className="p-3 bg-blue-50 border border-blue-200 rounded-md text-sm text-blue-800">
+                  <strong>Multiple Shipments:</strong> Your order includes {plannedShipments.length} shipments with different delivery windows.
                 </div>
               )}
 
@@ -409,6 +579,10 @@ export function MyOrderClient({
             returnTo={returnTo}
             repContext={repContext}
             itemsMissingCollection={itemsMissingCollection}
+            plannedShipments={plannedShipments}
+            onShipmentDatesChange={updateShipmentDates}
+            shipmentValidationErrors={shipmentValidationErrors}
+            hasShipmentValidationErrors={hasShipmentValidationErrors}
           />
         </div>
       </div>

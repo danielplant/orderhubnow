@@ -64,11 +64,12 @@ export async function GET(request: NextRequest) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const where: any = {}
 
+    // Note: SQL Server collation is case-insensitive by default
     if (input.q) {
-      where.StoreName = { contains: input.q, mode: 'insensitive' }
+      where.StoreName = { contains: input.q }
     }
     if (input.rep) {
-      where.SalesRep = { contains: input.rep, mode: 'insensitive' }
+      where.SalesRep = { contains: input.rep }
     }
     if (input.syncStatus === 'pending') {
       where.OR = [

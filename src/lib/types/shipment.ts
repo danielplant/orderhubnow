@@ -70,6 +70,8 @@ export interface CreateShipmentInput {
   notifyShopify?: boolean; // Shopify's notify_customer flag
   // Email override (one-time, doesn't update order)
   customerEmailOverride?: string;
+  // Phase 6: Optional link to planned shipment
+  plannedShipmentId?: string;
 }
 
 /**

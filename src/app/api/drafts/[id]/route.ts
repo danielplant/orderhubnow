@@ -46,6 +46,10 @@ interface DraftState {
     website?: string
   }
   
+  // Shipment date overrides (Phase 2 - Planned Shipments)
+  // Maps shipment ID to user-customized dates
+  shipmentDateOverrides?: Record<string, { start: string; end: string }>
+  
   // Metadata
   lastUpdated: string
 }
@@ -147,6 +151,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       preOrderMeta: body.preOrderMeta || {},
       lineMeta: body.lineMeta || {},
       formData: body.formData || {},
+      shipmentDateOverrides: body.shipmentDateOverrides || {},
       lastUpdated: new Date().toISOString(),
     }
 

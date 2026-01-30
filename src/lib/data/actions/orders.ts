@@ -5,8 +5,9 @@ import { headers } from 'next/headers'
 import { prisma } from '@/lib/prisma'
 import { auth } from '@/lib/auth/providers'
 import type { OrderStatus, CreateOrderResult, UpdateOrderInput, UpdateOrderResult } from '@/lib/types/order'
-import { createOrderInputSchema, type CreateOrderInput } from '@/lib/schemas/order'
+import { createOrderInputSchema, type CreateOrderInput, type PlannedShipmentData } from '@/lib/schemas/order'
 import { sendOrderEmails } from '@/lib/email/send-order-emails'
+import { validateShipDates, getATSDefaultDates } from '@/lib/validation/ship-window'
 
 // ============================================================================
 // Auth Helpers
@@ -354,15 +355,86 @@ function getOrderGroupKey(
   return `${typePrefix}-default`
 }
 
+// ============================================================================
+// Planned Shipment Helpers (Phase 3)
+// ============================================================================
+
+/**
+ * Calculate legacy ship dates from planned shipments.
+ * Order header gets earliest start and latest end.
+ */
+function getLegacyDatesFromShipments(
+  plannedShipments: PlannedShipmentData[] | undefined,
+  formDates: { shipStartDate: string; shipEndDate: string }
+): { start: Date; end: Date } {
+  if (!plannedShipments?.length) {
+    return {
+      start: new Date(formDates.shipStartDate),
+      end: new Date(formDates.shipEndDate),
+    }
+  }
+
+  const starts = plannedShipments.map((s) => new Date(s.plannedShipStart))
+  const ends = plannedShipments.map((s) => new Date(s.plannedShipEnd))
+
+  return {
+    start: new Date(Math.min(...starts.map((d) => d.getTime()))),
+    end: new Date(Math.max(...ends.map((d) => d.getTime()))),
+  }
+}
+
+/**
+ * Find which planned shipment a SKU belongs to.
+ */
+export function findShipmentIdForSku(
+  sku: string,
+  plannedShipments: PlannedShipmentData[] | undefined,
+  shipmentIdMap: Map<string, bigint>
+): bigint | null {
+  if (!plannedShipments?.length) return null
+  const shipment = plannedShipments.find((s) => s.itemSkus.includes(sku))
+  return shipment ? (shipmentIdMap.get(shipment.id) ?? null) : null
+}
+
+/**
+ * Derive planned shipments when client doesn't send them.
+ * Backward compatibility for old clients.
+ */
+export function deriveShipmentsFromItems(
+  items: CreateOrderInput['items'],
+  formDates: { shipStartDate: string; shipEndDate: string }
+): PlannedShipmentData[] {
+  const atsDefaults = getATSDefaultDates()
+  const groups = new Map<string, typeof items>()
+
+  for (const item of items) {
+    const key = item.collectionId?.toString() ?? 'no-collection'
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key)!.push(item)
+  }
+
+  return Array.from(groups.entries()).map(([, groupItems], index) => ({
+    id: `derived-${index}`,
+    collectionId: groupItems[0].collectionId ?? null,
+    collectionName: groupItems[0].collectionName ?? null,
+    itemSkus: groupItems.map((i) => i.sku),
+    plannedShipStart: groupItems[0].shipWindowStart ?? formDates.shipStartDate ?? atsDefaults.start,
+    plannedShipEnd: groupItems[0].shipWindowEnd ?? formDates.shipEndDate ?? atsDefaults.end,
+  }))
+}
+
 /**
  * Create a new order from buyer cart submission.
+ * 
+ * Phase 3: Creates ONE order with multiple PlannedShipments.
+ * Previously split orders by collection - now creates a single order
+ * and groups items into PlannedShipment records by collection.
+ * 
  * Matches .NET MyOrder.aspx.cs btnSaveOrder_Click behavior:
  * - Creates CustomerOrders header
  * - Creates CustomerOrdersItems for each line
+ * - Creates PlannedShipments for each collection group
  * - Upserts Customer record with address
- * 
- * NEW: Splits orders by ship window/category when items have different delivery dates.
- * A single cart with multiple ship windows results in multiple OHN orders.
  */
 export async function createOrder(input: CreateOrderInput): Promise<CreateOrderResult> {
   try {
@@ -380,32 +452,83 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
 
     const data = parsed.data
 
-    // Derive order type from SKU data (master source: SkuCategories.IsPreOrder)
+    // Derive order type from SKU data (master source: Collection.type)
     const skuVariantIds = data.items.map((item) => BigInt(item.skuVariantId))
     const skuPreOrderMap = await deriveIsPreOrderFromSkus(skuVariantIds)
 
-    // Group items by order type AND ship window (auto-split mixed ATS/Pre-Order)
-    const itemGroups = new Map<string, typeof data.items>()
-    for (const item of data.items) {
-      const key = getOrderGroupKey(item, skuPreOrderMap)
-      if (!itemGroups.has(key)) {
-        itemGroups.set(key, [])
+    // Determine order type: PreOrder if ANY item is PreOrder (P-prefix wins)
+    const isPreOrder = Array.from(skuPreOrderMap.values()).some((v) => v)
+
+    // Use provided plannedShipments or derive from items (backward compat)
+    const plannedShipments = data.plannedShipments?.length
+      ? data.plannedShipments
+      : deriveShipmentsFromItems(data.items, {
+          shipStartDate: data.shipStartDate,
+          shipEndDate: data.shipEndDate,
+        })
+
+    // =========================================================================
+    // Server-side validation: Batch fetch collections and validate dates
+    // =========================================================================
+    const collectionIds = plannedShipments
+      .map((s) => s.collectionId)
+      .filter((id): id is number => id !== null)
+
+    const collections = collectionIds.length > 0
+      ? await prisma.collection.findMany({
+          where: { id: { in: collectionIds } },
+          select: { id: true, name: true, shipWindowStart: true, shipWindowEnd: true },
+        })
+      : []
+
+    const collectionMap = new Map(collections.map((c) => [c.id, c]))
+
+    // Validate each shipment's dates against collection window
+    for (const shipment of plannedShipments) {
+      if (shipment.collectionId) {
+        const collection = collectionMap.get(shipment.collectionId)
+        if (collection?.shipWindowStart && collection?.shipWindowEnd) {
+          const result = validateShipDates(
+            shipment.plannedShipStart,
+            shipment.plannedShipEnd,
+            [{
+              id: shipment.collectionId,
+              name: collection.name,
+              shipWindowStart: collection.shipWindowStart.toISOString(),
+              shipWindowEnd: collection.shipWindowEnd.toISOString(),
+            }]
+          )
+          if (!result.valid) {
+            return {
+              success: false,
+              error: `Invalid dates for ${collection.name}: ${result.errors[0]?.message}`,
+            }
+          }
+        }
       }
-      itemGroups.get(key)!.push(item)
     }
 
-    // Track created orders
-    const createdOrders: Array<{
-      orderId: string
-      orderNumber: string
-      collectionName: string | null
-      shipWindowStart: string | null
-      shipWindowEnd: string | null
-      orderAmount: number
-      items: typeof data.items
-    }> = []
+    // =========================================================================
+    // Calculate order totals and legacy dates
+    // =========================================================================
+    const orderAmount = data.items.reduce(
+      (sum, item) => sum + item.price * item.quantity,
+      0
+    )
 
-    // Create orders in a single transaction for atomicity
+    const legacyDates = getLegacyDatesFromShipments(plannedShipments, {
+      shipStartDate: data.shipStartDate,
+      shipEndDate: data.shipEndDate,
+    })
+
+    // Track created order and shipments
+    let orderId: bigint = BigInt(0)
+    let orderNumber: string = ''
+    const createdShipmentIds: string[] = []
+
+    // =========================================================================
+    // Create order in a single transaction
+    // =========================================================================
     await prisma.$transaction(async (tx) => {
       // Look up rep by ID - fail if not found
       const rep = await tx.reps.findUnique({
@@ -430,59 +553,64 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
         }
       }
 
-      // Create one order per ship window group (and order type)
-      for (const [, groupItems] of itemGroups) {
-        // Determine order type from first item's SKU (all items in group have same type)
-        const firstItemVariantId = String(groupItems[0].skuVariantId)
-        const isPreOrder = skuPreOrderMap.get(firstItemVariantId) ?? false
-        
-        // Generate order number with appropriate prefix
-        const orderNumber = await getNextOrderNumber(isPreOrder)
+      // Generate SINGLE order number
+      orderNumber = await getNextOrderNumber(isPreOrder)
 
-        // Calculate group total
-        const orderAmount = groupItems.reduce(
-          (sum, item) => sum + item.price * item.quantity,
-          0
-        )
+      // CREATE SINGLE ORDER
+      const newOrder = await tx.customerOrders.create({
+        data: {
+          OrderNumber: orderNumber,
+          BuyerName: data.buyerName,
+          StoreName: data.storeName,
+          SalesRep: salesRepName,
+          CustomerEmail: data.customerEmail,
+          CustomerPhone: data.customerPhone,
+          Country: data.currency, // Legacy: stores currency, not country
+          OrderAmount: orderAmount,
+          OrderNotes: data.orderNotes ?? '',
+          CustomerPO: data.customerPO ?? '',
+          ShipStartDate: legacyDates.start, // Earliest across all shipments
+          ShipEndDate: legacyDates.end,     // Latest across all shipments
+          OrderDate: new Date(),
+          Website: data.website ?? '',
+          IsShipped: false,
+          OrderStatus: 'Pending',
+          IsTransferredToShopify: false,
+          IsPreOrder: isPreOrder, // Derived from SKU category, not client input
+          RepID: parseInt(data.salesRepId),
+          CustomerID: customerId,
+        },
+      })
+      orderId = newOrder.ID
 
-        // Use item's ship window if available, else form dates
-        const firstItem = groupItems[0]
-        const shipStart = firstItem.shipWindowStart
-          ? new Date(firstItem.shipWindowStart)
-          : new Date(data.shipStartDate)
-        const shipEnd = firstItem.shipWindowEnd
-          ? new Date(firstItem.shipWindowEnd)
-          : new Date(data.shipEndDate)
+      // CREATE PLANNED SHIPMENTS
+      const shipmentIdMap = new Map<string, bigint>()
 
-        // Create order header
-        const newOrder = await tx.customerOrders.create({
+      for (const shipment of plannedShipments) {
+        const created = await tx.plannedShipment.create({
           data: {
-            OrderNumber: orderNumber,
-            BuyerName: data.buyerName,
-            StoreName: data.storeName,
-            SalesRep: salesRepName,
-            CustomerEmail: data.customerEmail,
-            CustomerPhone: data.customerPhone,
-            Country: data.currency, // Legacy: stores currency, not country
-            OrderAmount: orderAmount,
-            OrderNotes: data.orderNotes ?? '',
-            CustomerPO: data.customerPO ?? '',
-            ShipStartDate: shipStart,
-            ShipEndDate: shipEnd,
-            OrderDate: new Date(),
-            Website: data.website ?? '',
-            IsShipped: false,
-            OrderStatus: 'Pending',
-            IsTransferredToShopify: false,
-            IsPreOrder: isPreOrder, // Derived from SKU category, not client input
-            RepID: parseInt(data.salesRepId),
-            CustomerID: customerId,
+            CustomerOrderID: newOrder.ID,
+            CollectionID: shipment.collectionId,
+            CollectionName: shipment.collectionName,
+            PlannedShipStart: new Date(shipment.plannedShipStart),
+            PlannedShipEnd: new Date(shipment.plannedShipEnd),
+            Status: 'Planned',
           },
         })
+        shipmentIdMap.set(shipment.id, created.ID)
+        createdShipmentIds.push(created.ID.toString())
+      }
 
-        // Create line items for this group
-        await tx.customerOrdersItems.createMany({
-          data: groupItems.map((item) => ({
+      // CREATE ALL ORDER ITEMS with PlannedShipmentID
+      for (const item of data.items) {
+        const plannedShipmentId = findShipmentIdForSku(
+          item.sku,
+          plannedShipments,
+          shipmentIdMap
+        )
+
+        await tx.customerOrdersItems.create({
+          data: {
             CustomerOrderID: newOrder.ID,
             OrderNumber: orderNumber,
             SKU: item.sku,
@@ -490,22 +618,13 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
             Quantity: item.quantity,
             Price: item.price,
             PriceCurrency: data.currency,
+            PlannedShipmentID: plannedShipmentId, // Link to planned shipment
             Notes: '',
-          })),
-        })
-
-        createdOrders.push({
-          orderId: newOrder.ID.toString(),
-          orderNumber,
-          collectionName: firstItem.collectionName ?? null,
-          shipWindowStart: firstItem.shipWindowStart ?? null,
-          shipWindowEnd: firstItem.shipWindowEnd ?? null,
-          orderAmount,
-          items: groupItems,
+          },
         })
       }
 
-      // Find or create customer (only once, not per order)
+      // Find or create customer
       const existingCustomer = await tx.customers.findFirst({
         where: { StoreName: data.storeName },
         select: { ID: true, OrderCount: true },
@@ -533,11 +652,11 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
             ShippingCountry: data.shippingCountry,
             Website: data.website ?? '',
             LastOrderDate: new Date(),
-            OrderCount: (existingCustomer.OrderCount ?? 0) + createdOrders.length,
+            OrderCount: (existingCustomer.OrderCount ?? 0) + 1, // Single order
           },
         })
       } else {
-        // Create new customer and update all orders with CustomerID
+        // Create new customer and update order with CustomerID
         const newCustomer = await tx.customers.create({
           data: {
             StoreName: data.storeName,
@@ -560,23 +679,22 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
             Website: data.website ?? '',
             FirstOrderDate: new Date(),
             LastOrderDate: new Date(),
-            OrderCount: createdOrders.length,
+            OrderCount: 1, // Single order
           },
           select: { ID: true },
         })
 
-        // Update all created orders with new customer's ID
-        for (const order of createdOrders) {
-          await tx.customerOrders.update({
-            where: { ID: BigInt(order.orderId) },
-            data: { CustomerID: newCustomer.ID },
-          })
-        }
+        // Update order with new customer's ID
+        await tx.customerOrders.update({
+          where: { ID: newOrder.ID },
+          data: { CustomerID: newCustomer.ID },
+        })
       }
     })
 
-    // Send order confirmation emails (non-blocking) unless skipEmail is set
-    // When skipEmail is true, emails are sent via the confirmation popup instead
+    // =========================================================================
+    // Send order confirmation emails (non-blocking)
+    // =========================================================================
     if (!data.skipEmail) {
       // Look up rep name and email for the order emails
       const rep = await prisma.reps.findUnique({
@@ -586,52 +704,51 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
       const salesRepName = rep?.Name || ''
       const salesRepEmail = rep?.Email1 || rep?.Email2 || undefined
 
-      // Send email for each created order
-      for (const order of createdOrders) {
-        sendOrderEmails({
-          orderId: order.orderId,
-          orderNumber: order.orderNumber,
-          storeName: data.storeName,
-          buyerName: data.buyerName,
-          customerEmail: data.customerEmail,
-          customerPhone: data.customerPhone,
-          salesRep: salesRepName,
-          salesRepEmail,
-          orderAmount: order.orderAmount,
-          currency: data.currency,
-          shipStartDate: order.shipWindowStart ? new Date(order.shipWindowStart) : new Date(data.shipStartDate),
-          shipEndDate: order.shipWindowEnd ? new Date(order.shipWindowEnd) : new Date(data.shipEndDate),
-          orderDate: new Date(),
-          orderNotes: data.orderNotes,
-          customerPO: data.customerPO,
-          items: order.items.map((item) => ({
-            sku: item.sku,
-            quantity: item.quantity,
-            price: item.price,
-            lineTotal: item.price * item.quantity,
-          })),
-        }).catch((err) => {
-          console.error(`Order email error for ${order.orderNumber}:`, err)
-        })
-      }
+      // Send email for the single order
+      sendOrderEmails({
+        orderId: orderId.toString(),
+        orderNumber,
+        storeName: data.storeName,
+        buyerName: data.buyerName,
+        customerEmail: data.customerEmail,
+        customerPhone: data.customerPhone,
+        salesRep: salesRepName,
+        salesRepEmail,
+        orderAmount,
+        currency: data.currency,
+        shipStartDate: legacyDates.start,
+        shipEndDate: legacyDates.end,
+        orderDate: new Date(),
+        orderNotes: data.orderNotes,
+        customerPO: data.customerPO,
+        items: data.items.map((item) => ({
+          sku: item.sku,
+          quantity: item.quantity,
+          price: item.price,
+          lineTotal: item.price * item.quantity,
+        })),
+      }).catch((err) => {
+        console.error(`Order email error for ${orderNumber}:`, err)
+      })
     }
 
     revalidatePath('/admin/orders')
 
-    // Return first order for backwards compatibility, plus full orders array
-    const primaryOrder = createdOrders[0]
+    // Return single order with backward-compatible orders[] array
     return {
       success: true,
-      orderId: primaryOrder?.orderId,
-      orderNumber: primaryOrder?.orderNumber,
-      orders: createdOrders.map((o) => ({
-        orderId: o.orderId,
-        orderNumber: o.orderNumber,
-        collectionName: o.collectionName,
-        shipWindowStart: o.shipWindowStart,
-        shipWindowEnd: o.shipWindowEnd,
-        orderAmount: o.orderAmount,
-      })),
+      orderId: orderId.toString(),
+      orderNumber,
+      plannedShipmentCount: createdShipmentIds.length,
+      // Backward compat: single-item array for consumers expecting orders[]
+      orders: [{
+        orderId: orderId.toString(),
+        orderNumber,
+        collectionName: null, // Deprecated - multiple collections now
+        shipWindowStart: legacyDates.start.toISOString(),
+        shipWindowEnd: legacyDates.end.toISOString(),
+        orderAmount,
+      }],
     }
   } catch (e) {
     console.error('createOrder error:', e)
@@ -711,7 +828,151 @@ export async function updateOrder(
       }
       const salesRepName = rep.Name ?? ''
 
-      // Update order header
+      // Phase 5: Sync PlannedShipments BEFORE deleting items
+      // This is critical - items are recreated, so we need shipment IDs first
+      const shipmentIdMap = new Map<string, bigint>()
+      const referencedIds = new Set<string>()
+
+      // 1. Get existing PlannedShipments
+      const existingShipments = await tx.plannedShipment.findMany({
+        where: { CustomerOrderID: BigInt(orderId) },
+        select: { ID: true },
+      })
+      const existingIds = new Set(existingShipments.map((s) => String(s.ID)))
+
+      // 2. Validate and sync shipments if provided
+      if (input.plannedShipments && input.plannedShipments.length > 0) {
+        // Fetch collection windows for validation
+        const collectionIds = input.plannedShipments
+          .map((s) => s.collectionId)
+          .filter((id): id is number => id !== null)
+
+        const collections = collectionIds.length > 0
+          ? await tx.collection.findMany({
+              where: { id: { in: collectionIds } },
+              select: {
+                id: true,
+                name: true,
+                shipWindowStart: true,
+                shipWindowEnd: true,
+              },
+            })
+          : []
+
+        const collectionMap = new Map(collections.map((c) => [c.id, c]))
+
+        // Validate each shipment's dates against collection windows
+        for (const shipment of input.plannedShipments) {
+          if (shipment.collectionId) {
+            const collection = collectionMap.get(shipment.collectionId)
+            if (collection) {
+              const result = validateShipDates(
+                shipment.plannedShipStart,
+                shipment.plannedShipEnd,
+                [
+                  {
+                    id: collection.id,
+                    name: collection.name ?? '',
+                    shipWindowStart:
+                      collection.shipWindowStart?.toISOString().slice(0, 10) ?? null,
+                    shipWindowEnd:
+                      collection.shipWindowEnd?.toISOString().slice(0, 10) ?? null,
+                  },
+                ]
+              )
+              if (!result.valid) {
+                throw new Error(
+                  `Invalid ship dates for ${collection.name}: ${result.errors[0]?.message}`
+                )
+              }
+            }
+          }
+        }
+
+        // 3. Create new shipments first (to get real IDs)
+        for (const shipment of input.plannedShipments) {
+          if (shipment.id.startsWith('new-')) {
+            const newShipment = await tx.plannedShipment.create({
+              data: {
+                CustomerOrderID: BigInt(orderId),
+                CollectionID: shipment.collectionId,
+                CollectionName: shipment.collectionName,
+                PlannedShipStart: new Date(shipment.plannedShipStart),
+                PlannedShipEnd: new Date(shipment.plannedShipEnd),
+                Status: 'Planned',
+              },
+            })
+            shipmentIdMap.set(shipment.id, newShipment.ID)
+          } else {
+            // Update existing shipment
+            referencedIds.add(shipment.id)
+            shipmentIdMap.set(shipment.id, BigInt(shipment.id))
+
+            await tx.plannedShipment.update({
+              where: { ID: BigInt(shipment.id) },
+              data: {
+                PlannedShipStart: new Date(shipment.plannedShipStart),
+                PlannedShipEnd: new Date(shipment.plannedShipEnd),
+              },
+            })
+          }
+        }
+      }
+
+      // 4. Delete old items
+      await tx.customerOrdersItems.deleteMany({
+        where: { CustomerOrderID: BigInt(orderId) },
+      })
+
+      // 5. Create new items WITH PlannedShipmentID
+      await tx.customerOrdersItems.createMany({
+        data: items.map((item) => {
+          // Find which shipment this item belongs to
+          const shipment = input.plannedShipments?.find((s) =>
+            s.itemSkus.includes(item.sku)
+          )
+          const plannedShipmentId = shipment
+            ? shipmentIdMap.get(shipment.id) ?? null
+            : null
+
+          return {
+            CustomerOrderID: BigInt(orderId),
+            OrderNumber: existingOrder.OrderNumber,
+            SKU: item.sku,
+            SKUVariantID: BigInt(item.skuVariantId),
+            Quantity: item.quantity,
+            Price: item.price,
+            PriceCurrency: headerData.currency,
+            Notes: '',
+            PlannedShipmentID: plannedShipmentId,
+          }
+        }),
+      })
+
+      // 6. Delete orphaned shipments (no longer referenced)
+      const orphanedIds = [...existingIds].filter((id) => !referencedIds.has(id))
+      if (orphanedIds.length > 0) {
+        await tx.plannedShipment.deleteMany({
+          where: { ID: { in: orphanedIds.map((id) => BigInt(id)) } },
+        })
+      }
+
+      // 7. Update order header
+      // Phase 5: Recalculate dates from shipments if they exist
+      let finalShipStart = new Date(headerData.shipStartDate)
+      let finalShipEnd = new Date(headerData.shipEndDate)
+
+      if (input.plannedShipments && input.plannedShipments.length > 0) {
+        const starts = input.plannedShipments.map(
+          (s) => new Date(s.plannedShipStart).getTime()
+        )
+        const ends = input.plannedShipments.map(
+          (s) => new Date(s.plannedShipEnd).getTime()
+        )
+        finalShipStart = new Date(Math.min(...starts))
+        finalShipEnd = new Date(Math.max(...ends))
+      }
+
       await tx.customerOrders.update({
         where: { ID: BigInt(orderId) },
         data: {
@@ -724,29 +985,10 @@ export async function updateOrder(
           OrderAmount: orderAmount,
           OrderNotes: headerData.orderNotes ?? '',
           CustomerPO: headerData.customerPO ?? '',
-          ShipStartDate: new Date(headerData.shipStartDate),
-          ShipEndDate: new Date(headerData.shipEndDate),
+          ShipStartDate: finalShipStart,
+          ShipEndDate: finalShipEnd,
           Website: headerData.website ?? '',
         },
-      })
-
-      // Delete old items
-      await tx.customerOrdersItems.deleteMany({
-        where: { CustomerOrderID: BigInt(orderId) },
-      })
-
-      // Insert new items
-      await tx.customerOrdersItems.createMany({
-        data: items.map((item) => ({
-          CustomerOrderID: BigInt(orderId),
-          OrderNumber: existingOrder.OrderNumber,
-          SKU: item.sku,
-          SKUVariantID: BigInt(item.skuVariantId),
-          Quantity: item.quantity,
-          Price: item.price,
-          PriceCurrency: headerData.currency,
-          Notes: '',
-        })),
       })
     })
 

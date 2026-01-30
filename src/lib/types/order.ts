@@ -81,6 +81,8 @@ export interface AdminOrderRow {
   season: string | null;            // Derived from ship window (SS26, FW26)
   notes: string | null;             // Shipping notes / variance explanation (BrandNotes field)
   syncError: string | null;         // Error message if Shopify sync failed
+  // Phase 5: Planned shipments count for orders with multiple ship windows
+  plannedShipmentCount: number;
 }
 
 /**
@@ -128,18 +130,22 @@ export interface OrderFacets {
 
 /**
  * Result shape from createOrder action.
- * Supports single order (backwards compat) or multiple orders (when split by Collection).
+ * 
+ * Phase 3: Now creates single order with multiple PlannedShipments.
+ * The orders[] array is kept for backward compatibility (single-item array).
  */
 export interface CreateOrderResult {
   success: boolean
-  // Single order (backwards compat - primary order when split)
+  // Single order
   orderId?: string
   orderNumber?: string
-  // Multiple orders (when split by Collection)
+  // Number of PlannedShipment records created (Phase 3)
+  plannedShipmentCount?: number
+  // Backward compat: single-item array for consumers expecting orders[]
   orders?: Array<{
     orderId: string
     orderNumber: string
-    // Collection name - what users see on pre-order pages
+    // Collection name - deprecated (now multiple collections per order)
     collectionName: string | null
     shipWindowStart: string | null
     shipWindowEnd: string | null
@@ -150,6 +156,10 @@ export interface CreateOrderResult {
 
 /**
  * Input for updating an existing order.
+ * 
+ * Phase 5: Added plannedShipments array to sync PlannedShipment records
+ * during edit mode. Each shipment can have a real DB ID (existing) or
+ * temp ID starting with "new-" (to be created).
  */
 export interface UpdateOrderInput {
   orderId: string
@@ -169,6 +179,15 @@ export interface UpdateOrderInput {
     skuVariantId: number
     quantity: number
     price: number
+  }>
+  // Phase 5: Planned shipments to sync during edit
+  plannedShipments?: Array<{
+    id: string  // Real DB ID or temp ID starting with "new-"
+    collectionId: number | null
+    collectionName: string | null
+    plannedShipStart: string  // ISO date (YYYY-MM-DD)
+    plannedShipEnd: string
+    itemSkus: string[]  // SKUs belonging to this shipment
   }>
 }
 

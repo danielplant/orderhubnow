@@ -150,13 +150,21 @@ export function RepOrdersTable({
         id: 'orderNumber',
         header: 'Order Number',
         cell: (order) => (
-          <Link
-            href={`/api/orders/${order.id}/pdf`}
-            className="text-primary hover:underline font-medium"
-            target="_blank"
-          >
-            {order.orderNumber}
-          </Link>
+          <div className="flex items-center gap-1.5">
+            <Link
+              href={`/api/orders/${order.id}/pdf`}
+              className="text-primary hover:underline font-medium"
+              target="_blank"
+            >
+              {order.orderNumber}
+            </Link>
+            {/* Phase 5: Show shipment count badge for multi-shipment orders */}
+            {order.plannedShipmentCount > 1 && (
+              <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium bg-blue-100 text-blue-700 rounded">
+                {order.plannedShipmentCount}
+              </span>
+            )}
+          </div>
         ),
       },
       {

@@ -581,9 +581,17 @@ export function OrdersTable({ initialOrders, total, statusCounts, facets }: Orde
         header: 'Order #',
         minWidth: 80,
         cell: (o) => (
-          <Link href={`/admin/orders/${o.id}`} className="font-medium hover:underline">
-            {o.orderNumber}
-          </Link>
+          <div className="flex items-center gap-1.5">
+            <Link href={`/admin/orders/${o.id}`} className="font-medium hover:underline">
+              {o.orderNumber}
+            </Link>
+            {/* Phase 5: Show shipment count badge for multi-shipment orders */}
+            {o.plannedShipmentCount > 1 && (
+              <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium bg-blue-100 text-blue-700 rounded">
+                {o.plannedShipmentCount}
+              </span>
+            )}
+          </div>
         ),
       },
       {

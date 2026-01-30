@@ -38,6 +38,15 @@ interface ShipmentModalProps {
   customerEmail?: string
   repEmail?: string
   repName?: string
+  // Phase 6: Available planned shipments for linking
+  plannedShipments?: Array<{
+    id: string
+    collectionName: string | null
+    plannedShipStart: string
+    plannedShipEnd: string
+    status: string
+    itemIds: string[]
+  }>
 }
 
 interface ItemSelection {
@@ -78,6 +87,7 @@ export function ShipmentModal({
   customerEmail,
   repEmail,
   repName,
+  plannedShipments,
 }: ShipmentModalProps) {
   const router = useRouter()
 
@@ -106,6 +116,9 @@ export function ShipmentModal({
   const [notifyRep, setNotifyRep] = React.useState(false)
   const [notifyShopify, setNotifyShopify] = React.useState(false)
 
+  // Phase 6: PlannedShipment selection
+  const [selectedPlannedShipment, setSelectedPlannedShipment] = React.useState<string>('')
+
   // Email override state
   const [emailOverride, setEmailOverride] = React.useState<string | null>(null)
   const [showEditEmail, setShowEditEmail] = React.useState(false)
@@ -127,6 +140,19 @@ export function ShipmentModal({
   const effectiveCustomerEmail = emailOverride || customerEmail || ''
   const customerEmailWarning = getEmailValidationMessage(effectiveCustomerEmail)
   const hasValidCustomerEmail = !customerEmailWarning
+
+  // Phase 6: Filter items based on selected planned shipment
+  const displayItems = React.useMemo(() => {
+    if (!selectedPlannedShipment || !plannedShipments) {
+      return orderItems // Show all if no filter
+    }
+    const selected = plannedShipments.find((ps) => ps.id === selectedPlannedShipment)
+    if (!selected?.itemIds?.length) {
+      return orderItems
+    }
+    const allowedIds = new Set(selected.itemIds)
+    return orderItems.filter((item) => allowedIds.has(item.id))
+  }, [selectedPlannedShipment, plannedShipments, orderItems])
 
   // Success state - stores created shipment info
   const [createdShipment, setCreatedShipment] = React.useState<CreatedShipmentInfo | null>(null)
@@ -167,6 +193,8 @@ export function ShipmentModal({
       setNotifyRep(false)
       setNotifyShopify(false)
       setEmailOverride(null)
+      // Phase 6: Reset planned shipment selection
+      setSelectedPlannedShipment('')
     }
   }, [open, orderId])
 
@@ -215,11 +243,11 @@ export function ShipmentModal({
     }
   }
 
-  // Select all remaining items
+  // Select all remaining items (uses displayItems for filtered selection)
   const selectAllRemaining = () => {
     setSelections((prev) => {
       const next = new Map(prev)
-      for (const item of orderItems) {
+      for (const item of displayItems) {
         if (item.remainingQuantity > 0) {
           next.set(item.id, {
             selected: true,
@@ -232,11 +260,11 @@ export function ShipmentModal({
     setValidationError(null)
   }
 
-  // Deselect all items
+  // Deselect all items (uses displayItems for filtered deselection)
   const deselectAll = () => {
     setSelections((prev) => {
       const next = new Map(prev)
-      for (const item of orderItems) {
+      for (const item of displayItems) {
         next.set(item.id, {
           selected: false,
           quantity: 0,
@@ -267,8 +295,8 @@ export function ShipmentModal({
   const shippedTotal = shippedSubtotal + shippingCostNum
   const variance = shippedTotal - orderAmount
 
-  // Items with remaining quantity
-  const itemsWithRemaining = orderItems.filter((item) => item.remainingQuantity > 0)
+  // Items with remaining quantity (filtered by planned shipment if selected)
+  const itemsWithRemaining = displayItems.filter((item) => item.remainingQuantity > 0)
   const allSelected = itemsWithRemaining.every((item) => {
     const sel = selections.get(item.id)
     return sel?.selected && sel.quantity === item.remainingQuantity
@@ -362,6 +390,7 @@ export function ShipmentModal({
         notifyRep: notifyRep && !!repEmail,
         notifyShopify,
         customerEmailOverride: emailOverride || undefined,
+        plannedShipmentId: selectedPlannedShipment || undefined, // Phase 6
       }
 
       if (trackingNumber.trim()) {
@@ -502,6 +531,33 @@ export function ShipmentModal({
                   </Button>
                 </div>
 
+                {/* Phase 6: PlannedShipment Selector */}
+                {plannedShipments && plannedShipments.length > 0 && (
+                  <div className="space-y-2">
+                    <label htmlFor="planned-shipment" className="text-sm font-medium">
+                      Link to Planned Shipment{' '}
+                      <span className="text-muted-foreground font-normal">(Optional)</span>
+                    </label>
+                    <select
+                      id="planned-shipment"
+                      value={selectedPlannedShipment}
+                      onChange={(e) => setSelectedPlannedShipment(e.target.value)}
+                      className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
+                    >
+                      <option value="">All items (no filter)</option>
+                      {plannedShipments.map((ps) => (
+                        <option key={ps.id} value={ps.id}>
+                          {ps.collectionName || 'Available to Ship'} ({ps.plannedShipStart} - {ps.plannedShipEnd})
+                          {ps.status !== 'Planned' && ` [${ps.status}]`}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-muted-foreground">
+                      Selecting a planned shipment filters items and links the fulfillment to that delivery window.
+                    </p>
+                  </div>
+                )}
+
                 {/* Validation Error */}
                 {validationError && (
                   <div className="p-3 rounded-md bg-destructive/10 text-destructive text-sm">
@@ -526,7 +582,7 @@ export function ShipmentModal({
                       </tr>
                     </thead>
                     <tbody className="divide-y">
-                      {orderItems.map((item) => {
+                      {displayItems.map((item) => {
                         const sel = selections.get(item.id)
                         const isSelected = sel?.selected ?? false
                         const qty = sel?.quantity ?? 0
@@ -620,9 +676,11 @@ export function ShipmentModal({
                     </tbody>
                   </table>
 
-                  {orderItems.length === 0 && (
+                  {displayItems.length === 0 && (
                     <p className="text-sm text-muted-foreground p-6 text-center">
-                      No items found for this order.
+                      {orderItems.length === 0
+                        ? 'No items found for this order.'
+                        : 'No items in the selected planned shipment.'}
                     </p>
                   )}
                 </div>
