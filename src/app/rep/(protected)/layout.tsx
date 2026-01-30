@@ -7,6 +7,7 @@ import { AdminViewBanner } from '@/components/portal/admin-view-banner'
 import { repNav } from '@/lib/constants/navigation'
 import { getRepById } from '@/lib/data/queries/reps'
 import { logAdminViewAs } from '@/lib/data/actions/audit'
+import { ImageConfigProvider } from '@/lib/contexts'
 import type { UserRole } from '@/lib/types/auth'
 
 interface Props {
@@ -76,7 +77,7 @@ export default async function RepLayout({ children }: Props) {
     : null
 
   return (
-    <>
+    <ImageConfigProvider>
       {isViewAsMode && (
         <AdminViewBanner
           repName={displayName}
@@ -96,6 +97,6 @@ export default async function RepLayout({ children }: Props) {
       >
         {children}
       </PortalLayout>
-    </>
+    </ImageConfigProvider>
   )
 }
