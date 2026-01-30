@@ -386,7 +386,7 @@ function getLegacyDatesFromShipments(
 /**
  * Find which planned shipment a SKU belongs to.
  */
-export function findShipmentIdForSku(
+function findShipmentIdForSku(
   sku: string,
   plannedShipments: PlannedShipmentData[] | undefined,
   shipmentIdMap: Map<string, bigint>
@@ -400,7 +400,7 @@ export function findShipmentIdForSku(
  * Derive planned shipments when client doesn't send them.
  * Backward compatibility for old clients.
  */
-export function deriveShipmentsFromItems(
+function deriveShipmentsFromItems(
   items: CreateOrderInput['items'],
   formDates: { shipStartDate: string; shipEndDate: string }
 ): PlannedShipmentData[] {
