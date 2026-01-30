@@ -33,6 +33,20 @@ export interface OrderLineMetadata {
 }
 
 /**
+ * Phase 5: Edit mode shipment data.
+ * Represents a PlannedShipment loaded from the database when editing an order.
+ * Uses real DB IDs (not temp IDs like new order mode).
+ */
+export interface EditModeShipment {
+  id: string;
+  collectionId: number | null;
+  collectionName: string | null;
+  plannedShipStart: string;  // ISO date (YYYY-MM-DD)
+  plannedShipEnd: string;
+  itemSkus: string[];
+}
+
+/**
  * Form data stored in draft (partial - user may not have filled everything)
  */
 export interface DraftFormData {
@@ -110,10 +124,19 @@ interface OrderContextValue {
   isEditMode: boolean;
   isValidatingEditState: boolean;
 
+  // Phase 5: Edit mode shipments
+  editModeShipments: Map<string, EditModeShipment>;
+  isEditModeWithShipments: boolean;
+
   // Edit mode methods
   loadOrderForEdit: (order: OrderForEditing) => void;
   setEditOrderCurrency: (currency: Currency) => void;
   clearEditMode: () => void;
+
+  // Planned shipments - date overrides per shipment
+  shipmentDateOverrides: Map<string, { start: string; end: string }>;
+  updateShipmentDates: (shipmentId: string, start: string, end: string) => void;
+  clearShipmentDateOverrides: () => void;
 }
 
 const OrderContext = createContext<OrderContextValue | null>(null);
@@ -148,6 +171,7 @@ interface StorageData {
   draftId: string | null;
   editOrderId: string | null;
   editOrderCurrency: Currency | null;
+  shipmentDateOverrides: Map<string, { start: string; end: string }>;
 }
 
 function loadFromStorage(): StorageData {
@@ -161,6 +185,7 @@ function loadFromStorage(): StorageData {
       draftId: null,
       editOrderId: null,
       editOrderCurrency: null,
+      shipmentDateOverrides: new Map(),
     };
   }
 
@@ -178,6 +203,7 @@ function loadFromStorage(): StorageData {
         draftId: null,
         editOrderId: editState.orderId || null,
         editOrderCurrency: editState.currency || null,
+        shipmentDateOverrides: new Map(), // Edit mode doesn't have shipment overrides
       };
     }
   } catch {
@@ -199,6 +225,9 @@ function loadFromStorage(): StorageData {
         draftId: draftId || null,
         editOrderId: null,
         editOrderCurrency: null,
+        shipmentDateOverrides: new Map(
+          Object.entries(parsed.shipmentDateOverrides || {})
+        ) as Map<string, { start: string; end: string }>,
       };
     }
   } catch {
@@ -213,6 +242,7 @@ function loadFromStorage(): StorageData {
     draftId: null,
     editOrderId: null,
     editOrderCurrency: null,
+    shipmentDateOverrides: new Map(),
   };
 }
 
@@ -260,6 +290,16 @@ export function OrderProvider({ children, initialDraftId }: OrderProviderProps) 
     () => !!loadFromStorage().editOrderId
   );
 
+  // Phase 5: Edit mode shipments (loaded from DB when editing an order)
+  const [editModeShipments, setEditModeShipments] = useState<Map<string, EditModeShipment>>(
+    () => new Map()
+  );
+
+  // Shipment date overrides - user's custom dates per planned shipment
+  const [shipmentDateOverrides, setShipmentDateOverrides] = useState<
+    Map<string, { start: string; end: string }>
+  >(() => loadFromStorage().shipmentDateOverrides);
+
   // Refs for debounced auto-save
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const pendingSaveRef = useRef(false);
@@ -285,12 +325,13 @@ export function OrderProvider({ children, initialDraftId }: OrderProviderProps) 
       preOrderMeta: preOrderMetadata,
       lineMeta: orderLineMetadata,
       formData,
+      shipmentDateOverrides: Object.fromEntries(shipmentDateOverrides),
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
     if (draftId) {
       localStorage.setItem(DRAFT_ID_KEY, draftId);
     }
-  }, [orders, priceMap, preOrderMetadata, orderLineMetadata, formData, draftId, editOrderId, editOrderCurrency]);
+  }, [orders, priceMap, preOrderMetadata, orderLineMetadata, formData, shipmentDateOverrides, draftId, editOrderId, editOrderCurrency]);
 
   // Sync to localStorage when state changes
   useEffect(() => {
@@ -343,6 +384,7 @@ export function OrderProvider({ children, initialDraftId }: OrderProviderProps) 
           preOrderMeta: preOrderMetadata,
           lineMeta: orderLineMetadata,
           formData,
+          shipmentDateOverrides: Object.fromEntries(shipmentDateOverrides),
           currency: formData.currency || 'CAD',
         }),
       });
@@ -361,7 +403,7 @@ export function OrderProvider({ children, initialDraftId }: OrderProviderProps) 
       console.error('Failed to sync to server:', err);
       setSaveStatus('error');
     }
-  }, [orders, priceMap, preOrderMetadata, orderLineMetadata, formData, draftId]);
+  }, [orders, priceMap, preOrderMetadata, orderLineMetadata, formData, shipmentDateOverrides, draftId]);
 
   // Debounced auto-save to server (skip in edit mode or after draft cleared)
   const scheduleServerSync = useCallback(() => {
@@ -393,6 +435,24 @@ export function OrderProvider({ children, initialDraftId }: OrderProviderProps) 
     }, DEBOUNCE_MS);
   }, [ensureDraft, syncToServer, editOrderId, draftId]);
 
+  // Update dates for a specific shipment
+  const updateShipmentDates = useCallback(
+    (shipmentId: string, start: string, end: string) => {
+      setShipmentDateOverrides((prev) => {
+        const next = new Map(prev);
+        next.set(shipmentId, { start, end });
+        return next;
+      });
+      scheduleServerSync();
+    },
+    [scheduleServerSync]
+  );
+
+  // Clear all shipment date overrides
+  const clearShipmentDateOverrides = useCallback(() => {
+    setShipmentDateOverrides(new Map());
+  }, []);
+
   // Load draft from server
   const loadDraft = useCallback(async (id: string): Promise<boolean> => {
     setIsLoadingDraft(true);
@@ -419,6 +479,9 @@ export function OrderProvider({ children, initialDraftId }: OrderProviderProps) 
       setPreOrderMetadata(state.preOrderMeta || {});
       setOrderLineMetadata(state.lineMeta || {});
       setFormDataState(state.formData || {});
+      setShipmentDateOverrides(
+        new Map(Object.entries(state.shipmentDateOverrides || {})) as Map<string, { start: string; end: string }>
+      );
       setDraftId(id);
       setSaveStatus('saved');
       setLastSaved(new Date(state.lastUpdated || Date.now()));
@@ -460,6 +523,7 @@ export function OrderProvider({ children, initialDraftId }: OrderProviderProps) 
     setPreOrderMetadata({});
     setOrderLineMetadata({});
     setFormDataState({});
+    setShipmentDateOverrides(new Map());
     setDraftId(null);
     setSaveStatus('idle');
     setLastSaved(null);
@@ -485,6 +549,8 @@ export function OrderProvider({ children, initialDraftId }: OrderProviderProps) 
     setPreOrderMetadata({});
     setOrderLineMetadata({});
     setHistory([]);
+    setShipmentDateOverrides(new Map());
+    setEditModeShipments(new Map());
 
     // Set edit mode state
     setEditOrderId(order.id);
@@ -505,6 +571,24 @@ export function OrderProvider({ children, initialDraftId }: OrderProviderProps) 
 
     setOrders(newOrders);
     setPriceMap(newPrices);
+
+    // Phase 5: Load planned shipments with their saved dates
+    if (order.plannedShipments && order.plannedShipments.length > 0) {
+      const shipmentsMap = new Map<string, EditModeShipment>();
+      const overridesMap = new Map<string, { start: string; end: string }>();
+
+      order.plannedShipments.forEach((ps) => {
+        shipmentsMap.set(ps.id, ps);
+        // Set overrides to preserve user's dates (not collection defaults)
+        overridesMap.set(ps.id, {
+          start: ps.plannedShipStart,
+          end: ps.plannedShipEnd,
+        });
+      });
+
+      setEditModeShipments(shipmentsMap);
+      setShipmentDateOverrides(overridesMap);
+    }
 
     // Save edit state to localStorage
     const editData = {
@@ -540,6 +624,10 @@ export function OrderProvider({ children, initialDraftId }: OrderProviderProps) 
     setOrders({});
     setPriceMap(new Map());
     setHistory([]);
+
+    // Phase 5: Clear edit mode shipments and date overrides
+    setEditModeShipments(new Map());
+    setShipmentDateOverrides(new Map());
 
     // Clear edit state from localStorage
     localStorage.removeItem(EDIT_STATE_KEY);
@@ -763,6 +851,7 @@ export function OrderProvider({ children, initialDraftId }: OrderProviderProps) 
     setOrders({});
     setPreOrderMetadata({});
     setOrderLineMetadata({});
+    setShipmentDateOverrides(new Map());
     // Auto-save to server
     scheduleServerSync();
   }, [saveToHistory, scheduleServerSync]);
@@ -848,10 +937,17 @@ export function OrderProvider({ children, initialDraftId }: OrderProviderProps) 
         editOrderCurrency,
         isEditMode: !!editOrderId,
         isValidatingEditState,
+        // Phase 5: Edit mode shipments
+        editModeShipments,
+        isEditModeWithShipments: !!editOrderId && editModeShipments.size > 0,
         // Edit mode methods
         loadOrderForEdit,
         setEditOrderCurrency: updateEditOrderCurrency,
         clearEditMode,
+        // Planned shipments - date overrides
+        shipmentDateOverrides,
+        updateShipmentDates,
+        clearShipmentDateOverrides,
       }}
     >
       {children}

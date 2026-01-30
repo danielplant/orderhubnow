@@ -35,6 +35,8 @@ import { isValidPortalReturn } from '@/lib/utils/rep-context'
 import type { Currency } from '@/lib/types'
 import type { OrderForEditing } from '@/lib/data/queries/orders'
 import { EmailConfirmationModal, type SubmittedOrder } from './email-confirmation-modal'
+import { ShipmentDateCard } from './shipment-date-card'
+import type { CartPlannedShipment } from '@/lib/types/planned-shipment'
 
 interface OrderFormProps {
   currency: Currency
@@ -59,6 +61,11 @@ interface OrderFormProps {
   repContext?: { repId: string } | null
   // Items missing CollectionID - blocks checkout
   itemsMissingCollection?: Array<{ sku: string; description: string }>
+  // Planned shipments with per-shipment dates
+  plannedShipments?: CartPlannedShipment[]
+  onShipmentDatesChange?: (shipmentId: string, start: string, end: string) => void
+  shipmentValidationErrors?: Map<string, { start?: string; end?: string }>
+  hasShipmentValidationErrors?: boolean
 }
 
 // Helper to format date as YYYY-MM-DD for input[type="date"]
@@ -83,6 +90,10 @@ export function OrderForm({
   returnTo = '/buyer/select-journey',
   repContext = null,
   itemsMissingCollection = [],
+  plannedShipments = [],
+  onShipmentDatesChange,
+  shipmentValidationErrors = new Map(),
+  hasShipmentValidationErrors = false,
 }: OrderFormProps) {
   const router = useRouter()
   const { clearDraft, clearEditMode, getPreOrderShipWindow, formData: draftFormData, setFormData, isLoadingDraft } = useOrder()
@@ -105,6 +116,24 @@ export function OrderForm({
   // Email confirmation modal state
   const [showEmailModal, setShowEmailModal] = useState(false)
   const [submittedOrders, setSubmittedOrders] = useState<SubmittedOrder[]>([])
+
+  // Determine if multi-shipment UI should be used
+  const useMultiShipmentUI = !editMode && plannedShipments.length > 1
+
+  // Calculate legacy dates from planned shipments (for backward compat)
+  const getLegacyDatesFromShipments = useCallback(() => {
+    if (plannedShipments.length === 0) {
+      return { shipStartDate: '', shipEndDate: '' }
+    }
+
+    const allStarts = plannedShipments.map((s) => s.plannedShipStart).sort()
+    const allEnds = plannedShipments.map((s) => s.plannedShipEnd).sort()
+
+    return {
+      shipStartDate: allStarts[0], // Earliest start
+      shipEndDate: allEnds[allEnds.length - 1], // Latest end
+    }
+  }, [plannedShipments])
 
   // Get pre-order ship window from cart metadata (if available)
   const preOrderWindow = isPreOrder ? getPreOrderShipWindow() : null
@@ -205,6 +234,16 @@ export function OrderForm({
       setIsRepLocked(true)
     }
   }, [repContext, setValue])
+
+  // Sync hidden form fields for multi-shipment to pass validation
+  // (these values aren't shown to user but satisfy schema requirements)
+  useEffect(() => {
+    if (useMultiShipmentUI && plannedShipments.length > 0) {
+      const legacyDates = getLegacyDatesFromShipments()
+      setValue('shipStartDate', legacyDates.shipStartDate, { shouldValidate: false })
+      setValue('shipEndDate', legacyDates.shipEndDate, { shouldValidate: false })
+    }
+  }, [useMultiShipmentUI, plannedShipments, setValue, getLegacyDatesFromShipments])
 
   // Initialize form from draft data when it changes (e.g., loading a shared draft)
   useEffect(() => {
@@ -407,6 +446,13 @@ export function OrderForm({
 
   const onSubmit = async (data: OrderFormData) => {
     if (isSubmitting) return // Prevent double-click
+
+    // Block submit if there are shipment validation errors
+    if (hasShipmentValidationErrors) {
+      toast.error('Please fix ship date errors before submitting')
+      return
+    }
+
     setIsSubmitting(true)
 
     startTransition(async () => {
@@ -432,6 +478,15 @@ export function OrderForm({
               quantity: item.quantity,
               price: item.price,
             })),
+            // Phase 5: Sync planned shipments during edit
+            plannedShipments: plannedShipments.map((s) => ({
+              id: s.id,
+              collectionId: s.collectionId,
+              collectionName: s.collectionName,
+              plannedShipStart: s.plannedShipStart,
+              plannedShipEnd: s.plannedShipEnd,
+              itemSkus: s.itemIds,
+            })),
           })
 
           if (result.success) {
@@ -446,8 +501,28 @@ export function OrderForm({
           // Create new order with customerId for strong ownership
           // Skip automatic email - show confirmation popup instead
           // Uses Collection data for order splitting by delivery date
+
+          // Build final shipments with correct date source
+          const finalPlannedShipments = useMultiShipmentUI
+            ? plannedShipments  // Multi: dates from context
+            : plannedShipments.map((s) => ({
+                ...s,
+                plannedShipStart: data.shipStartDate,  // Single: dates from form
+                plannedShipEnd: data.shipEndDate,
+              }))
+
+          // Calculate legacy dates for backward compatibility
+          const legacyDates = getLegacyDatesFromShipments()
+
           const result = await createOrder({
             ...data,
+            // Legacy dates: single shipment uses form, multiple uses calculated
+            shipStartDate: useMultiShipmentUI
+              ? legacyDates.shipStartDate
+              : data.shipStartDate,
+            shipEndDate: useMultiShipmentUI
+              ? legacyDates.shipEndDate
+              : data.shipEndDate,
             currency,
             items: cartItems.map((item) => ({
               sku: item.sku,
@@ -462,6 +537,15 @@ export function OrderForm({
             isPreOrder, // P prefix for pre-orders, A prefix for ATS
             customerId: selectedCustomerId, // Pass selected customer ID for strong ownership
             skipEmail: true, // Emails will be sent via confirmation popup
+            // Include planned shipments for Phase 3 server-side processing
+            plannedShipments: finalPlannedShipments.map((s) => ({
+              id: s.id,
+              collectionId: s.collectionId,
+              collectionName: s.collectionName,
+              itemSkus: s.itemIds,
+              plannedShipStart: s.plannedShipStart,
+              plannedShipEnd: s.plannedShipEnd,
+            })),
           })
 
           if (result.success && result.orders?.length) {
@@ -911,31 +995,80 @@ export function OrderForm({
           <CardTitle>Order Details</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
+          {/* SINGLE SHIPMENT: Simple inline dates (edit mode or 1 shipment) */}
+          {(editMode || plannedShipments.length <= 1) && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="shipStartDate">Ship Start Date *</Label>
+                <Input
+                  id="shipStartDate"
+                  type="date"
+                  {...register('shipStartDate')}
+                  min={plannedShipments[0]?.minAllowedStart ?? undefined}
+                />
+                {plannedShipments[0]?.minAllowedStart && (
+                  <p className="text-xs text-muted-foreground">
+                    Earliest: {plannedShipments[0].minAllowedStart}
+                  </p>
+                )}
+                {errors.shipStartDate && (
+                  <p className="text-sm text-destructive">{errors.shipStartDate.message}</p>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="shipEndDate">Ship End Date *</Label>
+                <Input
+                  id="shipEndDate"
+                  type="date"
+                  {...register('shipEndDate')}
+                  min={plannedShipments[0]?.minAllowedEnd ?? undefined}
+                />
+                {plannedShipments[0]?.minAllowedEnd && (
+                  <p className="text-xs text-muted-foreground">
+                    Earliest: {plannedShipments[0].minAllowedEnd}
+                  </p>
+                )}
+                {errors.shipEndDate && (
+                  <p className="text-sm text-destructive">{errors.shipEndDate.message}</p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* MULTIPLE SHIPMENTS: Card per shipment */}
+          {!editMode && plannedShipments.length > 1 && (
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Set delivery dates for each shipment:
+              </p>
+              {plannedShipments.map((shipment, index) => (
+                <ShipmentDateCard
+                  key={shipment.id}
+                  shipment={shipment}
+                  index={index}
+                  cartItems={cartItems.filter((item) =>
+                    shipment.itemIds.includes(item.sku)
+                  )}
+                  currency={currency}
+                  onDatesChange={(start, end) =>
+                    onShipmentDatesChange?.(shipment.id, start, end)
+                  }
+                  externalErrors={shipmentValidationErrors.get(shipment.id)}
+                />
+              ))}
+
+              {/* Validation error summary */}
+              {hasShipmentValidationErrors && (
+                <div className="p-3 bg-destructive/10 border border-destructive/20 rounded-md text-sm text-destructive">
+                  Please fix the date errors above before submitting.
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Customer PO and Order Notes - always shown */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="shipStartDate">Ship Start Date *</Label>
-              <Input
-                id="shipStartDate"
-                type="date"
-                {...register('shipStartDate')}
-              />
-              {errors.shipStartDate && (
-                <p className="text-sm text-destructive">{errors.shipStartDate.message}</p>
-              )}
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="shipEndDate">Ship End Date *</Label>
-              <Input
-                id="shipEndDate"
-                type="date"
-                {...register('shipEndDate')}
-              />
-              {errors.shipEndDate && (
-                <p className="text-sm text-destructive">{errors.shipEndDate.message}</p>
-              )}
-            </div>
-
             <div className="space-y-2">
               <Label htmlFor="customerPO">Customer PO</Label>
               <Input
