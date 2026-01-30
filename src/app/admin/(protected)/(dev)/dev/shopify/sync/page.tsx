@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Play, RefreshCw, CheckCircle, XCircle, Clock, Zap, Database, ArrowRight, Settings, ChevronDown, ChevronUp, History, StopCircle, AlertTriangle, Users, Trash2 } from 'lucide-react';
 import Link from 'next/link';
-import { formatDate } from '@/lib/utils/format';
+import { formatDate, formatDateTime } from '@/lib/utils/format';
 import { SYNC_STEPS } from '@/lib/shopify/sync';
 
 /**
@@ -92,9 +92,10 @@ function getStatusBgColor(status: string | null, inProgress: boolean): string {
   return 'bg-slate-100 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700';
 }
 
-function formatDuration(startedAt: string, completedAt: string | null): string {
+function formatDuration(startedAt: string, completedAt: string | null, now: number | null): string {
+  if (!now) return '—';
   const start = new Date(startedAt).getTime();
-  const end = completedAt ? new Date(completedAt).getTime() : Date.now();
+  const end = completedAt ? new Date(completedAt).getTime() : now;
   const seconds = Math.floor((end - start) / 1000);
 
   if (seconds < 60) return `${seconds}s`;
@@ -127,20 +128,21 @@ function formatHistoryDate(isoString: string): string {
  * Check if the heartbeat is stale (no update for 2+ minutes).
  * Returns the number of minutes since last heartbeat, or null if not applicable.
  */
-function getHeartbeatStaleness(lastHeartbeat: string | null): number | null {
-  if (!lastHeartbeat) return null;
+function getHeartbeatStaleness(lastHeartbeat: string | null, now: number | null): number | null {
+  if (!lastHeartbeat || !now) return null;
   const heartbeatTime = new Date(lastHeartbeat).getTime();
-  const minutesSinceHeartbeat = (Date.now() - heartbeatTime) / 60000;
+  const minutesSinceHeartbeat = (now - heartbeatTime) / 60000;
   return minutesSinceHeartbeat;
 }
 
-function isHeartbeatStale(lastHeartbeat: string | null): boolean {
-  const minutes = getHeartbeatStaleness(lastHeartbeat);
+function isHeartbeatStale(lastHeartbeat: string | null, now: number | null): boolean {
+  const minutes = getHeartbeatStaleness(lastHeartbeat, now);
   return minutes !== null && minutes > 2; // Stale if > 2 minutes
 }
 
 export default function SyncDashboardPage() {
   const [status, setStatus] = useState<SyncStatus | null>(null);
+  const [now, setNow] = useState<number | null>(null);
   const [isStarting, setIsStarting] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
   const [result, setResult] = useState<SyncResult | null>(null);
@@ -208,6 +210,14 @@ export default function SyncDashboardPage() {
     fetchHistory();
     fetchSettings();
   }, [fetchStatus, fetchHistory, fetchSettings]);
+
+  useEffect(() => {
+    setNow(Date.now());
+    const interval = setInterval(() => {
+      setNow(Date.now());
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Poll every 2 seconds when sync is in progress
   useEffect(() => {
@@ -418,7 +428,7 @@ export default function SyncDashboardPage() {
                 {validationResult.stats && (
                   <p className="text-sm text-green-600 dark:text-green-500 mt-1 ml-7">
                     {validationResult.stats.metafieldCount} metafields | 
-                    Tested: {new Date(validationResult.stats.testedAt).toLocaleString()}
+                    Tested: {formatDateTime(validationResult.stats.testedAt)}
                   </p>
                 )}
               </>
@@ -477,7 +487,7 @@ export default function SyncDashboardPage() {
                 </div>
                 <div>
                   <span className="text-muted-foreground">Duration</span>
-                  <p className="font-medium">{formatDuration(normalizedLastRun.startedAt, normalizedLastRun.completedAt)}</p>
+                  <p className="font-medium">{formatDuration(normalizedLastRun.startedAt, normalizedLastRun.completedAt, now)}</p>
                 </div>
                 {normalizedLastRun.recordsProcessed != null && (
                   <div>
@@ -538,7 +548,7 @@ export default function SyncDashboardPage() {
         </div>
 
         {/* Stale Heartbeat Warning */}
-        {inProgress && normalizedLastRun && isHeartbeatStale(normalizedLastRun.lastHeartbeat) && (
+        {inProgress && normalizedLastRun && isHeartbeatStale(normalizedLastRun.lastHeartbeat, now) && (
           <div className="mt-6 p-4 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
             <div className="flex items-center gap-3">
               <AlertTriangle className="h-5 w-5 text-amber-600 dark:text-amber-400 flex-shrink-0" />
@@ -547,7 +557,7 @@ export default function SyncDashboardPage() {
                   Sync may be stuck
                 </p>
                 <p className="text-xs text-amber-600 dark:text-amber-400 mt-0.5">
-                  No heartbeat for {Math.round(getHeartbeatStaleness(normalizedLastRun.lastHeartbeat) ?? 0)} minutes.
+                  No heartbeat for {Math.round(getHeartbeatStaleness(normalizedLastRun.lastHeartbeat, now) ?? 0)} minutes.
                   The process may have died. Use Cancel Sync to reset.
                 </p>
               </div>
