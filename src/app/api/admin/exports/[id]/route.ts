@@ -36,7 +36,7 @@ export async function GET(
     }
 
     // Check authorization (reps can only see their own jobs)
-    if (session.user.role === 'rep' && job.triggeredBy !== session.user.id) {
+    if (session.user.role === 'rep' && job.triggeredBy !== String(session.user.id)) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
