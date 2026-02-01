@@ -41,11 +41,15 @@ import { ShipmentDateCard } from './shipment-date-card'
 import type { CartPlannedShipment } from '@/lib/types/planned-shipment'
 
 function formatShortDate(isoDate: string): string {
-  const date = new Date(isoDate)
-  const month = date.toLocaleDateString('en-US', { month: 'short' })
-  const day = date.getDate()
-  const year = String(date.getFullYear()).slice(-2)
-  return `${month} ${day} '${year}`
+  const [year, month, day] = isoDate.split('T')[0].split('-').map(Number)
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  return `${monthNames[month - 1]} ${day} '${String(year).slice(-2)}`
+}
+
+function formatDateNoYear(isoDate: string): string {
+  const [, month, day] = isoDate.split('T')[0].split('-').map(Number)
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  return `${monthNames[month - 1]} ${day}`
 }
 
 interface OrderFormProps {
@@ -1058,7 +1062,7 @@ export function OrderForm({
                 />
                 {plannedShipments[0]?.minAllowedStart && (
                   <p className="text-xs text-muted-foreground">
-                    Earliest: {formatShortDate(plannedShipments[0].minAllowedStart)}
+                    Cannot be prior to {formatDateNoYear(plannedShipments[0].minAllowedStart)}
                   </p>
                 )}
                 {errors.shipStartDate && (
@@ -1076,7 +1080,7 @@ export function OrderForm({
                 />
                 {plannedShipments[0]?.minAllowedEnd && (
                   <p className="text-xs text-muted-foreground">
-                    Earliest: {formatShortDate(plannedShipments[0].minAllowedEnd)}
+                    Cannot be prior to {formatDateNoYear(plannedShipments[0].minAllowedEnd)}
                   </p>
                 )}
                 {errors.shipEndDate && (
@@ -1121,6 +1125,7 @@ export function OrderForm({
                   <p className="text-sm text-amber-800 font-medium">
                     Ship dates are outside collection windows
                   </p>
+                  {/* Override checkbox commented out per Devika - to be re-enabled for reps only
                   <div className="flex items-center gap-2">
                     <Checkbox
                       id="override-dates"
@@ -1131,6 +1136,7 @@ export function OrderForm({
                       Override and submit anyway
                     </Label>
                   </div>
+                  */}
                 </div>
               )}
             </div>

@@ -29,11 +29,13 @@ interface ShipmentTimelineProps {
 
 /**
  * Format ISO date string to display format (e.g., "Jul 15")
+ * Parses date components directly to avoid timezone shift.
  */
 function formatShortDate(isoDate: string): string {
   if (!isoDate) return 'TBD'
-  const date = new Date(isoDate)
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  const [, month, day] = isoDate.split('T')[0].split('-').map(Number)
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  return `${monthNames[month - 1]} ${day}`
 }
 
 /**
