@@ -20,11 +20,15 @@ import type { CartPlannedShipment } from '@/lib/types/planned-shipment'
 import type { Currency } from '@/lib/types'
 
 function formatShortDate(isoDate: string): string {
-  const date = new Date(isoDate)
-  const month = date.toLocaleDateString('en-US', { month: 'short' })
-  const day = date.getDate()
-  const year = String(date.getFullYear()).slice(-2)
-  return `${month} ${day} '${year}`
+  const [year, month, day] = isoDate.split('T')[0].split('-').map(Number)
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  return `${monthNames[month - 1]} ${day} '${String(year).slice(-2)}`
+}
+
+function formatDateNoYear(isoDate: string): string {
+  const [, month, day] = isoDate.split('T')[0].split('-').map(Number)
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  return `${monthNames[month - 1]} ${day}`
 }
 
 interface CartItem {
@@ -242,7 +246,7 @@ export function ShipmentDateCard({
             />
             {shipment.minAllowedStart && (
               <p className="text-xs text-muted-foreground">
-                Earliest: {formatShortDate(shipment.minAllowedStart)}
+                Cannot be prior to {formatDateNoYear(shipment.minAllowedStart)}
               </p>
             )}
             {displayErrors.start && (
@@ -262,7 +266,7 @@ export function ShipmentDateCard({
             />
             {shipment.minAllowedEnd && (
               <p className="text-xs text-muted-foreground">
-                Earliest: {formatShortDate(shipment.minAllowedEnd)}
+                Cannot be prior to {formatDateNoYear(shipment.minAllowedEnd)}
               </p>
             )}
             {displayErrors.end && (

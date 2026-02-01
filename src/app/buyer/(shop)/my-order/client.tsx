@@ -277,8 +277,9 @@ export function MyOrderClient({
             collectionId: shipment.collectionId,
             collectionName: shipment.collectionName,
             itemIds: shipmentItems.map((i) => i.sku),
-            plannedShipStart: override?.start ?? shipment.plannedShipStart,
-            plannedShipEnd: override?.end ?? shipment.plannedShipEnd,
+            // Use override, then loaded dates, then collection defaults, then ATS defaults
+            plannedShipStart: override?.start ?? (shipment.plannedShipStart || minAllowedStart || atsDefaults.start),
+            plannedShipEnd: override?.end ?? (shipment.plannedShipEnd || minAllowedEnd || atsDefaults.end),
             minAllowedStart,
             minAllowedEnd,
             // Propagate combined shipment tracking for Split button

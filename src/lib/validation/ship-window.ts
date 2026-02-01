@@ -56,6 +56,16 @@ function formatLocalDate(date: Date): string {
 }
 
 /**
+ * Format ISO date string as "Jan 20" for display in error messages.
+ * Parses date components directly to avoid timezone shift.
+ */
+function formatDisplayDate(isoDate: string): string {
+  const [, month, day] = isoDate.split('T')[0].split('-').map(Number)
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  return `${monthNames[month - 1]} ${day}`
+}
+
+/**
  * Get default ship dates for ATS orders.
  * ATS orders have no collection constraints - default is today + 14 days.
  * Uses local date components to avoid timezone shift for UTC+ users.
@@ -110,7 +120,7 @@ export function validateShipDates(
       if (startDate < collectionStart) {
         errors.push({
           field: 'start',
-          message: `Cannot be before ${collection.name}'s ship window`,
+          message: `Start ship cannot be prior to ${formatDisplayDate(collection.shipWindowStart)}`,
           collectionName: collection.name,
           minAllowedDate: collection.shipWindowStart,
         })
@@ -125,7 +135,7 @@ export function validateShipDates(
       if (endDate < collectionEnd) {
         errors.push({
           field: 'end',
-          message: `Cannot be before ${collection.name}'s ship window end`,
+          message: `End ship cannot be prior to ${formatDisplayDate(collection.shipWindowEnd)}`,
           collectionName: collection.name,
           minAllowedDate: collection.shipWindowEnd,
         })

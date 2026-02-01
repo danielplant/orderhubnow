@@ -73,8 +73,8 @@ export default async function MyOrderPage({ searchParams }: Props) {
         description: sku.Description || '',
         collectionId: sku.CollectionID ?? null,
         collectionName: sku.Collection?.name ?? null,
-        shipWindowStart: sku.Collection?.shipWindowStart?.toISOString() ?? null,
-        shipWindowEnd: sku.Collection?.shipWindowEnd?.toISOString() ?? null,
+        shipWindowStart: sku.Collection?.shipWindowStart?.toISOString().slice(0, 10) ?? null,
+        shipWindowEnd: sku.Collection?.shipWindowEnd?.toISOString().slice(0, 10) ?? null,
       },
     ])
   )
