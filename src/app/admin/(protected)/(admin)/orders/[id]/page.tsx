@@ -4,7 +4,7 @@ import { auth } from '@/lib/auth/providers'
 import { prisma } from '@/lib/prisma'
 import { formatCurrency } from '@/lib/utils'
 import { formatDateTime } from '@/lib/utils/format'
-import { Card, CardContent, CardHeader, CardTitle, Button, StatusBadge } from '@/components/ui'
+import { Card, CardContent, CardHeader, CardTitle, Button, StatusBadge, ShipmentTimeline } from '@/components/ui'
 import type { OrderStatus } from '@/lib/types/order'
 import { getShipmentsForOrder, getOrderItemsWithFulfillment } from '@/lib/data/actions/shipments'
 import { getPlannedShipmentsForOrder } from '@/lib/data/queries/orders'
@@ -202,18 +202,34 @@ export default async function AdminOrderDetailsPage(props: { params: Promise<{ i
             </div>
             <div className="flex justify-between gap-4">
               <span className="text-muted-foreground">Ship Window</span>
-              <span className="font-medium">
-                {order.ShipStartDate && order.ShipEndDate
-                  ? `${order.ShipStartDate.toISOString().slice(0, 10)} – ${order.ShipEndDate
-                      .toISOString()
-                      .slice(0, 10)}`
-                  : '—'}
-                {plannedShipments.length > 1 && (
-                  <span className="ml-1 text-muted-foreground">
-                    ({plannedShipments.length} shipments)
-                  </span>
-                )}
-              </span>
+              {plannedShipments.length > 1 ? (
+                <ShipmentTimeline
+                  shipments={plannedShipments.map((ps) => ({
+                    id: ps.id,
+                    collectionName: ps.collectionName,
+                    plannedShipStart: ps.plannedShipStart,
+                    plannedShipEnd: ps.plannedShipEnd,
+                    status: ps.status,
+                    itemCount: ps.items.length,
+                    // Add items for expanded view
+                    items: ps.items.map((item) => ({
+                      sku: item.sku,
+                      description: item.description,
+                      quantity: item.quantity,
+                    })),
+                  }))}
+                  variant="compact"
+                  showStatus
+                />
+              ) : (
+                <span className="font-medium">
+                  {order.ShipStartDate && order.ShipEndDate
+                    ? `${order.ShipStartDate.toISOString().slice(0, 10)} – ${order.ShipEndDate
+                        .toISOString()
+                        .slice(0, 10)}`
+                    : '—'}
+                </span>
+              )}
             </div>
             <div className="flex justify-between gap-4">
               <span className="text-muted-foreground">Order Date</span>

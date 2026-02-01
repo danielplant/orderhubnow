@@ -1,7 +1,8 @@
 'use client'
 
 import * as React from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useRouter } from 'next/navigation'
+import { useTableSearch } from '@/lib/hooks'
 import {
   DataTable,
   type DataTableColumn,
@@ -46,43 +47,15 @@ export function MissingSkusTable({
   total,
   statusCounts,
 }: MissingSkusTableProps) {
+  // Use shared table search hook
+  const { q: search, page, pageSize, setParam, setPage, getParam } = useTableSearch()
   const router = useRouter()
-  const searchParams = useSearchParams()
 
   const [selectedIds, setSelectedIds] = React.useState<string[]>([])
   const [isLoading, setIsLoading] = React.useState(false)
 
-  // Parse URL params
-  const status = (searchParams.get('status') || 'pending') as 'all' | 'pending' | 'reviewed'
-  const search = searchParams.get('q') || ''
-  const page = Number(searchParams.get('page') || '1')
-  const pageSize = 50
-
-  // URL param helpers
-  const setParam = React.useCallback(
-    (key: string, value: string | null) => {
-      const params = new URLSearchParams(searchParams.toString())
-      if (!value) {
-        params.delete(key)
-      } else {
-        params.set(key, value)
-      }
-      if (key !== 'page') {
-        params.delete('page')
-      }
-      router.push(`?${params.toString()}`, { scroll: false })
-    },
-    [router, searchParams]
-  )
-
-  const setPageParam = React.useCallback(
-    (nextPage: number) => {
-      const params = new URLSearchParams(searchParams.toString())
-      params.set('page', String(Math.max(1, nextPage)))
-      router.push(`?${params.toString()}`, { scroll: false })
-    },
-    [router, searchParams]
-  )
+  // Additional URL params
+  const status = (getParam('status') || 'pending') as 'all' | 'pending' | 'reviewed'
 
   // Actions
   const handleIgnore = React.useCallback(
@@ -272,7 +245,7 @@ export function MissingSkusTable({
         manualPagination
         page={page}
         totalCount={total}
-        onPageChange={setPageParam}
+        onPageChange={setPage}
       />
     </div>
   )

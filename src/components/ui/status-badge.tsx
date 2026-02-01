@@ -14,6 +14,7 @@ const statusBadgeVariants = cva(
   {
     variants: {
       status: {
+        draft: 'bg-amber-50 border-amber-200 text-amber-700 dark:bg-amber-950 dark:border-amber-800 dark:text-amber-400',
         pending: 'bg-muted border-border text-warning',
         processing: 'bg-muted border-border text-info',
         'partially-shipped': 'bg-warning/10 border-warning/20 text-warning',

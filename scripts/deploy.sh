@@ -118,6 +118,12 @@ if echo "$DRIFT_OUTPUT" | grep -q "SCHEMA DRIFT DETECTED"; then
             exit 1
         fi
     fi
+elif echo "$DRIFT_OUTPUT" | grep -q "SCHEMA DRIFT (PROD AHEAD"; then
+    echo ""
+    echo "$DRIFT_OUTPUT"
+    echo ""
+    echo "⚠️  Proceeding with deploy despite production being ahead."
+    echo "    (This is typically safe for older code, but review the warning above.)"
 else
     echo "✓ No schema drift - production is aligned"
 fi

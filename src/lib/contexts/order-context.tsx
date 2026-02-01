@@ -44,6 +44,12 @@ export interface EditModeShipment {
   plannedShipStart: string;  // ISO date (YYYY-MM-DD)
   plannedShipEnd: string;
   itemSkus: string[];
+  // Collection window constraints for validation (Issue 9 fix)
+  shipWindowStart: string | null;
+  shipWindowEnd: string | null;
+  // Combined shipment tracking (Issue 5 fix - requires Prisma migration)
+  isCombined?: boolean;
+  originalShipmentIds?: string[] | null;
 }
 
 /**
@@ -55,6 +61,7 @@ export interface DraftFormData {
   customerEmail?: string;
   customerPhone?: string;
   salesRepId?: string;
+  salesRepName?: string;  // Rep name loaded from draft API for display
   currency?: string;
   street1?: string;
   street2?: string;
@@ -117,6 +124,7 @@ interface OrderContextValue {
   loadDraft: (id: string) => Promise<boolean>;
   clearDraft: () => Promise<void>;
   getDraftUrl: () => string | null;
+  saveDraftToServer: (repId: string | null, customerInfo: { storeName: string; buyerName: string; customerEmail: string }) => Promise<string>;
 
   // Edit mode state (for editing existing orders)
   editOrderId: string | null;
@@ -137,6 +145,12 @@ interface OrderContextValue {
   shipmentDateOverrides: Map<string, { start: string; end: string }>;
   updateShipmentDates: (shipmentId: string, start: string, end: string) => void;
   clearShipmentDateOverrides: () => void;
+
+  // PR-3b: Manual shipment groupings (combine/split)
+  // Key: combined shipment ID, Value: array of original shipment IDs
+  shipmentGroups: Map<string, string[]>;
+  combineShipments: (shipmentIds: string[]) => string;  // Returns new combined ID
+  splitShipment: (combinedId: string) => void;
 }
 
 const OrderContext = createContext<OrderContextValue | null>(null);
@@ -172,6 +186,50 @@ interface StorageData {
   editOrderId: string | null;
   editOrderCurrency: Currency | null;
   shipmentDateOverrides: Map<string, { start: string; end: string }>;
+  // PR-3b: Combined shipment groupings
+  shipmentGroups: Map<string, string[]>;
+}
+
+/**
+ * Safely parse shipmentGroups from JSON, validating types.
+ * Returns empty Map if data is malformed.
+ */
+function safeParseShipmentGroups(data: unknown): Map<string, string[]> {
+  const result = new Map<string, string[]>();
+  if (!data || typeof data !== 'object') return result;
+
+  for (const [key, value] of Object.entries(data)) {
+    if (typeof key === 'string' && Array.isArray(value) && value.every(v => typeof v === 'string')) {
+      result.set(key, value);
+    }
+  }
+  return result;
+}
+
+/**
+ * Safely parse shipmentDateOverrides from JSON, validating types.
+ * Returns empty Map if data is malformed.
+ */
+function safeParseShipmentDateOverrides(
+  data: unknown
+): Map<string, { start: string; end: string }> {
+  const result = new Map<string, { start: string; end: string }>();
+  if (!data || typeof data !== 'object') return result;
+
+  for (const [key, value] of Object.entries(data)) {
+    if (
+      typeof key === 'string' &&
+      value &&
+      typeof value === 'object' &&
+      'start' in value &&
+      'end' in value &&
+      typeof (value as Record<string, unknown>).start === 'string' &&
+      typeof (value as Record<string, unknown>).end === 'string'
+    ) {
+      result.set(key, value as { start: string; end: string });
+    }
+  }
+  return result;
 }
 
 function loadFromStorage(): StorageData {
@@ -186,6 +244,7 @@ function loadFromStorage(): StorageData {
       editOrderId: null,
       editOrderCurrency: null,
       shipmentDateOverrides: new Map(),
+      shipmentGroups: new Map(),
     };
   }
 
@@ -204,6 +263,7 @@ function loadFromStorage(): StorageData {
         editOrderId: editState.orderId || null,
         editOrderCurrency: editState.currency || null,
         shipmentDateOverrides: new Map(), // Edit mode doesn't have shipment overrides
+        shipmentGroups: new Map(), // Edit mode doesn't have combined shipments initially
       };
     }
   } catch {
@@ -225,9 +285,9 @@ function loadFromStorage(): StorageData {
         draftId: draftId || null,
         editOrderId: null,
         editOrderCurrency: null,
-        shipmentDateOverrides: new Map(
-          Object.entries(parsed.shipmentDateOverrides || {})
-        ) as Map<string, { start: string; end: string }>,
+        shipmentDateOverrides: safeParseShipmentDateOverrides(parsed.shipmentDateOverrides),
+        // PR-3b: Restore combined shipment groupings (with type validation)
+        shipmentGroups: safeParseShipmentGroups(parsed.shipmentGroups),
       };
     }
   } catch {
@@ -243,6 +303,7 @@ function loadFromStorage(): StorageData {
     editOrderId: null,
     editOrderCurrency: null,
     shipmentDateOverrides: new Map(),
+    shipmentGroups: new Map(),
   };
 }
 
@@ -300,11 +361,19 @@ export function OrderProvider({ children, initialDraftId }: OrderProviderProps) 
     Map<string, { start: string; end: string }>
   >(() => loadFromStorage().shipmentDateOverrides);
 
+  // PR-3b: Manual shipment groupings (combine/split)
+  // Key: combined shipment ID, Value: array of original shipment IDs that were merged
+  const [shipmentGroups, setShipmentGroups] = useState<Map<string, string[]>>(
+    () => loadFromStorage().shipmentGroups
+  );
+
   // Refs for debounced auto-save
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const pendingSaveRef = useRef(false);
+  // Track if a sync is currently in flight (prevents race conditions)
+  const syncInFlightRef = useRef(false);
 
-  // Save state to localStorage (optimistic cache)
+  // Save state to localStorage (local session backup)
   const saveToLocalStorage = useCallback(() => {
     // In edit mode, save to edit-specific storage
     if (editOrderId) {
@@ -318,7 +387,7 @@ export function OrderProvider({ children, initialDraftId }: OrderProviderProps) 
       return;
     }
 
-    // Normal draft mode storage
+    // Normal session backup storage (local only)
     const data = {
       orders,
       prices: Object.fromEntries(priceMap),
@@ -326,27 +395,43 @@ export function OrderProvider({ children, initialDraftId }: OrderProviderProps) 
       lineMeta: orderLineMetadata,
       formData,
       shipmentDateOverrides: Object.fromEntries(shipmentDateOverrides),
+      // PR-3b: Persist combined shipment groupings
+      shipmentGroups: Object.fromEntries(
+        Array.from(shipmentGroups.entries()).map(([k, v]) => [k, v])
+      ),
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
     if (draftId) {
       localStorage.setItem(DRAFT_ID_KEY, draftId);
     }
-  }, [orders, priceMap, preOrderMetadata, orderLineMetadata, formData, shipmentDateOverrides, draftId, editOrderId, editOrderCurrency]);
+  }, [orders, priceMap, preOrderMetadata, orderLineMetadata, formData, shipmentDateOverrides, shipmentGroups, draftId, editOrderId, editOrderCurrency]);
 
-  // Sync to localStorage when state changes
+  // Sync to localStorage when state changes and update local backup status
   useEffect(() => {
     saveToLocalStorage();
-  }, [saveToLocalStorage]);
+    // Update status to reflect local backup is saved (only if we have items)
+    const itemCount = Object.values(orders).reduce(
+      (sum, productOrders) => sum + Object.values(productOrders).reduce((s, q) => s + q, 0),
+      0
+    );
+    if (itemCount > 0 && !editOrderId) {
+      setSaveStatus('saved');
+      setLastSaved(new Date());
+    }
+  }, [saveToLocalStorage, orders, editOrderId]);
 
   // Create or ensure draft exists on server
-  const ensureDraft = useCallback(async (): Promise<string> => {
+  const ensureDraft = useCallback(async (repId?: string | null): Promise<string> => {
     if (draftId) return draftId;
     
     try {
       const res = await fetch('/api/drafts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ currency: formData.currency || 'CAD' }),
+        body: JSON.stringify({ 
+          currency: formData.currency || 'CAD',
+          repId: repId || null,
+        }),
       });
       
       if (!res.ok) throw new Error('Failed to create draft');
@@ -371,9 +456,15 @@ export function OrderProvider({ children, initialDraftId }: OrderProviderProps) 
     if (!draftId) {
       return;
     }
-    
+
+    // Guard: skip if another sync is already in flight (prevents race conditions)
+    if (syncInFlightRef.current) {
+      return;
+    }
+    syncInFlightRef.current = true;
+
     setSaveStatus('saving');
-    
+
     try {
       const res = await fetch(`/api/drafts/${id}`, {
         method: 'PUT',
@@ -386,27 +477,33 @@ export function OrderProvider({ children, initialDraftId }: OrderProviderProps) 
           formData,
           shipmentDateOverrides: Object.fromEntries(shipmentDateOverrides),
           currency: formData.currency || 'CAD',
+          // Add shipmentGroups for cross-device persistence
+          shipmentGroups: Object.fromEntries(
+            Array.from(shipmentGroups.entries()).map(([k, v]) => [k, v])
+          ),
         }),
       });
-      
+
       // Silently ignore 404 (draft was deleted) to prevent error noise after order submission
       if (res.status === 404) {
         setSaveStatus('idle');
         return;
       }
-      
+
       if (!res.ok) throw new Error('Failed to sync draft');
-      
+
       setSaveStatus('saved');
       setLastSaved(new Date());
     } catch (err) {
       console.error('Failed to sync to server:', err);
       setSaveStatus('error');
+    } finally {
+      syncInFlightRef.current = false;
     }
-  }, [orders, priceMap, preOrderMetadata, orderLineMetadata, formData, shipmentDateOverrides, draftId]);
+  }, [orders, priceMap, preOrderMetadata, orderLineMetadata, formData, shipmentDateOverrides, draftId, shipmentGroups]);
 
   // Debounced auto-save to server (skip in edit mode or after draft cleared)
-  const scheduleServerSync = useCallback(() => {
+  const _scheduleServerSync = useCallback(() => {
     // Skip server sync in edit mode - edit state is only stored locally
     if (editOrderId) return;
     
@@ -443,14 +540,51 @@ export function OrderProvider({ children, initialDraftId }: OrderProviderProps) 
         next.set(shipmentId, { start, end });
         return next;
       });
-      scheduleServerSync();
+      // Local backup only - server draft created via explicit Save Draft action
     },
-    [scheduleServerSync]
+    []
   );
 
   // Clear all shipment date overrides
   const clearShipmentDateOverrides = useCallback(() => {
     setShipmentDateOverrides(new Map());
+  }, []);
+
+  // PR-3b: Combine multiple shipments into one
+  // Returns the ID of the new combined shipment
+  const combineShipments = useCallback((shipmentIds: string[]): string => {
+    if (shipmentIds.length < 2) {
+      console.warn('[OrderContext] combineShipments requires at least 2 shipment IDs');
+      return shipmentIds[0] || '';
+    }
+
+    // Generate a combined shipment ID
+    const combinedId = `combined-${Date.now()}`;
+
+    setShipmentGroups((prev) => {
+      const next = new Map(prev);
+      // Store the original shipment IDs under the combined ID
+      next.set(combinedId, shipmentIds);
+      return next;
+    });
+
+    return combinedId;
+  }, []);
+
+  // PR-3b: Split a combined shipment back into its originals
+  const splitShipment = useCallback((combinedId: string) => {
+    setShipmentGroups((prev) => {
+      const next = new Map(prev);
+      next.delete(combinedId);
+      return next;
+    });
+
+    // Also clear any date overrides for the combined shipment
+    setShipmentDateOverrides((prev) => {
+      const next = new Map(prev);
+      next.delete(combinedId);
+      return next;
+    });
   }, []);
 
   // Load draft from server
@@ -472,16 +606,23 @@ export function OrderProvider({ children, initialDraftId }: OrderProviderProps) 
       
       const data = await res.json();
       const state = data.state;
-      
+
+      // Merge salesRep from API response into formData for display purposes
+      const formDataWithRep = {
+        ...state.formData,
+        // If API returned salesRep (rep name), store it for modal display
+        ...(data.salesRep && { salesRepName: data.salesRep }),
+      };
+
       // Update all state from server
       setOrders(state.orders || {});
       setPriceMap(new Map(Object.entries(state.prices || {})));
       setPreOrderMetadata(state.preOrderMeta || {});
       setOrderLineMetadata(state.lineMeta || {});
-      setFormDataState(state.formData || {});
-      setShipmentDateOverrides(
-        new Map(Object.entries(state.shipmentDateOverrides || {})) as Map<string, { start: string; end: string }>
-      );
+      setFormDataState(formDataWithRep);
+      setShipmentDateOverrides(safeParseShipmentDateOverrides(state.shipmentDateOverrides));
+      // Restore combined shipment groupings from server draft (with type validation)
+      setShipmentGroups(safeParseShipmentGroups(state.shipmentGroups));
       setDraftId(id);
       setSaveStatus('saved');
       setLastSaved(new Date(state.lastUpdated || Date.now()));
@@ -524,6 +665,7 @@ export function OrderProvider({ children, initialDraftId }: OrderProviderProps) 
     setOrderLineMetadata({});
     setFormDataState({});
     setShipmentDateOverrides(new Map());
+    setShipmentGroups(new Map());
     setDraftId(null);
     setSaveStatus('idle');
     setLastSaved(null);
@@ -541,6 +683,80 @@ export function OrderProvider({ children, initialDraftId }: OrderProviderProps) 
     return `${window.location.origin}/draft/${draftId}`;
   }, [draftId]);
 
+  /**
+   * Explicitly save draft to server with customer info.
+   * This is the intentional "Save Draft" action (vs local autosave).
+   * Returns the draft ID on success.
+   */
+  const saveDraftToServer = useCallback(async (
+    repId: string | null,
+    customerInfo: { storeName: string; buyerName: string; customerEmail: string }
+  ): Promise<string> => {
+    setSaveStatus('saving');
+    
+    try {
+      // Update form data with customer info and rep
+      const updatedFormData = {
+        ...formData,
+        storeName: customerInfo.storeName,
+        buyerName: customerInfo.buyerName,
+        customerEmail: customerInfo.customerEmail,
+        salesRepId: repId || undefined,
+      };
+      setFormDataState(updatedFormData);
+
+      // Cancel any pending auto-save to prevent race condition
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+        saveTimeoutRef.current = null;
+      }
+      pendingSaveRef.current = false;
+
+      // Wait for any in-flight sync to complete before saving
+      while (syncInFlightRef.current) {
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+
+      // Ensure draft exists on server (creates if needed, with rep attribution)
+      const id = await ensureDraft(repId);
+      
+      // Sync full state to server
+      const res = await fetch(`/api/drafts/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orders,
+          prices: Object.fromEntries(priceMap),
+          preOrderMeta: preOrderMetadata,
+          lineMeta: orderLineMetadata,
+          formData: updatedFormData,
+          shipmentDateOverrides: Object.fromEntries(shipmentDateOverrides),
+          shipmentGroups: Object.fromEntries(
+            Array.from(shipmentGroups.entries()).map(([k, v]) => [k, v])
+          ),
+          currency: updatedFormData.currency || 'CAD',
+          repId, // Include repId for PUT to preserve attribution
+        }),
+      });
+      
+      if (!res.ok) {
+        throw new Error('Failed to save draft');
+      }
+      
+      setSaveStatus('saved');
+      setLastSaved(new Date());
+      
+      // Update localStorage with draft ID
+      localStorage.setItem(DRAFT_ID_KEY, id);
+      
+      return id;
+    } catch (err) {
+      console.error('Failed to save draft to server:', err);
+      setSaveStatus('error');
+      throw err;
+    }
+  }, [formData, orders, priceMap, preOrderMetadata, orderLineMetadata, shipmentDateOverrides, shipmentGroups, ensureDraft]);
+
   // Load existing order into cart for editing
   const loadOrderForEdit = useCallback((order: OrderForEditing) => {
     // Clear any existing cart state
@@ -550,6 +766,7 @@ export function OrderProvider({ children, initialDraftId }: OrderProviderProps) 
     setOrderLineMetadata({});
     setHistory([]);
     setShipmentDateOverrides(new Map());
+    setShipmentGroups(new Map());
     setEditModeShipments(new Map());
 
     // Set edit mode state
@@ -628,6 +845,7 @@ export function OrderProvider({ children, initialDraftId }: OrderProviderProps) 
     // Phase 5: Clear edit mode shipments and date overrides
     setEditModeShipments(new Map());
     setShipmentDateOverrides(new Map());
+    setShipmentGroups(new Map());
 
     // Clear edit state from localStorage
     localStorage.removeItem(EDIT_STATE_KEY);
@@ -772,10 +990,9 @@ export function OrderProvider({ children, initialDraftId }: OrderProviderProps) 
       if (lineMeta) {
         setOrderLineMetadata((prev) => ({ ...prev, [sku]: lineMeta }));
       }
-      // Auto-save to server
-      scheduleServerSync();
+      // Local backup only - server draft created via explicit Save Draft action
     },
-    [saveToHistory, scheduleServerSync]
+    [saveToHistory]
   );
 
   const removeItem = useCallback(
@@ -791,10 +1008,9 @@ export function OrderProvider({ children, initialDraftId }: OrderProviderProps) 
         }
         return { ...prev, [productId]: productOrders };
       });
-      // Auto-save to server
-      scheduleServerSync();
+      // Local backup only - server draft created via explicit Save Draft action
     },
-    [saveToHistory, scheduleServerSync]
+    [saveToHistory]
   );
 
   const setQuantity = useCallback(
@@ -826,10 +1042,9 @@ export function OrderProvider({ children, initialDraftId }: OrderProviderProps) 
           setOrderLineMetadata((prev) => ({ ...prev, [sku]: lineMeta }));
         }
       }
-      // Auto-save to server
-      scheduleServerSync();
+      // Local backup only - server draft created via explicit Save Draft action
     },
-    [saveToHistory, scheduleServerSync]
+    [saveToHistory]
   );
 
   const clearProduct = useCallback(
@@ -840,10 +1055,9 @@ export function OrderProvider({ children, initialDraftId }: OrderProviderProps) 
         delete next[productId];
         return next;
       });
-      // Auto-save to server
-      scheduleServerSync();
+      // Local backup only - server draft created via explicit Save Draft action
     },
-    [saveToHistory, scheduleServerSync]
+    [saveToHistory]
   );
 
   const clearAll = useCallback(() => {
@@ -852,18 +1066,17 @@ export function OrderProvider({ children, initialDraftId }: OrderProviderProps) 
     setPreOrderMetadata({});
     setOrderLineMetadata({});
     setShipmentDateOverrides(new Map());
-    // Auto-save to server
-    scheduleServerSync();
-  }, [saveToHistory, scheduleServerSync]);
+    setShipmentGroups(new Map());
+    // Local backup only - server draft created via explicit Save Draft action
+  }, [saveToHistory]);
 
   const undo = useCallback(() => {
     if (history.length === 0) return;
     const previousState = history[history.length - 1];
     setHistory((prev) => prev.slice(0, -1));
     setOrders(previousState.orders);
-    // Auto-save to server
-    scheduleServerSync();
-  }, [history, scheduleServerSync]);
+    // Local backup only - server draft created via explicit Save Draft action
+  }, [history]);
 
   const getProductTotal = useCallback(
     (product: Product, currency: Currency) => {
@@ -891,15 +1104,13 @@ export function OrderProvider({ children, initialDraftId }: OrderProviderProps) 
 
   const setFormData = useCallback((data: DraftFormData) => {
     setFormDataState(data);
-    // Auto-save to server
-    scheduleServerSync();
-  }, [scheduleServerSync]);
+    // Local backup only - server draft created via explicit Save Draft action
+  }, []);
 
   const updateFormField = useCallback((field: keyof DraftFormData, value: string) => {
     setFormDataState((prev) => ({ ...prev, [field]: value }));
-    // Auto-save to server
-    scheduleServerSync();
-  }, [scheduleServerSync]);
+    // Local backup only - server draft created via explicit Save Draft action
+  }, []);
 
   const { items: totalItems, price: totalPrice } = calculateTotals(orders, priceMap);
 
@@ -932,6 +1143,7 @@ export function OrderProvider({ children, initialDraftId }: OrderProviderProps) 
         loadDraft,
         clearDraft,
         getDraftUrl,
+        saveDraftToServer,
         // Edit mode state
         editOrderId,
         editOrderCurrency,
@@ -948,6 +1160,10 @@ export function OrderProvider({ children, initialDraftId }: OrderProviderProps) 
         shipmentDateOverrides,
         updateShipmentDates,
         clearShipmentDateOverrides,
+        // PR-3b: Manual shipment groupings
+        shipmentGroups,
+        combineShipments,
+        splitShipment,
       }}
     >
       {children}

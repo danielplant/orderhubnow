@@ -25,6 +25,10 @@ export interface CartPlannedShipment {
   plannedShipEnd: string // ISO date (YYYY-MM-DD)
   minAllowedStart: string | null // From collection, for UI validation
   minAllowedEnd: string | null // From collection, for UI validation
+  // PR-3b: Combine/split support
+  isCombined?: boolean // True if this shipment was manually combined from multiple
+  originalShipmentIds?: string[] // IDs of shipments that were combined into this one
+  canCombineWith?: string[] // IDs of other shipments with overlapping windows
 }
 
 /**
@@ -60,6 +64,9 @@ export interface PlannedShipmentItem {
   lineTotal: number
   collectionId: number | null
   collectionName: string | null // For display in combined shipments
+  // Collection ship window constraints (from SKU's collection)
+  minAllowedStart: string | null
+  minAllowedEnd: string | null
 }
 
 /**

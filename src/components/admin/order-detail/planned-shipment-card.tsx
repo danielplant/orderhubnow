@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
@@ -38,6 +39,7 @@ export function PlannedShipmentCard({
   allShipments,
   orderId,
 }: PlannedShipmentCardProps) {
+  const router = useRouter()
   const [startDate, setStartDate] = useState(shipment.plannedShipStart)
   const [endDate, setEndDate] = useState(shipment.plannedShipEnd)
   const [errors, setErrors] = useState<{ start?: string; end?: string }>({})
@@ -101,6 +103,7 @@ export function PlannedShipmentCard({
 
     if (result.success) {
       toast.success('Shipment dates updated')
+      router.refresh()
     } else {
       toast.error(result.error || 'Failed to update dates')
     }

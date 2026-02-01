@@ -9,7 +9,6 @@ import { sendDateChangeEmail } from '@/lib/email/shipment-date-change'
 import type {
   CollectionType,
   CollectionFormData,
-  MappingStatus,
 } from '@/lib/types/collection'
 
 async function requireAdmin() {
@@ -386,6 +385,8 @@ interface NotifyInput {
   notifyReps: boolean
   notifyCustomers: boolean
   collectionName: string
+  oldStart: string
+  oldEnd: string
   newStart: string
   newEnd: string
 }
@@ -454,14 +455,14 @@ export async function notifyShipmentDateChanges(
               orderId: String(order.ID),
               storeName: order.StoreName || '',
               collectionName: input.collectionName,
-              oldStart: shipment.PlannedShipStart.toISOString().split('T')[0],
-              oldEnd: shipment.PlannedShipEnd.toISOString().split('T')[0],
+              oldStart: input.oldStart,
+              oldEnd: input.oldEnd,
               newStart: input.newStart,
               newEnd: input.newEnd,
               isRep: true,
             })
             emailsSent++
-          } catch (e) {
+          } catch {
             errors.push(`Failed to email rep for ${order.OrderNumber}`)
           }
         }
@@ -476,14 +477,14 @@ export async function notifyShipmentDateChanges(
             orderId: String(order.ID),
             storeName: order.StoreName || '',
             collectionName: input.collectionName,
-            oldStart: shipment.PlannedShipStart.toISOString().split('T')[0],
-            oldEnd: shipment.PlannedShipEnd.toISOString().split('T')[0],
+            oldStart: input.oldStart,
+            oldEnd: input.oldEnd,
             newStart: input.newStart,
             newEnd: input.newEnd,
             isRep: false,
           })
           emailsSent++
-        } catch (e) {
+        } catch {
           errors.push(`Failed to email customer for ${order.OrderNumber}`)
         }
       }

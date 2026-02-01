@@ -41,7 +41,7 @@ export function MoveItemModal({
   item,
   sourceShipment,
   allShipments,
-  orderId,
+  orderId: _orderId,
 }: MoveItemModalProps) {
   const [targetShipmentId, setTargetShipmentId] = useState<string>('')
   const [overrideConfirmed, setOverrideConfirmed] = useState(false)
@@ -59,19 +59,19 @@ export function MoveItemModal({
     [targetShipments, targetShipmentId]
   )
 
-  // Validate target dates against item's collection window
+  // Validate target dates against item's collection window (not source shipment's)
   const validationResult = useMemo(() => {
     if (!targetShipment) return null
 
-    // Use source shipment's minAllowed dates as the collection window
+    // Use the ITEM's collection window (from SKU lookup), not the source shipment's
     const collectionWindow = {
-      id: sourceShipment.collectionId ?? 0,
-      name: sourceShipment.collectionName ?? 'Collection',
-      shipWindowStart: sourceShipment.minAllowedStart,
-      shipWindowEnd: sourceShipment.minAllowedEnd,
+      id: item.collectionId ?? 0,
+      name: item.collectionName ?? 'Collection',
+      shipWindowStart: item.minAllowedStart,
+      shipWindowEnd: item.minAllowedEnd,
     }
 
-    // Skip validation if no collection window
+    // Skip validation if no collection window (ATS items)
     if (!collectionWindow.shipWindowStart && !collectionWindow.shipWindowEnd) {
       return { valid: true, errors: [], warnings: [] }
     }
@@ -81,7 +81,7 @@ export function MoveItemModal({
       targetShipment.plannedShipEnd,
       [collectionWindow]
     )
-  }, [targetShipment, sourceShipment])
+  }, [targetShipment, item])
 
   const hasValidationWarning = validationResult && !validationResult.valid
   const canMove = targetShipmentId && (!hasValidationWarning || overrideConfirmed)
@@ -141,7 +141,7 @@ export function MoveItemModal({
               <p className="text-sm text-muted-foreground">{item.description}</p>
             )}
             {item.quantityFulfilled > 0 && (
-              <Badge variant="secondary" className="text-amber-600">
+              <Badge className="text-amber-600">
                 <AlertTriangle className="h-3 w-3 mr-1" />
                 {item.quantityFulfilled} units already fulfilled
               </Badge>

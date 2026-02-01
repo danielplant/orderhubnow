@@ -3,11 +3,12 @@ import { prisma } from '@/lib/prisma'
 
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const id = parseInt(params.id, 10)
-    if (isNaN(id)) {
+    const { id } = await params
+    const mappingId = Number.parseInt(id, 10)
+    if (Number.isNaN(mappingId)) {
       return NextResponse.json({ error: 'Invalid ID' }, { status: 400 })
     }
 
@@ -25,7 +26,7 @@ export async function PATCH(
 
     // Validate the record exists
     const existing = await prisma.shopifyFieldMapping.findUnique({
-      where: { id },
+      where: { id: mappingId },
     })
 
     if (!existing) {
@@ -49,11 +50,11 @@ export async function PATCH(
     }
 
     const updated = await prisma.shopifyFieldMapping.update({
-      where: { id },
+      where: { id: mappingId },
       data: { enabled },
     })
 
-    console.log(`[Mapping] Updated field ${id}: enabled=${enabled}`)
+    console.log(`[Mapping] Updated field ${mappingId}: enabled=${enabled}`)
 
     return NextResponse.json({
       success: true,

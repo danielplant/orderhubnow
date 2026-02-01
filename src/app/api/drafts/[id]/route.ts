@@ -50,6 +50,10 @@ interface DraftState {
   // Maps shipment ID to user-customized dates
   shipmentDateOverrides?: Record<string, { start: string; end: string }>
   
+  // Combined shipment groupings (PR-3b)
+  // Maps combined shipment ID to original shipment IDs
+  shipmentGroups?: Record<string, string[]>
+  
   // Metadata
   lastUpdated: string
 }
@@ -74,6 +78,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         OrderNotes: true,
         OrderDate: true,
         Country: true,
+        RepID: true,
+        SalesRep: true,
       },
     })
 
@@ -99,12 +105,16 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       dbId: String(draft.ID),
       currency: draft.Country || 'CAD',
       createdAt: draft.OrderDate?.toISOString(),
+      repId: draft.RepID ? String(draft.RepID) : null,
+      salesRep: draft.SalesRep || null,
       state: state || {
         orders: {},
         prices: {},
         preOrderMeta: {},
         lineMeta: {},
         formData: {},
+        shipmentDateOverrides: {},
+        shipmentGroups: {},
         lastUpdated: new Date().toISOString(),
       },
     })
@@ -122,19 +132,26 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
  * 
  * No authentication required - drafts are public/shareable.
  * Stores entire cart + form state in OrderNotes as JSON.
+ * 
+ * Preserves rep attribution if already set; sets it if not and repId provided.
  */
 export async function PUT(request: NextRequest, { params }: RouteParams) {
   try {
     const { id } = await params
     const body = await request.json()
+    const { repId } = body
 
-    // Verify draft exists
+    // Verify draft exists and check current rep attribution
     const existing = await prisma.customerOrders.findFirst({
       where: {
         OrderNumber: id,
         OrderStatus: 'Draft',
       },
-      select: { ID: true },
+      select: { 
+        ID: true,
+        RepID: true,
+        SalesRep: true,
+      },
     })
 
     if (!existing) {
@@ -152,6 +169,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       lineMeta: body.lineMeta || {},
       formData: body.formData || {},
       shipmentDateOverrides: body.shipmentDateOverrides || {},
+      shipmentGroups: body.shipmentGroups || {},
       lastUpdated: new Date().toISOString(),
     }
 
@@ -161,6 +179,27 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       for (const [sku, qty] of Object.entries(skuQtys as Record<string, number>)) {
         const price = state.prices[sku] || 0
         orderAmount += price * qty
+      }
+    }
+
+    // Build rep update object
+    // If draft has no rep and repId provided, set it now
+    // If draft already has RepID, preserve it (don't allow changing)
+    let repUpdate: { RepID?: number | null; SalesRep?: string } = {}
+    
+    if (repId && !existing.RepID) {
+      const repIdInt = parseInt(repId, 10)
+      if (!isNaN(repIdInt)) {
+        const rep = await prisma.reps.findUnique({
+          where: { ID: repIdInt },
+          select: { Name: true },
+        })
+        if (rep?.Name) {
+          repUpdate = {
+            RepID: repIdInt,
+            SalesRep: rep.Name,
+          }
+        }
       }
     }
 
@@ -176,6 +215,8 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         ...(body.formData?.buyerName && { BuyerName: body.formData.buyerName }),
         ...(body.formData?.customerEmail && { CustomerEmail: body.formData.customerEmail }),
         ...(body.formData?.customerPhone && { CustomerPhone: body.formData.customerPhone }),
+        // Apply rep attribution if needed
+        ...repUpdate,
       },
     })
 

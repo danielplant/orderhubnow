@@ -80,6 +80,11 @@ export const plannedShipmentSchema = z.object({
   itemSkus: z.array(z.string()),
   plannedShipStart: z.string().min(1, 'Ship start date is required'),
   plannedShipEnd: z.string().min(1, 'Ship end date is required'),
+  // Override flag: allows submission even if dates violate collection window
+  allowOverride: z.boolean().optional(),
+  // PR-3b: Combined shipment tracking for multi-collection support
+  isCombined: z.boolean().optional(),
+  originalShipmentIds: z.array(z.string()).optional(),
 })
 
 export type PlannedShipmentData = z.infer<typeof plannedShipmentSchema>

@@ -159,8 +159,9 @@ export async function moveItemBetweenShipments(
     }
 
     // 2. Fetch collection info via SKU
-    const sku = await prisma.sku.findUnique({
+    const sku = await prisma.sku.findFirst({
       where: { SkuID: item.SKU },
+      orderBy: { ID: 'desc' },
       select: {
         Collection: {
           select: { id: true, name: true, shipWindowStart: true, shipWindowEnd: true },

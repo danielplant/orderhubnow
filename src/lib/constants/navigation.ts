@@ -38,6 +38,7 @@ export const adminNav: NavItem[] = [
   { name: 'SYSTEM', section: true },
   { name: 'Settings', path: '/admin/settings' },
   { name: 'Feature Interest', path: '/admin/feature-interest' },
+  { name: 'Export History', path: '/admin/export-history' },
   { name: 'Developer Portal', path: '/admin/dev' },
 ]
 

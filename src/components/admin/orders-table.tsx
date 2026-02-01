@@ -3,10 +3,10 @@
 import * as React from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
+import { useTableSearch, useColumnVisibility } from '@/lib/hooks'
 import {
   DataTable,
   type DataTableColumn,
-  StatusBadge,
   Button,
   DropdownMenu,
   DropdownMenuTrigger,
@@ -16,6 +16,7 @@ import {
   type DateRange,
   SearchInput,
   FilterPill,
+  ShipmentTimeline,
 } from '@/components/ui'
 import { BulkActionsBar } from '@/components/admin/bulk-actions-bar'
 import { OrderCommentsModal } from '@/components/admin/order-comments-modal'
@@ -31,7 +32,7 @@ import type { AdminOrderRow, OrderFacets, OrderStatus, OrdersListResult } from '
 import type { ShopifyValidationResult, BulkTransferResult, BatchValidationResult } from '@/lib/types/shopify'
 import { bulkUpdateStatus, updateOrderStatus } from '@/lib/data/actions/orders'
 import { validateOrderForShopify, transferOrderToShopify, bulkTransferOrdersToShopify, batchValidateOrdersForShopify } from '@/lib/data/actions/shopify'
-import { MoreHorizontal, AlertTriangle, RefreshCw, SearchX } from 'lucide-react'
+import { MoreHorizontal, AlertTriangle, SearchX } from 'lucide-react'
 
 // ============================================================================
 // Types
@@ -63,6 +64,7 @@ const COLUMN_LABELS: Record<string, string> = {
   orderType: 'Type',
   storeName: 'Store',
   salesRep: 'Rep',
+  customerEmail: 'Email',
   collection: 'OHN Collection',
   shopifyCollectionRaw: 'Shopify Collection',
   season: 'Season',
@@ -95,6 +97,7 @@ const DEFAULT_COLUMN_WIDTHS: Record<string, number> = {
   orderType: 80,
   storeName: 160,
   salesRep: 100,
+  customerEmail: 180,
   collection: 110,
   shopifyCollectionRaw: 130,
   season: 80,
@@ -109,7 +112,7 @@ const DEFAULT_COLUMN_WIDTHS: Record<string, number> = {
 }
 
 // Map OrderStatus to StatusBadge status prop
-function getStatusBadgeStatus(status: OrderStatus) {
+function _getStatusBadgeStatus(status: OrderStatus) {
   switch (status) {
     case 'Cancelled':
       return 'cancelled'
@@ -141,6 +144,12 @@ export function OrdersTable({ initialOrders, total, statusCounts, facets }: Orde
   const router = useRouter()
   const searchParams = useSearchParams()
 
+  // Use shared table search hook for standard params
+  const { q, page, pageSize, sort, dir, setParam, setPage, setSort, getParam } = useTableSearch()
+
+  // Default sort for orders
+  const actualSort = sort || 'orderDate'
+
   const [selectedIds, setSelectedIds] = React.useState<string[]>([])
   const [commentsOrderId, setCommentsOrderId] = React.useState<string | null>(null)
   const [shipmentOrder, setShipmentOrder] = React.useState<AdminOrderRow | null>(null)
@@ -164,34 +173,31 @@ export function OrdersTable({ initialOrders, total, statusCounts, facets }: Orde
   const [bulkValidating, setBulkValidating] = React.useState(false)
   const [bulkValidationResult, setBulkValidationResult] = React.useState<BatchValidationResult | null>(null)
 
-  // Column visibility state (localStorage persisted)
-  // Initialize with defaults to avoid hydration mismatch, then hydrate from localStorage
-  const [visibleColumns, setVisibleColumns] = React.useState<string[]>(DEFAULT_VISIBLE_COLUMNS)
-  const [columnWidths, setColumnWidths] = React.useState<Record<string, number>>(DEFAULT_COLUMN_WIDTHS)
-  const [isHydrated, setIsHydrated] = React.useState(false)
+  // Column visibility state (localStorage persisted, no flash)
+  const {
+    visibleColumns,
+    toggleColumn,
+    resetColumns,
+    isHydrated,
+  } = useColumnVisibility({
+    storageKey: 'orders-table-columns',
+    defaultColumns: DEFAULT_VISIBLE_COLUMNS,
+  })
 
-  // Hydrate state from localStorage on mount (client-side only)
+  // Column widths state (separate from visibility - debounced persistence is fine here)
+  const [columnWidths, setColumnWidths] = React.useState<Record<string, number>>(DEFAULT_COLUMN_WIDTHS)
+
+  // Hydrate column widths from localStorage on mount
   React.useEffect(() => {
     try {
-      const savedColumns = localStorage.getItem('orders-table-columns')
-      if (savedColumns) {
-        setVisibleColumns(JSON.parse(savedColumns))
-      }
       const savedWidths = localStorage.getItem('orders-table-widths')
       if (savedWidths) {
         setColumnWidths(JSON.parse(savedWidths))
       }
     } catch {}
-    setIsHydrated(true)
   }, [])
 
-  // Persist column visibility (skip initial render to avoid overwriting with defaults)
-  React.useEffect(() => {
-    if (!isHydrated) return
-    localStorage.setItem('orders-table-columns', JSON.stringify(visibleColumns))
-  }, [visibleColumns, isHydrated])
-
-  // Persist column widths (debounced, skip until hydrated)
+  // Persist column widths (debounced)
   const widthsRef = React.useRef(columnWidths)
   widthsRef.current = columnWidths
   React.useEffect(() => {
@@ -202,20 +208,15 @@ export function OrdersTable({ initialOrders, total, statusCounts, facets }: Orde
     return () => clearTimeout(timeout)
   }, [columnWidths, isHydrated])
 
-  // Parse current filter state from URL
-  const status = (searchParams.get('status') || 'All') as 'All' | OrderStatus
-  const syncStatus = searchParams.get('syncStatus') || ''
-  const q = searchParams.get('q') || ''
-  const rep = searchParams.get('rep') || ''
-  const orderType = searchParams.get('orderType') || ''
-  const season = searchParams.get('season') || ''
-  const collection = searchParams.get('collection') || ''
-  const dateFrom = searchParams.get('dateFrom') || ''
-  const dateTo = searchParams.get('dateTo') || ''
-  const page = Number(searchParams.get('page') || '1')
-  const pageSize = Number(searchParams.get('pageSize') || '50')
-  const sort = searchParams.get('sort') || 'orderDate'
-  const dir = (searchParams.get('dir') || 'desc') as 'asc' | 'desc'
+  // Additional URL params (beyond standard ones from hook)
+  const status = (getParam('status') || 'All') as 'All' | OrderStatus
+  const syncStatus = getParam('syncStatus') || ''
+  const rep = getParam('rep') || ''
+  const orderType = getParam('orderType') || ''
+  const season = getParam('season') || ''
+  const collection = getParam('collection') || ''
+  const dateFrom = getParam('dateFrom') || ''
+  const dateTo = getParam('dateTo') || ''
 
   // Date range value for the popover
   const dateRange: DateRange = {
@@ -238,42 +239,6 @@ export function OrdersTable({ initialOrders, total, statusCounts, facets }: Orde
         params.delete('dateTo')
       }
       params.delete('page')
-      router.push(`?${params.toString()}`, { scroll: false })
-    },
-    [router, searchParams]
-  )
-
-  // URL param helpers
-  const setParam = React.useCallback(
-    (key: string, value: string | null) => {
-      const params = new URLSearchParams(searchParams.toString())
-      if (!value) {
-        params.delete(key)
-      } else {
-        params.set(key, value)
-      }
-      if (key !== 'page') {
-        params.delete('page')
-      }
-      router.push(`?${params.toString()}`, { scroll: false })
-    },
-    [router, searchParams]
-  )
-
-  const setPageParam = React.useCallback(
-    (nextPage: number) => {
-      const params = new URLSearchParams(searchParams.toString())
-      params.set('page', String(Math.max(1, nextPage)))
-      router.push(`?${params.toString()}`, { scroll: false })
-    },
-    [router, searchParams]
-  )
-
-  const setSortParam = React.useCallback(
-    (newSort: { columnId: string; direction: 'asc' | 'desc' }) => {
-      const params = new URLSearchParams(searchParams.toString())
-      params.set('sort', newSort.columnId)
-      params.set('dir', newSort.direction)
       router.push(`?${params.toString()}`, { scroll: false })
     },
     [router, searchParams]
@@ -563,15 +528,13 @@ export function OrdersTable({ initialOrders, total, statusCounts, facets }: Orde
 
   // Column visibility change handlers
   const handleColumnVisibilityChange = React.useCallback((columnId: string, visible: boolean) => {
-    setVisibleColumns((prev) =>
-      visible ? [...prev, columnId] : prev.filter((id) => id !== columnId)
-    )
-  }, [])
+    toggleColumn(columnId, visible)
+  }, [toggleColumn])
 
   const handleResetColumns = React.useCallback(() => {
-    setVisibleColumns(DEFAULT_VISIBLE_COLUMNS)
+    resetColumns()
     setColumnWidths(DEFAULT_COLUMN_WIDTHS)
-  }, [])
+  }, [resetColumns])
 
   // Table columns
   const allColumns = React.useMemo<Array<DataTableColumn<AdminOrderRow>>>(
@@ -585,11 +548,24 @@ export function OrdersTable({ initialOrders, total, statusCounts, facets }: Orde
             <Link href={`/admin/orders/${o.id}`} className="font-medium hover:underline">
               {o.orderNumber}
             </Link>
-            {/* Phase 5: Show shipment count badge for multi-shipment orders */}
+            {/* Phase 5: Show shipment timeline for multi-shipment orders
+                NOTE: Using synthetic shipments for compact view. All shipments use the same
+                first date since we only have firstShipmentDate and count in AdminOrderRow.
+                For expanded/full view with real per-shipment dates, would need to:
+                1. Add plannedShipments array to AdminOrderRow type
+                2. Query real PlannedShipment records in getOrders()
+                3. Pass real shipment data here instead of synthetic array */}
             {o.plannedShipmentCount > 1 && (
-              <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium bg-blue-100 text-blue-700 rounded">
-                {o.plannedShipmentCount}
-              </span>
+              <ShipmentTimeline
+                shipments={Array.from({ length: o.plannedShipmentCount }, (_, i) => ({
+                  id: `shipment-${i}`,
+                  collectionName: null,
+                  plannedShipStart: o.firstShipmentDate ?? o.shipStartDate ?? '',
+                  plannedShipEnd: o.firstShipmentDate ?? o.shipStartDate ?? '',
+                }))}
+                variant="compact"
+                className="ml-1"
+              />
             )}
           </div>
         ),
@@ -611,6 +587,16 @@ export function OrdersTable({ initialOrders, total, statusCounts, facets }: Orde
         header: 'Rep',
         minWidth: 60,
         cell: (o) => <span className="text-muted-foreground">{o.salesRep || '—'}</span>,
+      },
+      {
+        id: 'customerEmail',
+        header: 'Email',
+        minWidth: 120,
+        cell: (o) => (
+          <span className="text-sm text-muted-foreground truncate">
+            {o.customerEmail || '—'}
+          </span>
+        ),
       },
       {
         id: 'collection',
@@ -1044,11 +1030,11 @@ export function OrdersTable({ initialOrders, total, statusCounts, facets }: Orde
           manualPagination
           page={page}
           totalCount={total}
-          onPageChange={setPageParam}
+          onPageChange={setPage}
           // Manual/server-side sorting
           manualSorting
-          sort={{ columnId: sort, direction: dir }}
-          onSortChange={setSortParam}
+          sort={{ columnId: actualSort, direction: dir }}
+          onSortChange={setSort}
           // Sticky header and column resizing
           stickyHeader
           maxHeight="calc(100vh - 380px)"

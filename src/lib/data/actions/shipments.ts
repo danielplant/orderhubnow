@@ -179,6 +179,7 @@ export async function createShipment(
             Quantity: true,
             Price: true,
             CancelledQty: true,
+            PlannedShipmentID: true,  // For cross-shipment fulfillment tracking
           },
         },
       },
@@ -252,14 +253,18 @@ export async function createShipment(
         },
       })
 
-      // Create shipment items
+      // Create shipment items with PlannedShipmentID for cross-shipment fulfillment tracking
       await tx.shipmentItems.createMany({
-        data: input.items.map((item) => ({
-          ShipmentID: shipment.ID,
-          OrderItemID: BigInt(item.orderItemId),
-          QuantityShipped: item.quantityShipped,
-          PriceOverride: item.priceOverride ?? null,
-        })),
+        data: input.items.map((item) => {
+          const orderItem = orderItemMap.get(item.orderItemId)
+          return {
+            ShipmentID: shipment.ID,
+            OrderItemID: BigInt(item.orderItemId),
+            QuantityShipped: item.quantityShipped,
+            PriceOverride: item.priceOverride ?? null,
+            PlannedShipmentID: orderItem?.PlannedShipmentID ?? null,
+          }
+        }),
       })
 
       // Create tracking if provided
@@ -334,9 +339,26 @@ export async function createShipment(
       return shipment
     })
 
-    // Phase 6: Update PlannedShipment status
-    if (plannedShipmentBigInt) {
-      await updatePlannedShipmentStatus(plannedShipmentBigInt)
+    // Phase 6: Update ALL affected PlannedShipment statuses
+    // Get PlannedShipmentIDs from the fulfilled items
+    const fulfilledItemIds = input.items.map((i) => BigInt(i.orderItemId))
+    const affectedItems = await prisma.customerOrdersItems.findMany({
+      where: { ID: { in: fulfilledItemIds } },
+      select: { PlannedShipmentID: true },
+    })
+
+    // Get unique PlannedShipmentIDs (excluding null)
+    const affectedPlannedShipmentIds = [
+      ...new Set(
+        affectedItems
+          .map((i) => i.PlannedShipmentID)
+          .filter((id): id is bigint => id !== null)
+      ),
+    ]
+
+    // Update each affected PlannedShipment's status
+    for (const psId of affectedPlannedShipmentIds) {
+      await updatePlannedShipmentStatus(psId)
     }
 
     // Sync with Shopify if order is transferred and has Shopify order ID

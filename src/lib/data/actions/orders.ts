@@ -7,7 +7,9 @@ import { auth } from '@/lib/auth/providers'
 import type { OrderStatus, CreateOrderResult, UpdateOrderInput, UpdateOrderResult } from '@/lib/types/order'
 import { createOrderInputSchema, type CreateOrderInput, type PlannedShipmentData } from '@/lib/schemas/order'
 import { sendOrderEmails } from '@/lib/email/send-order-emails'
-import { validateShipDates, getATSDefaultDates } from '@/lib/validation/ship-window'
+import { validateShipDates, getMultiCollectionOverlap } from '@/lib/validation/ship-window'
+import { logShipmentDatesOverride } from '@/lib/audit/activity-logger'
+import { findShipmentIdForSku, deriveShipmentsFromItems } from '@/lib/utils/shipment-helpers'
 
 // ============================================================================
 // Auth Helpers
@@ -338,7 +340,7 @@ async function deriveIsPreOrderFromSkus(
  * Grouping: CollectionID → default
  * (No CategoryID fallback - Collection is the source of truth)
  */
-function getOrderGroupKey(
+function _getOrderGroupKey(
   item: {
     collectionId?: number | null
     skuVariantId: number | bigint
@@ -383,45 +385,8 @@ function getLegacyDatesFromShipments(
   }
 }
 
-/**
- * Find which planned shipment a SKU belongs to.
- */
-export function findShipmentIdForSku(
-  sku: string,
-  plannedShipments: PlannedShipmentData[] | undefined,
-  shipmentIdMap: Map<string, bigint>
-): bigint | null {
-  if (!plannedShipments?.length) return null
-  const shipment = plannedShipments.find((s) => s.itemSkus.includes(sku))
-  return shipment ? (shipmentIdMap.get(shipment.id) ?? null) : null
-}
-
-/**
- * Derive planned shipments when client doesn't send them.
- * Backward compatibility for old clients.
- */
-export function deriveShipmentsFromItems(
-  items: CreateOrderInput['items'],
-  formDates: { shipStartDate: string; shipEndDate: string }
-): PlannedShipmentData[] {
-  const atsDefaults = getATSDefaultDates()
-  const groups = new Map<string, typeof items>()
-
-  for (const item of items) {
-    const key = item.collectionId?.toString() ?? 'no-collection'
-    if (!groups.has(key)) groups.set(key, [])
-    groups.get(key)!.push(item)
-  }
-
-  return Array.from(groups.entries()).map(([, groupItems], index) => ({
-    id: `derived-${index}`,
-    collectionId: groupItems[0].collectionId ?? null,
-    collectionName: groupItems[0].collectionName ?? null,
-    itemSkus: groupItems.map((i) => i.sku),
-    plannedShipStart: groupItems[0].shipWindowStart ?? formDates.shipStartDate ?? atsDefaults.start,
-    plannedShipEnd: groupItems[0].shipWindowEnd ?? formDates.shipEndDate ?? atsDefaults.end,
-  }))
-}
+// Note: findShipmentIdForSku and deriveShipmentsFromItems moved to
+// @/lib/utils/shipment-helpers.ts to avoid "use server" async requirement
 
 /**
  * Create a new order from buyer cart submission.
@@ -470,41 +435,142 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
     // =========================================================================
     // Server-side validation: Batch fetch collections and validate dates
     // =========================================================================
-    const collectionIds = plannedShipments
-      .map((s) => s.collectionId)
-      .filter((id): id is number => id !== null)
+    // Get ALL collection IDs from items (handles combined shipments correctly)
+    // Combined shipments have collectionId: null, so we must get IDs from items
+    const allItemCollectionIds = [
+      ...new Set(
+        data.items
+          .map((i) => i.collectionId)
+          .filter((id): id is number => id !== null && id !== undefined)
+      ),
+    ]
 
-    const collections = collectionIds.length > 0
+    const collections = allItemCollectionIds.length > 0
       ? await prisma.collection.findMany({
-          where: { id: { in: collectionIds } },
+          where: { id: { in: allItemCollectionIds } },
           select: { id: true, name: true, shipWindowStart: true, shipWindowEnd: true },
         })
       : []
 
     const collectionMap = new Map(collections.map((c) => [c.id, c]))
 
+    // Track shipments where override was used (for audit logging)
+    const overriddenShipments: Array<{
+      id: string
+      collectionName: string
+      plannedStart: string
+      plannedEnd: string
+    }> = []
+
     // Validate each shipment's dates against collection window
+    // PR-3b: For combined/multi-collection shipments, validate against all items' collections
     for (const shipment of plannedShipments) {
-      if (shipment.collectionId) {
-        const collection = collectionMap.get(shipment.collectionId)
-        if (collection?.shipWindowStart && collection?.shipWindowEnd) {
-          const result = validateShipDates(
-            shipment.plannedShipStart,
-            shipment.plannedShipEnd,
-            [{
-              id: shipment.collectionId,
-              name: collection.name,
-              shipWindowStart: collection.shipWindowStart.toISOString(),
-              shipWindowEnd: collection.shipWindowEnd.toISOString(),
-            }]
-          )
-          if (!result.valid) {
-            return {
-              success: false,
-              error: `Invalid dates for ${collection.name}: ${result.errors[0]?.message}`,
-            }
+      // Get all items in this shipment
+      const shipmentItems = data.items.filter((item) =>
+        shipment.itemSkus.includes(item.sku)
+      )
+
+      // Get unique collection IDs from items (handles combined shipments)
+      const itemCollectionIds = [
+        ...new Set(
+          shipmentItems
+            .map((i) => i.collectionId)
+            .filter((id): id is number => id !== null && id !== undefined)
+        ),
+      ]
+
+      // If no collections (ATS items), skip validation
+      if (itemCollectionIds.length === 0) continue
+
+      // Check if ANY collection in this shipment lacks complete windows
+      const collectionsWithoutWindows = itemCollectionIds
+        .map((id) => collectionMap.get(id))
+        .filter((c) => c && (!c.shipWindowStart || !c.shipWindowEnd))
+
+      if (collectionsWithoutWindows.length > 0) {
+        const names = collectionsWithoutWindows.map((c) => c?.name).join(', ')
+        if (!shipment.allowOverride) {
+          return {
+            success: false,
+            error: `Cannot validate shipment: ${names} missing ship window dates. Contact admin to configure collection windows.`,
           }
         }
+        overriddenShipments.push({
+          id: shipment.id,
+          collectionName: names,
+          plannedStart: shipment.plannedShipStart,
+          plannedEnd: shipment.plannedShipEnd,
+        })
+        continue // Skip further validation for this shipment
+      }
+
+      // Get all relevant collections for validation
+      const shipmentCollections = itemCollectionIds
+        .map((id) => collectionMap.get(id))
+        .filter(
+          (c): c is NonNullable<typeof c> =>
+            c !== undefined && c.shipWindowStart !== null && c.shipWindowEnd !== null
+        )
+
+      if (shipmentCollections.length === 0) continue
+
+      // PR-3b: For multi-collection combined shipments, validate INTERSECTION exists
+      if (itemCollectionIds.length > 1 && shipmentCollections.length > 1) {
+        const intersection = getMultiCollectionOverlap(
+          shipmentCollections.map((c) => ({
+            id: c.id,
+            name: c.name ?? '',
+            shipWindowStart: c.shipWindowStart!.toISOString().slice(0, 10),
+            shipWindowEnd: c.shipWindowEnd!.toISOString().slice(0, 10),
+          }))
+        )
+
+        if (!intersection) {
+          // Collections don't overlap - this is an error
+          const collectionNames = shipmentCollections.map((c) => c.name).join(', ')
+          if (!shipment.allowOverride) {
+            return {
+              success: false,
+              error: `Cannot combine shipments from ${collectionNames}: ship windows do not overlap`,
+            }
+          }
+          // Track for audit if override allowed
+          overriddenShipments.push({
+            id: shipment.id,
+            collectionName: collectionNames,
+            plannedStart: shipment.plannedShipStart,
+            plannedEnd: shipment.plannedShipEnd,
+          })
+        }
+      }
+
+      const result = validateShipDates(
+        shipment.plannedShipStart,
+        shipment.plannedShipEnd,
+        shipmentCollections.map((c) => ({
+          id: c.id,
+          name: c.name,
+          shipWindowStart: c.shipWindowStart!.toISOString(),
+          shipWindowEnd: c.shipWindowEnd!.toISOString(),
+        }))
+      )
+
+      if (!result.valid) {
+        // Check if override is allowed
+        if (!shipment.allowOverride) {
+          const collectionNames = shipmentCollections.map((c) => c.name).join(', ')
+          return {
+            success: false,
+            error: `Invalid dates for ${collectionNames}: ${result.errors[0]?.message}`,
+          }
+        }
+        // Track for audit logging
+        overriddenShipments.push({
+          id: shipment.id,
+          collectionName: shipmentCollections.map((c) => c.name).join(' + ') ?? shipment.collectionName ?? 'Unknown',
+          plannedStart: shipment.plannedShipStart,
+          plannedEnd: shipment.plannedShipEnd,
+        })
       }
     }
 
@@ -595,6 +661,10 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
             PlannedShipStart: new Date(shipment.plannedShipStart),
             PlannedShipEnd: new Date(shipment.plannedShipEnd),
             Status: 'Planned',
+            IsCombined: shipment.isCombined ?? false,
+            OriginalShipmentIds: shipment.originalShipmentIds
+              ? JSON.stringify(shipment.originalShipmentIds)
+              : null,
           },
         })
         shipmentIdMap.set(shipment.id, created.ID)
@@ -732,23 +802,57 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
       })
     }
 
+    // Log any overridden shipments to audit trail
+    if (overriddenShipments.length > 0) {
+      const session = await auth()
+      const userName = session?.user?.name || session?.user?.loginId || 'Unknown'
+
+      // Deduplicate overridden shipments before logging (same shipment can hit multiple checks)
+      const uniqueOverrides = new Map<string, (typeof overriddenShipments)[0]>()
+      for (const override of overriddenShipments) {
+        uniqueOverrides.set(override.id, override)
+      }
+
+      for (const override of uniqueOverrides.values()) {
+        await logShipmentDatesOverride({
+          orderId: orderId.toString(),
+          orderNumber,
+          shipmentId: override.id,
+          collectionName: override.collectionName,
+          plannedStart: override.plannedStart,
+          plannedEnd: override.plannedEnd,
+          performedBy: userName,
+        })
+      }
+    }
+
     revalidatePath('/admin/orders')
 
-    // Return single order with backward-compatible orders[] array
+    // Build real shipment summaries from the created planned shipments
+    const shipmentSummaries = plannedShipments.map((ps) => {
+      // Calculate per-shipment amount from items
+      const shipmentItems = data.items.filter((item) => ps.itemSkus.includes(item.sku))
+      const shipmentAmount = shipmentItems.reduce(
+        (sum, item) => sum + item.price * item.quantity,
+        0
+      )
+      
+      return {
+        orderId: orderId.toString(),
+        orderNumber,
+        collectionName: ps.collectionName,
+        shipWindowStart: ps.plannedShipStart,
+        shipWindowEnd: ps.plannedShipEnd,
+        orderAmount: shipmentAmount,
+      }
+    })
+
     return {
       success: true,
       orderId: orderId.toString(),
       orderNumber,
       plannedShipmentCount: createdShipmentIds.length,
-      // Backward compat: single-item array for consumers expecting orders[]
-      orders: [{
-        orderId: orderId.toString(),
-        orderNumber,
-        collectionName: null, // Deprecated - multiple collections now
-        shipWindowStart: legacyDates.start.toISOString(),
-        shipWindowEnd: legacyDates.end.toISOString(),
-        orderAmount,
-      }],
+      orders: shipmentSummaries,
     }
   } catch (e) {
     console.error('createOrder error:', e)
@@ -816,6 +920,14 @@ export async function updateOrder(
       0
     )
 
+    // Track shipments where override was used (for audit logging after transaction)
+    const updateOverriddenShipments: Array<{
+      id: string
+      collectionName: string
+      plannedStart: string
+      plannedEnd: string
+    }> = []
+
     // Update order in transaction
     await prisma.$transaction(async (tx) => {
       // Look up rep by ID
@@ -861,37 +973,135 @@ export async function updateOrder(
 
         const collectionMap = new Map(collections.map((c) => [c.id, c]))
 
+        // PR-3b: For combined/multi-collection shipments, validate against all items' collections
+        // First, get all SKUs referenced in shipments and their collection info
+        const allShipmentSkus = input.plannedShipments.flatMap((s) => s.itemSkus)
+        const skuCollectionInfo = allShipmentSkus.length > 0
+          ? await tx.sku.findMany({
+              where: { SkuID: { in: allShipmentSkus } },
+              select: {
+                SkuID: true,
+                CollectionID: true,
+              },
+            })
+          : []
+        const skuToCollection = new Map(
+          skuCollectionInfo.map((s) => [s.SkuID, s.CollectionID])
+        )
+
         // Validate each shipment's dates against collection windows
         for (const shipment of input.plannedShipments) {
-          if (shipment.collectionId) {
-            const collection = collectionMap.get(shipment.collectionId)
-            if (collection) {
-              const result = validateShipDates(
-                shipment.plannedShipStart,
-                shipment.plannedShipEnd,
-                [
-                  {
-                    id: collection.id,
-                    name: collection.name ?? '',
-                    shipWindowStart:
-                      collection.shipWindowStart?.toISOString().slice(0, 10) ?? null,
-                    shipWindowEnd:
-                      collection.shipWindowEnd?.toISOString().slice(0, 10) ?? null,
-                  },
-                ]
+          // Get unique collection IDs from items in this shipment
+          const itemCollectionIds = [
+            ...new Set(
+              shipment.itemSkus
+                .map((sku) => skuToCollection.get(sku))
+                .filter((id): id is number => id !== null && id !== undefined)
+            ),
+          ]
+
+          // If no collections (ATS items), skip validation
+          if (itemCollectionIds.length === 0) continue
+
+          // Check if ANY collection in this shipment lacks complete windows
+          const collectionsWithoutWindows = itemCollectionIds
+            .map((id) => collectionMap.get(id))
+            .filter((c) => c && (!c.shipWindowStart || !c.shipWindowEnd))
+
+          if (collectionsWithoutWindows.length > 0) {
+            const names = collectionsWithoutWindows.map((c) => c?.name).join(', ')
+            if (!shipment.allowOverride) {
+              throw new Error(
+                `Cannot validate shipment: ${names} missing ship window dates. Contact admin to configure collection windows.`
               )
-              if (!result.valid) {
+            }
+            updateOverriddenShipments.push({
+              id: shipment.id,
+              collectionName: names,
+              plannedStart: shipment.plannedShipStart,
+              plannedEnd: shipment.plannedShipEnd,
+            })
+            continue // Skip further validation for this shipment
+          }
+
+          // Get all relevant collections for validation
+          const shipmentCollections = itemCollectionIds
+            .map((id) => collectionMap.get(id))
+            .filter(
+              (c): c is NonNullable<typeof c> =>
+                c !== undefined &&
+                c.shipWindowStart !== null &&
+                c.shipWindowEnd !== null
+            )
+
+          if (shipmentCollections.length === 0) continue
+
+          // PR-3b: For multi-collection combined shipments, validate INTERSECTION exists
+          if (itemCollectionIds.length > 1 && shipmentCollections.length > 1) {
+            const intersection = getMultiCollectionOverlap(
+              shipmentCollections.map((c) => ({
+                id: c.id,
+                name: c.name ?? '',
+                shipWindowStart: c.shipWindowStart!.toISOString().slice(0, 10),
+                shipWindowEnd: c.shipWindowEnd!.toISOString().slice(0, 10),
+              }))
+            )
+
+            if (!intersection) {
+              // Collections don't overlap - this is an error
+              const collectionNames = shipmentCollections.map((c) => c.name).join(', ')
+              if (!shipment.allowOverride) {
                 throw new Error(
-                  `Invalid ship dates for ${collection.name}: ${result.errors[0]?.message}`
+                  `Cannot combine shipments from ${collectionNames}: ship windows do not overlap`
                 )
               }
+              // Track for audit if override allowed
+              updateOverriddenShipments.push({
+                id: shipment.id,
+                collectionName: collectionNames,
+                plannedStart: shipment.plannedShipStart,
+                plannedEnd: shipment.plannedShipEnd,
+              })
             }
+          }
+
+          const result = validateShipDates(
+            shipment.plannedShipStart,
+            shipment.plannedShipEnd,
+            shipmentCollections.map((c) => ({
+              id: c.id,
+              name: c.name ?? '',
+              shipWindowStart: c.shipWindowStart!.toISOString().slice(0, 10),
+              shipWindowEnd: c.shipWindowEnd!.toISOString().slice(0, 10),
+            }))
+          )
+
+          if (!result.valid) {
+            // Check if override is allowed
+            if (!shipment.allowOverride) {
+              const collectionNames = shipmentCollections.map((c) => c.name).join(', ')
+              throw new Error(
+                `Invalid ship dates for ${collectionNames}: ${result.errors[0]?.message}`
+              )
+            }
+            // Track for audit logging
+            updateOverriddenShipments.push({
+              id: shipment.id,
+              collectionName:
+                shipmentCollections.map((c) => c.name).join(' + ') ??
+                shipment.collectionName ??
+                'Unknown',
+              plannedStart: shipment.plannedShipStart,
+              plannedEnd: shipment.plannedShipEnd,
+            })
           }
         }
 
         // 3. Create new shipments first (to get real IDs)
+        // Both 'new-*' and 'combined-*' prefixes indicate client-generated IDs
         for (const shipment of input.plannedShipments) {
-          if (shipment.id.startsWith('new-')) {
+          const isNewShipment = shipment.id.startsWith('new-') || shipment.id.startsWith('combined-')
+          if (isNewShipment) {
             const newShipment = await tx.plannedShipment.create({
               data: {
                 CustomerOrderID: BigInt(orderId),
@@ -900,6 +1110,10 @@ export async function updateOrder(
                 PlannedShipStart: new Date(shipment.plannedShipStart),
                 PlannedShipEnd: new Date(shipment.plannedShipEnd),
                 Status: 'Planned',
+                IsCombined: shipment.isCombined ?? false,
+                OriginalShipmentIds: shipment.originalShipmentIds
+                  ? JSON.stringify(shipment.originalShipmentIds)
+                  : null,
               },
             })
             shipmentIdMap.set(shipment.id, newShipment.ID)
@@ -1035,6 +1249,30 @@ export async function updateOrder(
       console.error('Failed to send order update emails:', err)
     })
 
+    // Log any overridden shipments to audit trail
+    if (updateOverriddenShipments.length > 0) {
+      const session = await auth()
+      const userName = session?.user?.name || session?.user?.loginId || 'Unknown'
+
+      // Deduplicate overridden shipments before logging (same shipment can hit multiple checks)
+      const uniqueOverrides = new Map<string, (typeof updateOverriddenShipments)[0]>()
+      for (const override of updateOverriddenShipments) {
+        uniqueOverrides.set(override.id, override)
+      }
+
+      for (const override of uniqueOverrides.values()) {
+        await logShipmentDatesOverride({
+          orderId: orderId,
+          orderNumber: existingOrder.OrderNumber,
+          shipmentId: override.id,
+          collectionName: override.collectionName,
+          plannedStart: override.plannedStart,
+          plannedEnd: override.plannedEnd,
+          performedBy: userName,
+        })
+      }
+    }
+
     return {
       success: true,
       orderNumber: existingOrder.OrderNumber,
@@ -1163,7 +1401,7 @@ export async function updateOrderCurrency(input: {
  * - Generates new order number (A or P prefix based on isATS)
  */
 export async function duplicateOrder(
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+   
   _input: { orderId: string }
 ): Promise<{ success: boolean; newOrderId?: string; error?: string }> {
   return { 

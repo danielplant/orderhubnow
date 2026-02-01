@@ -83,6 +83,10 @@ export interface AdminOrderRow {
   syncError: string | null;         // Error message if Shopify sync failed
   // Phase 5: Planned shipments count for orders with multiple ship windows
   plannedShipmentCount: number;
+  // First planned shipment date for timeline display
+  firstShipmentDate: string | null;
+  // Aggregate fulfillment status across planned shipments (null if no shipments)
+  shipmentFulfillmentStatus: 'Planned' | 'PartiallyFulfilled' | 'Fulfilled' | 'Mixed' | null;
 }
 
 /**
@@ -188,6 +192,10 @@ export interface UpdateOrderInput {
     plannedShipStart: string  // ISO date (YYYY-MM-DD)
     plannedShipEnd: string
     itemSkus: string[]  // SKUs belonging to this shipment
+    allowOverride?: boolean  // PR-3a: Allow submission despite date validation errors
+    // PR-3b: Combined shipment tracking
+    isCombined?: boolean
+    originalShipmentIds?: string[]
   }>
 }
 

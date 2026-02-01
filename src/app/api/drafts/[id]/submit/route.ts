@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { sendOrderEmails } from '@/lib/email/send-order-emails'
-import { deriveShipmentsFromItems, findShipmentIdForSku } from '@/lib/data/actions/orders'
+import { deriveShipmentsFromItems, findShipmentIdForSku } from '@/lib/utils/shipment-helpers'
 import { validateShipDates } from '@/lib/validation/ship-window'
 
 interface RouteParams {
@@ -48,7 +48,7 @@ async function getNextOrderNumber(isPreOrder: boolean): Promise<string> {
  * Derive order type (ATS vs Pre-Order) from SKU data.
  * Master source: Collection.type
  */
-async function deriveIsPreOrderFromSkus(
+async function _deriveIsPreOrderFromSkus(
   skuVariantIds: bigint[]
 ): Promise<Map<string, boolean>> {
   if (skuVariantIds.length === 0) {
@@ -145,7 +145,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const missing = required.filter(f => !formData[f])
     if (missing.length > 0) {
       return NextResponse.json(
-        { error: `Missing required fields: ${missing.join(', ')}` },
+        {
+          error: 'Please complete all required fields before submitting',
+          missingFields: missing,
+          message: `Missing: ${missing.join(', ')}. Please fill out the order form completely.`,
+        },
         { status: 400 }
       )
     }
@@ -163,13 +167,14 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     // NOTE: Order type will be derived from SKU data below, not preOrderMeta
 
-    // Look up rep name and email
+    // Look up rep name, code, and email
     const rep = await prisma.reps.findUnique({
       where: { ID: parseInt(formData.salesRepId) },
-      select: { Name: true, Email1: true, Email2: true },
+      select: { Name: true, Code: true, Email1: true, Email2: true },
     })
     const salesRepName = rep?.Name || 'Unknown Rep'
-    const salesRepEmail = rep?.Email1 || rep?.Email2 || undefined
+    const salesRepCode = rep?.Code || null
+    const _salesRepEmail = rep?.Email1 || rep?.Email2 || undefined
 
     // Gap 3 Fix: Customer lookup (upsert happens inside transaction for parity with createOrder)
     let customerId: number | null = null
@@ -250,7 +255,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const plannedShipments = deriveShipmentsFromItems(
       items.map(i => ({
         sku: i.sku,
-        skuVariantId: String(i.skuVariantId),
+        skuVariantId: i.skuVariantId,
         quantity: i.quantity,
         price: i.price,
         collectionId: i.collectionId,
@@ -317,9 +322,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const shipEnd = allEnds.length ? new Date(Math.max(...allEnds.map(d => d.getTime()))) : new Date(formData.shipEndDate)
 
     const currency = formData.currency || 'CAD'
-    let createdOrder: { ID: bigint; OrderNumber: string } | null = null
 
-    await prisma.$transaction(async (tx) => {
+    const createdOrder = await prisma.$transaction(async (tx) => {
       // Delete the draft first
       await tx.customerOrdersItems.deleteMany({
         where: { CustomerOrderID: draft.ID },
@@ -353,7 +357,6 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           CustomerID: customerId,
         },
       })
-      createdOrder = { ID: newOrder.ID, OrderNumber: orderNumber }
 
       // Create planned shipments
       const shipmentIdMap = new Map<string, bigint>()
@@ -413,13 +416,13 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
             Street2: formData.street2 ?? '',
             City: formData.city ?? '',
             StateProvince: formData.stateProvince ?? '',
-            PostalCode: formData.zipPostal ?? '',
+            ZipPostal: formData.zipPostal ?? '',
             Country: formData.country ?? 'USA',
             ShippingStreet1: formData.shippingStreet1 ?? formData.street1 ?? '',
             ShippingStreet2: formData.shippingStreet2 ?? formData.street2 ?? '',
             ShippingCity: formData.shippingCity ?? formData.city ?? '',
             ShippingStateProvince: formData.shippingStateProvince ?? formData.stateProvince ?? '',
-            ShippingPostalCode: formData.shippingZipPostal ?? formData.zipPostal ?? '',
+            ShippingZipPostal: formData.shippingZipPostal ?? formData.zipPostal ?? '',
             ShippingCountry: formData.shippingCountry ?? formData.country ?? 'USA',
             Website: formData.website ?? '',
             LastOrderDate: new Date(),
@@ -439,13 +442,13 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
             Street2: formData.street2 ?? '',
             City: formData.city ?? '',
             StateProvince: formData.stateProvince ?? '',
-            PostalCode: formData.zipPostal ?? '',
+            ZipPostal: formData.zipPostal ?? '',
             Country: formData.country ?? 'USA',
             ShippingStreet1: formData.shippingStreet1 ?? formData.street1 ?? '',
             ShippingStreet2: formData.shippingStreet2 ?? formData.street2 ?? '',
             ShippingCity: formData.shippingCity ?? formData.city ?? '',
             ShippingStateProvince: formData.shippingStateProvince ?? formData.stateProvince ?? '',
-            ShippingPostalCode: formData.shippingZipPostal ?? formData.zipPostal ?? '',
+            ShippingZipPostal: formData.shippingZipPostal ?? formData.zipPostal ?? '',
             ShippingCountry: formData.shippingCountry ?? formData.country ?? 'USA',
             Website: formData.website ?? '',
             FirstOrderDate: new Date(),
@@ -461,11 +464,10 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           data: { CustomerID: newCustomer.ID },
         })
       }
-    })
 
-    if (!createdOrder) {
-      return NextResponse.json({ error: 'Failed to create order' }, { status: 500 })
-    }
+      // Return created order info from transaction
+      return { ID: newOrder.ID, OrderNumber: orderNumber }
+    })
 
     // Send confirmation email for the single order
     void sendOrderEmails({

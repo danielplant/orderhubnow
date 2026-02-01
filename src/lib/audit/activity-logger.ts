@@ -41,6 +41,8 @@ export type ActivityAction =
   // Phase 8: Collection date change actions
   | 'collection_window_changed'
   | 'shipment_dates_changed'
+  // Override actions
+  | 'shipment_dates_override'
 
 export interface LogActivityParams {
   entityType: EntityType
@@ -243,6 +245,7 @@ function formatDescription(params: LogActivityParams): string {
     customer_updated: 'Customer updated',
     collection_window_changed: 'Collection window changed',
     shipment_dates_changed: 'Shipment dates changed',
+    shipment_dates_override: 'Shipment dates override',
   }
 
   return actionLabels[params.action] || params.action
@@ -351,6 +354,35 @@ export async function logItemMoved(params: {
       fromShipmentId: params.fromShipmentId,
       toShipmentId: params.toShipmentId,
       wasOverride: params.wasOverride,
+    },
+    performedBy: params.performedBy,
+    orderNumber: params.orderNumber,
+    orderId: params.orderId,
+  })
+}
+
+/**
+ * Log shipment dates override - when rep overrides invalid ship dates
+ */
+export async function logShipmentDatesOverride(params: {
+  orderId: string
+  orderNumber: string
+  shipmentId: string
+  collectionName: string | null
+  plannedStart: string
+  plannedEnd: string
+  performedBy: string
+}): Promise<void> {
+  await logActivity({
+    entityType: 'order',
+    entityId: params.orderId,
+    action: 'shipment_dates_override',
+    description: `Overrode ship dates for ${params.collectionName ?? 'shipment'}: ${params.plannedStart} to ${params.plannedEnd}`,
+    newValues: {
+      shipmentId: params.shipmentId,
+      collectionName: params.collectionName,
+      plannedStart: params.plannedStart,
+      plannedEnd: params.plannedEnd,
     },
     performedBy: params.performedBy,
     orderNumber: params.orderNumber,

@@ -124,20 +124,104 @@ export default function ImagesPage() {
   const [isGenerating, setIsGenerating] = useState(false)
   const [generationStatus, setGenerationStatus] = useState<GenerationStatus | null>(null)
 
+  // Export Policy state
+  const [exportPolicy, setExportPolicy] = useState<{
+    thumbnailSize: number
+    excelDisplayPx: number
+    pdfDisplayPx: number
+    requireS3: boolean
+    allowShopifyFallback: boolean
+    imageConcurrency: number
+  } | null>(null)
+  const [editingExportPolicy, setEditingExportPolicy] = useState(false)
+  const [exportPolicyForm, setExportPolicyForm] = useState<{
+    thumbnailSize: string
+    excelDisplayPx: string
+    pdfDisplayPx: string
+    requireS3: boolean
+    allowShopifyFallback: boolean
+    imageConcurrency: string
+  }>({
+    thumbnailSize: '120',
+    excelDisplayPx: '96',
+    pdfDisplayPx: '60',
+    requireS3: true,
+    allowShopifyFallback: true,
+    imageConcurrency: '10',
+  })
+  const [savingExportPolicy, setSavingExportPolicy] = useState(false)
+
   // General UI state
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
 
-  // Fetch all data on mount
+  // Fetch all data on mount, including coverage analysis
   useEffect(() => {
     Promise.all([
       fetchDisplayConfigs(),
       fetchThumbnailSizes(),
       fetchThumbnailStatus(),
-    ]).finally(() => setLoading(false))
+      fetchExportPolicy(),
+    ]).then(() => {
+      // Auto-analyze coverage after loading configs
+      analyzeThumbnails()
+    }).finally(() => setLoading(false))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  async function fetchExportPolicy() {
+    try {
+      const res = await fetch('/api/admin/shopify/settings/export-policy')
+      if (!res.ok) throw new Error('Failed to fetch export policy')
+      const data = await res.json()
+      if (data.policy) {
+        setExportPolicy(data.policy)
+        setExportPolicyForm({
+          thumbnailSize: String(data.policy.thumbnailSize),
+          excelDisplayPx: String(data.policy.excelDisplayPx),
+          pdfDisplayPx: String(data.policy.pdfDisplayPx),
+          requireS3: data.policy.requireS3,
+          allowShopifyFallback: data.policy.allowShopifyFallback,
+          imageConcurrency: String(data.policy.imageConcurrency),
+        })
+      }
+    } catch (err) {
+      console.error('Failed to fetch export policy:', err)
+    }
+  }
+
+  async function saveExportPolicy() {
+    setSavingExportPolicy(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/admin/shopify/settings/export-policy', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          thumbnailSize: parseInt(exportPolicyForm.thumbnailSize, 10),
+          excelDisplayPx: parseInt(exportPolicyForm.excelDisplayPx, 10),
+          pdfDisplayPx: parseInt(exportPolicyForm.pdfDisplayPx, 10),
+          requireS3: exportPolicyForm.requireS3,
+          allowShopifyFallback: exportPolicyForm.allowShopifyFallback,
+          imageConcurrency: parseInt(exportPolicyForm.imageConcurrency, 10),
+        }),
+      })
+      if (!res.ok) {
+        const data = await res.json()
+        throw new Error(data.error || 'Failed to save export policy')
+      }
+      const data = await res.json()
+      setExportPolicy(data.policy)
+      setEditingExportPolicy(false)
+      setSuccess('Export policy saved successfully')
+      setTimeout(() => setSuccess(null), 3000)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save export policy')
+    } finally {
+      setSavingExportPolicy(false)
+    }
+  }
 
   // Poll for generation status when generating
   useEffect(() => {
@@ -391,6 +475,23 @@ export default function ImagesPage() {
 
   const inProgress = generationStatus?.inProgress || isGenerating
 
+  // Calculate overall coverage summary for required sizes
+  const requiredStats = sizeStats.filter(s => requiredPixelSizes.includes(s.pixelSize))
+  const totalRequired = requiredStats.reduce((sum, s) => sum + s.total, 0)
+  const totalCached = requiredStats.reduce((sum, s) => sum + s.cached, 0)
+  const totalMissing = requiredStats.reduce((sum, s) => sum + s.needed, 0)
+  const overallCoveragePercent = totalRequired > 0 ? Math.round((totalCached / totalRequired) * 100) : 0
+  const isFullCoverage = totalMissing === 0 && totalRequired > 0
+
+  // Calculate export-specific coverage (based on export policy thumbnail size)
+  const exportSize = exportPolicy?.thumbnailSize ?? 120
+  const exportSizeStats = sizeStats.find(s => s.pixelSize === exportSize)
+  const exportCached = exportSizeStats?.cached ?? 0
+  const exportMissing = exportSizeStats?.needed ?? 0
+  const exportTotal = exportSizeStats?.total ?? 0
+  const exportCoveragePercent = exportTotal > 0 ? Math.round((exportCached / exportTotal) * 100) : 100
+  const isExportReady = exportMissing === 0 || !exportPolicy?.requireS3
+
   return (
     <main className="p-6 max-w-7xl">
       <div className="mb-6">
@@ -403,17 +504,248 @@ export default function ImagesPage() {
         </p>
       </div>
 
+      {/* Export Coverage Summary Banner */}
+      {sizeStats.length > 0 && !isAnalyzing && (
+        <div className={`mb-6 p-4 rounded-lg border ${
+          isExportReady
+            ? 'border-emerald-200 bg-emerald-50 dark:bg-emerald-900/20 dark:border-emerald-800'
+            : 'border-amber-200 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-800'
+        }`}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              {isExportReady ? (
+                <CheckCircle className="h-6 w-6 text-emerald-500" />
+              ) : (
+                <BarChart3 className="h-6 w-6 text-amber-500" />
+              )}
+              <div>
+                <h3 className={`font-semibold ${isExportReady ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-700 dark:text-amber-300'}`}>
+                  {isExportReady ? 'Exports Ready' : 'Exports Blocked'}
+                </h3>
+                <p className={`text-sm ${isExportReady ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>
+                  {isExportReady
+                    ? `All ${exportCached.toLocaleString()} thumbnails at ${exportSize}px are cached — XLSX/PDF exports will proceed`
+                    : `${exportMissing.toLocaleString()} thumbnails missing at ${exportSize}px — exports will be blocked until generated`
+                  }
+                </p>
+                {exportPolicy?.requireS3 && !isExportReady && (
+                  <p className="text-xs text-amber-500 mt-1">
+                    Coverage gate is active: exports require 100% S3 coverage
+                  </p>
+                )}
+                {!exportPolicy?.requireS3 && exportMissing > 0 && (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Coverage gate is disabled: exports will fallback to Shopify CDN for missing images
+                  </p>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center gap-4">
+              <div className="text-right">
+                <div className={`text-2xl font-bold ${isExportReady ? 'text-emerald-600' : 'text-amber-600'}`}>
+                  {exportCoveragePercent}%
+                </div>
+                <div className="text-xs text-muted-foreground">{exportSize}px Coverage</div>
+              </div>
+              {!isExportReady && (
+                <button
+                  onClick={() => {
+                    // Select export size and scroll to generation section
+                    setSelectedSizes(new Set([exportSize]))
+                    document.getElementById('thumbnail-generation')?.scrollIntoView({ behavior: 'smooth' })
+                  }}
+                  className="px-3 py-1.5 text-sm font-medium rounded-lg bg-amber-600 text-white hover:bg-amber-700"
+                >
+                  Generate Missing
+                </button>
+              )}
+            </div>
+          </div>
+          {/* Overall coverage info (secondary) */}
+          {!isFullCoverage && exportMissing === 0 && (
+            <div className="mt-3 pt-3 border-t border-amber-200 dark:border-amber-700 text-sm text-muted-foreground">
+              Note: {totalMissing.toLocaleString()} thumbnails missing for other sizes ({overallCoveragePercent}% overall coverage)
+            </div>
+          )}
+        </div>
+      )}
+
       {error && (
-        <div className="mb-6 p-4 rounded-lg border border-red-200 bg-red-50 text-red-700">
+        <div className="mb-6 p-4 rounded-lg border border-red-200 bg-red-50 text-red-700 dark:bg-red-900/20 dark:border-red-800 dark:text-red-300">
           {error}
         </div>
       )}
 
       {success && (
-        <div className="mb-6 p-4 rounded-lg border border-green-200 bg-green-50 text-green-700">
+        <div className="mb-6 p-4 rounded-lg border border-green-200 bg-green-50 text-green-700 dark:bg-green-900/20 dark:border-green-800 dark:text-green-300">
           {success}
         </div>
       )}
+
+      {/* Export Policy Section */}
+      <div className="rounded-lg border border-border bg-card mb-6">
+        <div className="p-4 border-b border-border flex items-center justify-between">
+          <div>
+            <h2 className="font-semibold">Export Policy</h2>
+            <p className="text-sm text-muted-foreground mt-1">
+              Configure how XLSX and PDF exports fetch and display product images
+            </p>
+          </div>
+          {!editingExportPolicy && (
+            <button
+              onClick={() => setEditingExportPolicy(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border border-border hover:bg-muted"
+            >
+              <Edit2 className="h-3.5 w-3.5" />
+              Edit
+            </button>
+          )}
+        </div>
+        <div className="p-4">
+          {exportPolicy ? (
+            editingExportPolicy ? (
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-1">Thumbnail Size (px)</label>
+                  <select
+                    value={exportPolicyForm.thumbnailSize}
+                    onChange={(e) => setExportPolicyForm(f => ({ ...f, thumbnailSize: e.target.value }))}
+                    className="w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
+                  >
+                    {thumbnailSizes.filter(s => s.enabled).map(size => (
+                      <option key={size.pixelSize} value={size.pixelSize}>{size.pixelSize}px</option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-muted-foreground mt-1">S3 thumbnail size for exports</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Excel Display (px)</label>
+                  <input
+                    type="number"
+                    min="32"
+                    max="256"
+                    value={exportPolicyForm.excelDisplayPx}
+                    onChange={(e) => setExportPolicyForm(f => ({ ...f, excelDisplayPx: e.target.value }))}
+                    className="w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">Image width in XLSX</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">PDF Display (px)</label>
+                  <input
+                    type="number"
+                    min="32"
+                    max="256"
+                    value={exportPolicyForm.pdfDisplayPx}
+                    onChange={(e) => setExportPolicyForm(f => ({ ...f, pdfDisplayPx: e.target.value }))}
+                    className="w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">Image width in PDF</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Concurrency</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="50"
+                    value={exportPolicyForm.imageConcurrency}
+                    onChange={(e) => setExportPolicyForm(f => ({ ...f, imageConcurrency: e.target.value }))}
+                    className="w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">Max parallel fetches</p>
+                </div>
+                <div className="flex flex-col gap-2">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={exportPolicyForm.requireS3}
+                      onChange={(e) => setExportPolicyForm(f => ({ ...f, requireS3: e.target.checked }))}
+                      className="rounded"
+                    />
+                    <span className="text-sm">Require S3 Cache</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={exportPolicyForm.allowShopifyFallback}
+                      onChange={(e) => setExportPolicyForm(f => ({ ...f, allowShopifyFallback: e.target.checked }))}
+                      className="rounded"
+                    />
+                    <span className="text-sm">Allow Shopify Fallback</span>
+                  </label>
+                </div>
+                <div className="flex items-end gap-2">
+                  <button
+                    onClick={saveExportPolicy}
+                    disabled={savingExportPolicy}
+                    className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                  >
+                    <Save className="h-3.5 w-3.5" />
+                    {savingExportPolicy ? 'Saving...' : 'Save'}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setEditingExportPolicy(false)
+                      if (exportPolicy) {
+                        setExportPolicyForm({
+                          thumbnailSize: String(exportPolicy.thumbnailSize),
+                          excelDisplayPx: String(exportPolicy.excelDisplayPx),
+                          pdfDisplayPx: String(exportPolicy.pdfDisplayPx),
+                          requireS3: exportPolicy.requireS3,
+                          allowShopifyFallback: exportPolicy.allowShopifyFallback,
+                          imageConcurrency: String(exportPolicy.imageConcurrency),
+                        })
+                      }
+                    }}
+                    className="px-3 py-2 text-sm font-medium rounded-lg border border-border hover:bg-muted"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+                <div>
+                  <div className="text-2xl font-bold">{exportPolicy.thumbnailSize}px</div>
+                  <div className="text-sm text-muted-foreground">S3 Thumbnail Size</div>
+                </div>
+                <div>
+                  <div className="text-2xl font-bold">{exportPolicy.excelDisplayPx}px</div>
+                  <div className="text-sm text-muted-foreground">Excel Display</div>
+                </div>
+                <div>
+                  <div className="text-2xl font-bold">{exportPolicy.pdfDisplayPx}px</div>
+                  <div className="text-sm text-muted-foreground">PDF Display</div>
+                </div>
+                <div>
+                  <div className="text-2xl font-bold">{exportPolicy.imageConcurrency}</div>
+                  <div className="text-sm text-muted-foreground">Concurrency</div>
+                </div>
+                <div className="col-span-2 md:col-span-4 flex gap-4 pt-2 border-t border-border">
+                  <div className="flex items-center gap-2">
+                    {exportPolicy.requireS3 ? (
+                      <CheckCircle className="h-4 w-4 text-emerald-500" />
+                    ) : (
+                      <XCircle className="h-4 w-4 text-muted-foreground" />
+                    )}
+                    <span className="text-sm">Require S3 Cache</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {exportPolicy.allowShopifyFallback ? (
+                      <CheckCircle className="h-4 w-4 text-emerald-500" />
+                    ) : (
+                      <XCircle className="h-4 w-4 text-muted-foreground" />
+                    )}
+                    <span className="text-sm">Allow Shopify Fallback</span>
+                  </div>
+                </div>
+              </div>
+            )
+          ) : (
+            <div className="text-sm text-muted-foreground">Loading export policy...</div>
+          )}
+        </div>
+      </div>
 
       {/* Section 1: Display Locations Matrix */}
       <div className="rounded-lg border border-border bg-card mb-6">
@@ -823,7 +1155,7 @@ export default function ImagesPage() {
       </div>
 
       {/* Section 3: Thumbnail Generation */}
-      <div className="rounded-lg border border-border bg-card p-6 mb-6">
+      <div id="thumbnail-generation" className="rounded-lg border border-border bg-card p-6 mb-6">
         <h2 className="font-semibold mb-4">S3 Thumbnail Cache Status</h2>
         <p className="text-sm text-muted-foreground mb-4">
           Pre-generate optimized thumbnails for faster loading. Required sizes based on enabled display locations: <strong>{requiredPixelSizes.join('px, ')}px</strong>

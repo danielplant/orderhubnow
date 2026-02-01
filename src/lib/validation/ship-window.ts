@@ -30,10 +30,12 @@ export interface ValidationResult {
 
 /**
  * Parse ISO date string safely (avoids timezone issues).
- * Interprets the date as local midnight.
+ * Strips any time component and creates UTC midnight for consistent comparison.
  */
 export function parseDate(isoDateString: string): Date {
-  return new Date(isoDateString + 'T00:00:00')
+  // Strip any time component and create UTC midnight
+  const dateOnly = isoDateString.split('T')[0]
+  return new Date(dateOnly + 'T00:00:00Z')
 }
 
 /**
@@ -44,17 +46,27 @@ export function formatDate(date: Date): string {
 }
 
 /**
+ * Format a date using local date components (avoids timezone shift).
+ */
+function formatLocalDate(date: Date): string {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+/**
  * Get default ship dates for ATS orders.
  * ATS orders have no collection constraints - default is today + 14 days.
+ * Uses local date components to avoid timezone shift for UTC+ users.
  */
 export function getATSDefaultDates(): { start: string; end: string } {
   const today = new Date()
-  today.setHours(0, 0, 0, 0)
   const twoWeeksOut = new Date(today)
-  twoWeeksOut.setDate(twoWeeksOut.getDate() + 14)
+  twoWeeksOut.setDate(today.getDate() + 14)
   return {
-    start: formatDate(today),
-    end: formatDate(twoWeeksOut),
+    start: formatLocalDate(today),
+    end: formatLocalDate(twoWeeksOut),
   }
 }
 
@@ -145,39 +157,55 @@ export function getMinimumAllowedDates(collections: CollectionWindow[]): {
     return { minStart: null, minEnd: null }
   }
 
-  // Find the latest (most restrictive) dates
-  const latestStart = starts.length > 0 ? starts.reduce((a, b) => (a > b ? a : b)) : null
+  // Find the latest (most restrictive) dates using parseDate for consistent comparison
+  const latestStart = starts.length > 0
+    ? starts.reduce((a, b) => (parseDate(a) > parseDate(b) ? a : b))
+    : null
 
-  const latestEnd = ends.length > 0 ? ends.reduce((a, b) => (a > b ? a : b)) : null
+  const latestEnd = ends.length > 0
+    ? ends.reduce((a, b) => (parseDate(a) > parseDate(b) ? a : b))
+    : null
 
   return { minStart: latestStart, minEnd: latestEnd }
 }
 
 /**
  * Check if two collection windows overlap.
+ * Uses parseDate for consistent Date comparison.
  */
 export function windowsOverlap(a: CollectionWindow, b: CollectionWindow): boolean {
   if (!a.shipWindowStart || !a.shipWindowEnd || !b.shipWindowStart || !b.shipWindowEnd) {
     return false
   }
+  const aStart = parseDate(a.shipWindowStart)
+  const aEnd = parseDate(a.shipWindowEnd)
+  const bStart = parseDate(b.shipWindowStart)
+  const bEnd = parseDate(b.shipWindowEnd)
   // Overlap exists if: A starts before B ends AND A ends after B starts
-  return a.shipWindowStart <= b.shipWindowEnd && a.shipWindowEnd >= b.shipWindowStart
+  return aStart <= bEnd && aEnd >= bStart
 }
 
 /**
  * Get intersection of two overlapping windows.
  * Returns null if no overlap.
+ * Uses parseDate for consistent Date comparison.
  */
 export function getOverlapWindow(
   a: CollectionWindow,
   b: CollectionWindow
 ): { start: string; end: string } | null {
   if (!windowsOverlap(a, b)) return null
+
+  const aStart = parseDate(a.shipWindowStart!)
+  const aEnd = parseDate(a.shipWindowEnd!)
+  const bStart = parseDate(b.shipWindowStart!)
+  const bEnd = parseDate(b.shipWindowEnd!)
+
   return {
     // Latest start
-    start: a.shipWindowStart! > b.shipWindowStart! ? a.shipWindowStart! : b.shipWindowStart!,
+    start: aStart > bStart ? a.shipWindowStart! : b.shipWindowStart!,
     // Earliest end
-    end: a.shipWindowEnd! < b.shipWindowEnd! ? a.shipWindowEnd! : b.shipWindowEnd!,
+    end: aEnd < bEnd ? a.shipWindowEnd! : b.shipWindowEnd!,
   }
 }
 
@@ -205,15 +233,21 @@ export function getMultiCollectionOverlap(
     const c = collections[i]
     if (!c.shipWindowStart || !c.shipWindowEnd) return null
 
+    // Use parseDate for consistent date comparison
+    const resultStart = parseDate(result.start)
+    const resultEnd = parseDate(result.end)
+    const collStart = parseDate(c.shipWindowStart)
+    const collEnd = parseDate(c.shipWindowEnd)
+
     // Check if current result overlaps with next collection
-    if (result.start > c.shipWindowEnd || result.end < c.shipWindowStart) {
+    if (resultStart > collEnd || resultEnd < collStart) {
       return null // No overlap
     }
 
-    // Narrow the window
+    // Narrow the window (keep string format for return value)
     result = {
-      start: result.start > c.shipWindowStart ? result.start : c.shipWindowStart,
-      end: result.end < c.shipWindowEnd ? result.end : c.shipWindowEnd,
+      start: resultStart > collStart ? result.start : c.shipWindowStart,
+      end: resultEnd < collEnd ? result.end : c.shipWindowEnd,
     }
   }
 

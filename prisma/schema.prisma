@@ -833,16 +833,19 @@ model Shipments {
 
 /// Line items included in a shipment - links to order items with quantity shipped
 model ShipmentItems {
-  ID              BigInt              @id(map: "PK_ShipmentItems") @default(autoincrement())
-  ShipmentID      BigInt
-  OrderItemID     BigInt
-  QuantityShipped Int
-  PriceOverride   Float?
-  Shipment        Shipments           @relation(fields: [ShipmentID], references: [ID], onUpdate: NoAction, map: "FK_ShipmentItems_Shipments")
-  OrderItem       CustomerOrdersItems @relation(fields: [OrderItemID], references: [ID], onUpdate: NoAction, map: "FK_ShipmentItems_CustomerOrdersItems")
+  ID                BigInt              @id(map: "PK_ShipmentItems") @default(autoincrement())
+  ShipmentID        BigInt
+  OrderItemID       BigInt
+  QuantityShipped   Int
+  PriceOverride     Float?
+  PlannedShipmentID BigInt?             // Direct link to planned shipment for cross-shipment fulfillment tracking
+  Shipment          Shipments           @relation(fields: [ShipmentID], references: [ID], onUpdate: NoAction, map: "FK_ShipmentItems_Shipments")
+  OrderItem         CustomerOrdersItems @relation(fields: [OrderItemID], references: [ID], onUpdate: NoAction, map: "FK_ShipmentItems_CustomerOrdersItems")
+  PlannedShipment   PlannedShipment?    @relation(fields: [PlannedShipmentID], references: [ID], onUpdate: NoAction, map: "FK_ShipmentItems_PlannedShipment")
 
   @@index([ShipmentID], map: "IX_ShipmentItems_ShipmentID")
   @@index([OrderItemID], map: "IX_ShipmentItems_OrderItemID")
+  @@index([PlannedShipmentID], map: "IX_ShipmentItems_PlannedShipmentID")
 }
 
 /// Tracking numbers for shipments - supports multiple tracking numbers per shipment
@@ -1365,6 +1368,15 @@ model SyncSettings {
   introspectRecordSampleSize  Int      @default(250) @map("IntrospectRecordSampleSize")
   introspectMetafieldLimit    Int      @default(100) @map("IntrospectMetafieldLimit")
 
+  // Export Policy Configuration
+  // Controls how XLSX/PDF exports fetch and display product images
+  exportThumbnailSize         Int      @default(120) @map("ExportThumbnailSize")
+  exportExcelDisplayPx        Int      @default(96) @map("ExportExcelDisplayPx")
+  exportPdfDisplayPx          Int      @default(60) @map("ExportPdfDisplayPx")
+  exportRequireS3             Boolean  @default(true) @map("ExportRequireS3")
+  exportAllowShopifyFallback  Boolean  @default(true) @map("ExportAllowShopifyFallback")
+  exportImageConcurrency      Int      @default(10) @map("ExportImageConcurrency")
+
   updatedAt                 DateTime @default(now()) @updatedAt @map("UpdatedAt")
 
   // Relation to history
@@ -1407,6 +1419,61 @@ model ThumbnailGenerationRun {
 
   @@index([status, startedAt], map: "IX_ThumbnailGenerationRun_Status_StartedAt")
   @@map("ThumbnailGenerationRun")
+}
+
+// ============================================================================
+// Export Job Tracking (Phase 3: Durable Background Jobs)
+// ============================================================================
+// Tracks async export operations for XLSX and PDF generation.
+// Jobs are queued via BullMQ and processed by background workers.
+// Completed exports are stored in S3 with signed URL downloads.
+// ============================================================================
+
+/// Export job tracking for durable XLSX/PDF generation
+/// Follows same patterns as SyncRun and ThumbnailGenerationRun
+model ExportJob {
+  id                String    @id @default(uuid()) @map("id")
+  
+  // Job identity
+  type              String    @db.NVarChar(20) @map("type")                   // xlsx | pdf
+  triggeredBy       String    @db.NVarChar(100) @map("triggeredBy")           // userId or system
+  triggeredByRole   String    @db.NVarChar(20) @map("triggeredByRole")        // admin | rep
+  
+  // Input parameters (stored as JSON for flexibility)
+  filters           String    @db.NVarChar(Max) @map("filters")               // JSON: { collections, currency, q, orientation }
+  
+  // Status tracking
+  status            String    @db.NVarChar(20) @default("pending") @map("status")  // pending | processing | completed | failed | cancelled | expired
+  currentStep       String?   @db.NVarChar(50) @map("currentStep")            // querying | fetching_images | generating | uploading
+  currentStepDetail String?   @db.NVarChar(500) @map("currentStepDetail")     // Human-readable detail
+  progressPercent   Int?      @map("progressPercent")                          // 0-100
+  
+  // Timing
+  createdAt         DateTime  @default(now()) @map("createdAt")
+  startedAt         DateTime? @map("startedAt")
+  completedAt       DateTime? @map("completedAt")
+  durationMs        Int?      @map("durationMs")
+  
+  // Results
+  totalSkus         Int?      @map("totalSkus")
+  imagesProcessed   Int?      @map("imagesProcessed")
+  s3Hits            Int?      @map("s3Hits")
+  shopifyFallbacks  Int?      @map("shopifyFallbacks")
+  imageFetchFails   Int?      @map("imageFetchFails")
+  
+  // Output
+  outputS3Key       String?   @db.NVarChar(500) @map("outputS3Key")           // S3 key for completed file
+  outputFilename    String?   @db.NVarChar(200) @map("outputFilename")        // Original filename for download
+  outputSizeBytes   Int?      @map("outputSizeBytes")
+  expiresAt         DateTime? @map("expiresAt")                                // When S3 file should be cleaned up
+  
+  // Error handling
+  errorMessage      String?   @db.NVarChar(Max) @map("errorMessage")
+  retryCount        Int       @default(0) @map("retryCount")
+  
+  @@index([status, createdAt], map: "IX_ExportJob_status_createdAt")
+  @@index([triggeredBy], map: "IX_ExportJob_triggeredBy")
+  @@map("ExportJob")
 }
 
 // ============================================================================
@@ -1457,19 +1524,22 @@ model SizeAlias {
 
 /// Planned shipment - groups items by collection with specific ship dates
 model PlannedShipment {
-  ID                BigInt              @id(map: "PK_PlannedShipment") @default(autoincrement())
-  CustomerOrderID   BigInt
-  CollectionID      Int?                // Nullable for combined/ATS shipments
-  CollectionName    String?             @db.NVarChar(500)
-  PlannedShipStart  DateTime            @db.DateTime
-  PlannedShipEnd    DateTime            @db.DateTime
-  Status            String              @default("Planned") @db.NVarChar(20) // Planned|PartiallyFulfilled|Fulfilled|Cancelled
-  CreatedAt         DateTime            @default(now()) @db.DateTime
-  UpdatedAt         DateTime?           @db.DateTime
+  ID                  BigInt              @id(map: "PK_PlannedShipment") @default(autoincrement())
+  CustomerOrderID     BigInt
+  CollectionID        Int?                // Nullable for combined/ATS shipments
+  CollectionName      String?             @db.NVarChar(500)
+  PlannedShipStart    DateTime            @db.DateTime
+  PlannedShipEnd      DateTime            @db.DateTime
+  Status              String              @default("Planned") @db.NVarChar(20) // Planned|PartiallyFulfilled|Fulfilled|Cancelled
+  IsCombined          Boolean             @default(false)  // True if manually combined from multiple shipments
+  OriginalShipmentIds String?             @db.NVarChar(Max) // JSON array of original shipment IDs if combined
+  CreatedAt           DateTime            @default(now()) @db.DateTime
+  UpdatedAt           DateTime?           @db.DateTime
 
   CustomerOrders    CustomerOrders      @relation(fields: [CustomerOrderID], references: [ID], onDelete: Cascade, map: "FK_PlannedShipment_CustomerOrders")
   Items             CustomerOrdersItems[]
   Shipments         Shipments[]  // Phase 6: Back-relation to linked fulfillments
+  ShipmentItems     ShipmentItems[]  // Cross-shipment fulfillment: per-item tracking
 
   @@index([CustomerOrderID], map: "IX_PlannedShipment_CustomerOrderID")
   @@index([Status], map: "IX_PlannedShipment_Status")

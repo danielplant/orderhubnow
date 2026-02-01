@@ -44,12 +44,17 @@ export function AffectedOrdersClient({
   affected,
   totalOrders,
   totalShipments,
-  invalidCount,
+  invalidCount: _invalidCount,
   shopifyExcludedCount,
 }: AffectedOrdersClientProps) {
   const router = useRouter()
+  
+  // Filter to invalid-only shipments per business requirement
+  // Only show shipments that would become invalid with new dates
+  const invalidAffected = affected.filter((a) => a.isInvalid)
+  
   const [selected, setSelected] = useState<Set<string>>(
-    new Set(affected.filter((a) => a.isInvalid).map((a) => a.shipmentId))
+    new Set(invalidAffected.map((a) => a.shipmentId))
   )
   const [updatedIds, setUpdatedIds] = useState<Set<string>>(new Set())
   const [notifiedReps, setNotifiedReps] = useState<Set<string>>(new Set())
@@ -69,7 +74,7 @@ export function AffectedOrdersClient({
 
   function toggleAll(checked: boolean) {
     if (checked) {
-      setSelected(new Set(affected.map((a) => a.shipmentId)))
+      setSelected(new Set(invalidAffected.map((a) => a.shipmentId)))
     } else {
       setSelected(new Set())
     }
@@ -119,6 +124,8 @@ export function AffectedOrdersClient({
         notifyReps,
         notifyCustomers,
         collectionName: collection.name,
+        oldStart: collection.oldStart ?? '',
+        oldEnd: collection.oldEnd ?? '',
         newStart: newWindowStart,
         newEnd: newWindowEnd,
       })
@@ -137,8 +144,9 @@ export function AffectedOrdersClient({
   }
 
   const selectedArray = Array.from(selected)
-  const invalidNotUpdated = affected.filter(
-    (a) => a.isInvalid && !updatedIds.has(a.shipmentId)
+  // All displayed items are invalid, just filter out already updated ones
+  const invalidNotUpdated = invalidAffected.filter(
+    (a) => !updatedIds.has(a.shipmentId)
   )
 
   return (
@@ -247,7 +255,7 @@ export function AffectedOrdersClient({
             <tr>
               <th className="p-3 w-10">
                 <Checkbox
-                  checked={selected.size === affected.length && affected.length > 0}
+                  checked={selected.size === invalidAffected.length && invalidAffected.length > 0}
                   onCheckedChange={(checked) => toggleAll(!!checked)}
                 />
               </th>
@@ -261,7 +269,7 @@ export function AffectedOrdersClient({
             </tr>
           </thead>
           <tbody>
-            {affected.map((order) => {
+            {invalidAffected.map((order) => {
               const isUpdated = updatedIds.has(order.shipmentId)
               const repNotified = notifiedReps.has(order.shipmentId)
               const custNotified = notifiedCustomers.has(order.shipmentId)
@@ -392,9 +400,9 @@ export function AffectedOrdersClient({
         </table>
       </div>
 
-      {affected.length === 0 && (
+      {invalidAffected.length === 0 && (
         <div className="text-center py-8 text-muted-foreground">
-          No affected orders found.
+          No invalid shipments found. All affected orders have valid ship dates.
         </div>
       )}
     </div>

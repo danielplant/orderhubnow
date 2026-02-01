@@ -3,30 +3,22 @@
 import { useState } from 'react'
 import { useOrder } from '@/lib/contexts/order-context'
 import { Button } from '@/components/ui/button'
-import { Copy, Check, Trash2, Loader2, Cloud, CloudOff } from 'lucide-react'
+import { Check, Trash2, Loader2, HardDrive } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-interface DraftToolbarProps {
+interface SessionBackupToolbarProps {
   className?: string
 }
 
-export function DraftToolbar({ className }: DraftToolbarProps) {
-  const { draftId, saveStatus, lastSaved, totalItems, clearDraft, getDraftUrl } = useOrder()
-  const [copied, setCopied] = useState(false)
+/**
+ * SessionBackupToolbar - displays local session backup status
+ * 
+ * This is a local-only safety net. Cart data is saved to localStorage.
+ * Server drafts are created via explicit "Save Draft" action (future feature).
+ */
+export function SessionBackupToolbar({ className }: SessionBackupToolbarProps) {
+  const { saveStatus, totalItems, clearDraft } = useOrder()
   const [clearing, setClearing] = useState(false)
-
-  const handleCopyLink = async () => {
-    const url = getDraftUrl()
-    if (!url) return
-
-    try {
-      await navigator.clipboard.writeText(url)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    } catch (err) {
-      console.error('Failed to copy:', err)
-    }
-  }
 
   const handleClearCart = async () => {
     if (!confirm('Clear your cart and start fresh?')) return
@@ -39,14 +31,8 @@ export function DraftToolbar({ className }: DraftToolbarProps) {
     }
   }
 
-  // Format last saved text - just show "Saved" with checkmark, no running clock
-  const getLastSavedText = () => {
-    if (!lastSaved) return null
-    return 'Saved'
-  }
-
-  // Don't show toolbar if cart is empty and no draft exists
-  if (totalItems === 0 && !draftId) {
+  // Don't show toolbar if cart is empty
+  if (totalItems === 0) {
     return null
   }
 
@@ -55,61 +41,36 @@ export function DraftToolbar({ className }: DraftToolbarProps) {
       'flex items-center justify-between gap-4 rounded-lg border border-border bg-muted/30 px-4 py-2',
       className
     )}>
-      {/* Left side: Draft info */}
+      {/* Left side: Local backup info */}
       <div className="flex items-center gap-3 text-sm">
-        {saveStatus === 'saving' && (
-          <>
-            <Loader2 className="size-4 animate-spin text-muted-foreground" />
-            <span className="text-muted-foreground">Saving...</span>
-          </>
-        )}
-        {saveStatus === 'saved' && draftId && (
+        {saveStatus === 'saved' && totalItems > 0 && (
           <>
             <Check className="size-4 text-green-600" />
             <span className="text-muted-foreground">
-              Draft <span className="font-mono font-medium text-foreground">{draftId}</span>
-              {lastSaved && (
-                <span className="text-green-600"> · {getLastSavedText()}</span>
-              )}
+              <span className="font-medium text-foreground">Local session backup</span>
+              <span className="text-green-600"> · {totalItems} item{totalItems !== 1 ? 's' : ''} saved locally</span>
+            </span>
+          </>
+        )}
+        {saveStatus === 'idle' && totalItems > 0 && (
+          <>
+            <HardDrive className="size-4 text-muted-foreground" />
+            <span className="text-muted-foreground">
+              {totalItems} item{totalItems !== 1 ? 's' : ''} in cart
             </span>
           </>
         )}
         {saveStatus === 'error' && (
           <>
-            <CloudOff className="size-4 text-destructive" />
-            <span className="text-destructive">Failed to save</span>
+            <HardDrive className="size-4 text-destructive" />
+            <span className="text-destructive">Local backup failed</span>
           </>
-        )}
-        {saveStatus === 'idle' && totalItems > 0 && (
-          <span className="text-muted-foreground">
-            {totalItems} item{totalItems !== 1 ? 's' : ''} in cart
-          </span>
         )}
       </div>
 
       {/* Right side: Actions */}
       <div className="flex items-center gap-2">
-        {draftId && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleCopyLink}
-            disabled={copied}
-            className="gap-2"
-          >
-            {copied ? (
-              <>
-                <Check className="size-4 text-green-600" />
-                <span>Copied!</span>
-              </>
-            ) : (
-              <>
-                <Copy className="size-4" />
-                <span>Copy Link</span>
-              </>
-            )}
-          </Button>
-        )}
+        {/* Copy Link hidden - no server draft until explicit Save Draft action */}
         
         {totalItems > 0 && (
           <Button
@@ -131,3 +92,6 @@ export function DraftToolbar({ className }: DraftToolbarProps) {
     </div>
   )
 }
+
+// Keep DraftToolbar as alias for backwards compatibility during transition
+export const DraftToolbar = SessionBackupToolbar

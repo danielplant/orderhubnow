@@ -5,7 +5,14 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
-import { ChevronDown, ChevronUp, Package } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { ChevronDown, ChevronUp, Package, Merge, Split } from 'lucide-react'
 import { formatCurrency } from '@/lib/utils'
 import { validateShipDates } from '@/lib/validation/ship-window'
 import type { CollectionWindow } from '@/lib/validation/ship-window'
@@ -28,6 +35,17 @@ interface ShipmentDateCardProps {
   /** External errors from parent validation (survives refresh) */
   externalErrors?: { start?: string; end?: string }
   disabled?: boolean
+  // PR-3b: Combine/split support
+  /** IDs of shipments this can be combined with (overlapping windows) */
+  canCombineWith?: string[]
+  /** True if this is a combined shipment */
+  isCombined?: boolean
+  /** Handler for combining with another shipment */
+  onCombine?: (targetShipmentId: string) => void
+  /** Handler for splitting a combined shipment */
+  onSplit?: () => void
+  /** All shipments for combine target display */
+  allShipments?: CartPlannedShipment[]
 }
 
 export function ShipmentDateCard({
@@ -38,6 +56,12 @@ export function ShipmentDateCard({
   onDatesChange,
   externalErrors,
   disabled = false,
+  // PR-3b: Combine/split props
+  canCombineWith,
+  isCombined,
+  onCombine,
+  onSplit,
+  allShipments,
 }: ShipmentDateCardProps) {
   const [isExpanded, setIsExpanded] = useState(false)
   const [localErrors, setLocalErrors] = useState<{ start?: string; end?: string }>({})
@@ -62,18 +86,34 @@ export function ShipmentDateCard({
     const newStart = field === 'start' ? value : shipment.plannedShipStart
     const newEnd = field === 'end' ? value : shipment.plannedShipEnd
 
-    // Build collection window for validation (only if collection has constraints)
-    const collections: CollectionWindow[] =
-      shipment.minAllowedStart || shipment.minAllowedEnd
-        ? [
-            {
-              id: shipment.collectionId ?? 0,
-              name: shipment.collectionName ?? 'Collection',
-              shipWindowStart: shipment.minAllowedStart,
-              shipWindowEnd: shipment.minAllowedEnd,
-            },
-          ]
-        : [] // Empty = ATS, no validation
+    // Build collection windows for validation
+    // Issue 2 fix: For combined shipments, get individual collection windows
+    // so error messages show the specific collection that was violated
+    let collections: CollectionWindow[] = []
+
+    if (shipment.isCombined && shipment.originalShipmentIds && allShipments) {
+      // For combined shipments, get individual collection windows from original shipments
+      collections = shipment.originalShipmentIds
+        .map((origId) => allShipments.find((s) => s.id === origId))
+        .filter((s): s is CartPlannedShipment => !!s && !!(s.minAllowedStart || s.minAllowedEnd))
+        .map((s) => ({
+          id: s.collectionId ?? 0,
+          name: s.collectionName ?? 'Collection',
+          shipWindowStart: s.minAllowedStart,
+          shipWindowEnd: s.minAllowedEnd,
+        }))
+    } else if (shipment.minAllowedStart || shipment.minAllowedEnd) {
+      // Regular shipment with constraints
+      collections = [
+        {
+          id: shipment.collectionId ?? 0,
+          name: shipment.collectionName ?? 'Collection',
+          shipWindowStart: shipment.minAllowedStart,
+          shipWindowEnd: shipment.minAllowedEnd,
+        },
+      ]
+    }
+    // Empty collections = ATS, no validation
 
     // Validate
     const result = validateShipDates(newStart, newEnd, collections)
@@ -104,6 +144,44 @@ export function ShipmentDateCard({
             </CardTitle>
           </div>
           <div className="flex items-center gap-2">
+            {/* PR-3b: Combine button - shown when overlap exists */}
+            {canCombineWith && canCombineWith.length > 0 && !isCombined && onCombine && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" className="h-7 px-2 text-xs">
+                    <Merge className="h-3 w-3 mr-1" />
+                    Combine
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  {canCombineWith.map((targetId) => {
+                    const target = allShipments?.find((s) => s.id === targetId)
+                    return (
+                      <DropdownMenuItem
+                        key={targetId}
+                        onClick={() => onCombine(targetId)}
+                      >
+                        with {target?.collectionName ?? 'Shipment'}
+                      </DropdownMenuItem>
+                    )
+                  })}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+
+            {/* PR-3b: Split button - shown on combined shipments */}
+            {isCombined && onSplit && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                onClick={onSplit}
+              >
+                <Split className="h-3 w-3 mr-1" />
+                Split
+              </Button>
+            )}
+
             <Badge variant="default" size="sm" className="px-2 py-1 h-auto w-auto text-xs">
               {itemCount} item{itemCount !== 1 ? 's' : ''} · {formatCurrency(subtotal, currency)}
             </Badge>

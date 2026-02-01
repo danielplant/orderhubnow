@@ -304,7 +304,7 @@ export async function getOrders(
   const orderIds = orders.map((o) => String(o.ID));
   const orderNumbers = orders.map((o) => o.OrderNumber);
   const orderBigIntIds = orders.map((o) => o.ID);
-  const [shipmentSummaries, collectionMap, shopifyRawCollectionMap, plannedShipmentCounts] = await Promise.all([
+  const [shipmentSummaries, collectionMap, shopifyRawCollectionMap, plannedShipmentCounts, firstShipmentDates, plannedShipmentStatuses] = await Promise.all([
     getShipmentSummariesForOrders(orderIds),
     getOrderCollections(orderNumbers),
     getShopifyRawCollections(orderNumbers),
@@ -314,12 +314,58 @@ export async function getOrders(
       where: { CustomerOrderID: { in: orderBigIntIds } },
       _count: { ID: true },
     }),
+    // Get first planned shipment date for each order (earliest PlannedShipStart)
+    prisma.plannedShipment.findMany({
+      where: { CustomerOrderID: { in: orderBigIntIds } },
+      select: { CustomerOrderID: true, PlannedShipStart: true },
+      orderBy: { PlannedShipStart: 'asc' },
+      distinct: ['CustomerOrderID'],
+    }),
+    // Get planned shipment statuses for fulfillment tracking
+    prisma.plannedShipment.findMany({
+      where: { CustomerOrderID: { in: orderBigIntIds } },
+      select: { CustomerOrderID: true, Status: true },
+    }),
   ]);
 
   // Phase 5: Build planned shipment count map
   const plannedCountMap = new Map(
     plannedShipmentCounts.map((s) => [String(s.CustomerOrderID), s._count.ID])
   );
+
+  // Build first shipment date map
+  const firstShipmentDateMap = new Map(
+    firstShipmentDates.map((s) => [
+      String(s.CustomerOrderID),
+      s.PlannedShipStart ? s.PlannedShipStart.toISOString().slice(0, 10) : null,
+    ])
+  );
+
+  // Build aggregate shipment status map (Planned | PartiallyFulfilled | Fulfilled | Mixed | null)
+  const shipmentStatusMap = new Map<string, 'Planned' | 'PartiallyFulfilled' | 'Fulfilled' | 'Mixed' | null>();
+  const statusesByOrder = new Map<string, Set<string>>();
+  // Valid shipment status values (excludes empty strings)
+  const validStatuses = ['Planned', 'PartiallyFulfilled', 'Fulfilled', 'Cancelled'];
+  for (const ps of plannedShipmentStatuses) {
+    const orderId = String(ps.CustomerOrderID);
+    if (!statusesByOrder.has(orderId)) {
+      statusesByOrder.set(orderId, new Set());
+    }
+    // Only add valid, non-empty status values
+    if (ps.Status && validStatuses.includes(ps.Status)) {
+      statusesByOrder.get(orderId)!.add(ps.Status);
+    }
+  }
+  for (const [orderId, statuses] of statusesByOrder) {
+    if (statuses.size === 0) {
+      shipmentStatusMap.set(orderId, null);
+    } else if (statuses.size === 1) {
+      const status = [...statuses][0] as 'Planned' | 'PartiallyFulfilled' | 'Fulfilled';
+      shipmentStatusMap.set(orderId, status);
+    } else {
+      shipmentStatusMap.set(orderId, 'Mixed');
+    }
+  }
 
   // Map to frontend shape
   return {
@@ -378,6 +424,10 @@ export async function getOrders(
         isPreOrder: o.IsPreOrder ?? o.OrderNumber.startsWith('P'),
         // Phase 5: Planned shipments count for orders with multiple ship windows
         plannedShipmentCount: plannedCountMap.get(orderId) ?? 0,
+        // First planned shipment date for timeline display
+        firstShipmentDate: firstShipmentDateMap.get(orderId) ?? null,
+        // Aggregate fulfillment status across planned shipments
+        shipmentFulfillmentStatus: shipmentStatusMap.get(orderId) ?? null,
       };
     }),
   };
@@ -469,10 +519,17 @@ export async function getOrderById(orderId: string): Promise<AdminOrderRow | nul
   const summary = shipmentSummaries.get(orderId);
   const currency = order.Country?.toUpperCase().includes('US') ? 'USD' : 'CAD';
 
-  // Phase 5: Get planned shipment count
-  const plannedShipmentCount = await prisma.plannedShipment.count({
-    where: { CustomerOrderID: BigInt(orderId) },
-  });
+  // Phase 5: Get planned shipment count and first shipment date
+  const [plannedShipmentCount, firstShipment] = await Promise.all([
+    prisma.plannedShipment.count({
+      where: { CustomerOrderID: BigInt(orderId) },
+    }),
+    prisma.plannedShipment.findFirst({
+      where: { CustomerOrderID: BigInt(orderId) },
+      select: { PlannedShipStart: true },
+      orderBy: { PlannedShipStart: 'asc' },
+    }),
+  ]);
 
   // Calculate variance if shipments exist
   let shippedTotal: number | null = null;
@@ -522,6 +579,12 @@ export async function getOrderById(orderId: string): Promise<AdminOrderRow | nul
     isPreOrder: order.IsPreOrder ?? order.OrderNumber.startsWith('P'),
     // Phase 5: Planned shipments count
     plannedShipmentCount,
+    // First planned shipment date for timeline display
+    firstShipmentDate: firstShipment?.PlannedShipStart
+      ? firstShipment.PlannedShipStart.toISOString().slice(0, 10)
+      : null,
+    // For single order view, status will be fetched separately if needed
+    shipmentFulfillmentStatus: null,
   };
 }
 
@@ -1026,7 +1089,7 @@ export async function getOrdersByRep(
   const orderNumbers = orders.map((o) => o.OrderNumber);
   const orderIds = orders.map((o) => String(o.ID));
   const orderBigIntIds = orders.map((o) => o.ID);
-  const [categoryMap, collectionMap, shopifyRawCollectionMap, shipmentSummaries, plannedShipmentCounts] = await Promise.all([
+  const [categoryMap, collectionMap, shopifyRawCollectionMap, shipmentSummaries, plannedShipmentCounts, firstShipmentDates, plannedShipmentStatuses] = await Promise.all([
     getOrderCategories(orderNumbers),
     getOrderCollections(orderNumbers),
     getShopifyRawCollections(orderNumbers),
@@ -1037,12 +1100,58 @@ export async function getOrdersByRep(
       where: { CustomerOrderID: { in: orderBigIntIds } },
       _count: { ID: true },
     }),
+    // Get first planned shipment date for each order (earliest PlannedShipStart)
+    prisma.plannedShipment.findMany({
+      where: { CustomerOrderID: { in: orderBigIntIds } },
+      select: { CustomerOrderID: true, PlannedShipStart: true },
+      orderBy: { PlannedShipStart: 'asc' },
+      distinct: ['CustomerOrderID'],
+    }),
+    // Get planned shipment statuses for fulfillment tracking
+    prisma.plannedShipment.findMany({
+      where: { CustomerOrderID: { in: orderBigIntIds } },
+      select: { CustomerOrderID: true, Status: true },
+    }),
   ]);
 
   // Phase 5: Build planned shipment count map
   const plannedCountMap = new Map(
     plannedShipmentCounts.map((s) => [String(s.CustomerOrderID), s._count.ID])
   );
+
+  // Build first shipment date map
+  const firstShipmentDateMap = new Map(
+    firstShipmentDates.map((s) => [
+      String(s.CustomerOrderID),
+      s.PlannedShipStart ? s.PlannedShipStart.toISOString().slice(0, 10) : null,
+    ])
+  );
+
+  // Build aggregate shipment status map (Planned | PartiallyFulfilled | Fulfilled | Mixed | null)
+  const shipmentStatusMap = new Map<string, 'Planned' | 'PartiallyFulfilled' | 'Fulfilled' | 'Mixed' | null>();
+  const statusesByOrder = new Map<string, Set<string>>();
+  // Valid shipment status values (excludes empty strings)
+  const validStatuses = ['Planned', 'PartiallyFulfilled', 'Fulfilled', 'Cancelled'];
+  for (const ps of plannedShipmentStatuses) {
+    const orderId = String(ps.CustomerOrderID);
+    if (!statusesByOrder.has(orderId)) {
+      statusesByOrder.set(orderId, new Set());
+    }
+    // Only add valid, non-empty status values
+    if (ps.Status && validStatuses.includes(ps.Status)) {
+      statusesByOrder.get(orderId)!.add(ps.Status);
+    }
+  }
+  for (const [orderId, statuses] of statusesByOrder) {
+    if (statuses.size === 0) {
+      shipmentStatusMap.set(orderId, null);
+    } else if (statuses.size === 1) {
+      const status = [...statuses][0] as 'Planned' | 'PartiallyFulfilled' | 'Fulfilled';
+      shipmentStatusMap.set(orderId, status);
+    } else {
+      shipmentStatusMap.set(orderId, 'Mixed');
+    }
+  }
 
   // 8. Map to frontend shape
   return {
@@ -1106,6 +1215,10 @@ export async function getOrdersByRep(
         isPreOrder: o.IsPreOrder ?? o.OrderNumber.startsWith('P'),
         // Phase 5: Planned shipments count for orders with multiple ship windows
         plannedShipmentCount: plannedCountMap.get(orderId) ?? 0,
+        // First planned shipment date for timeline display
+        firstShipmentDate: firstShipmentDateMap.get(orderId) ?? null,
+        // Aggregate fulfillment status across planned shipments
+        shipmentFulfillmentStatus: shipmentStatusMap.get(orderId) ?? null,
       };
     }),
   };
@@ -1159,6 +1272,12 @@ export interface OrderForEditing {
     plannedShipStart: string;  // ISO date (YYYY-MM-DD)
     plannedShipEnd: string;
     itemSkus: string[];  // SKUs in this shipment
+    // Collection window constraints for validation (Issue 9 fix)
+    shipWindowStart: string | null;
+    shipWindowEnd: string | null;
+    // Combined shipment tracking (Issue 5 - optional until migration)
+    isCombined?: boolean;
+    originalShipmentIds?: string[] | null;
   }>;
 }
 
@@ -1216,12 +1335,40 @@ export async function getOrderForEditing(
       CollectionName: true,
       PlannedShipStart: true,
       PlannedShipEnd: true,
+      IsCombined: true,
+      OriginalShipmentIds: true,
       Items: {
         select: { SKU: true },
       },
     },
     orderBy: { PlannedShipStart: 'asc' },
   });
+
+  // Fetch collection windows for validation (Issue 9 fix)
+  const collectionIds = plannedShipments
+    .map((ps) => ps.CollectionID)
+    .filter((id): id is number => id !== null);
+
+  const collectionRecords = collectionIds.length > 0
+    ? await prisma.collection.findMany({
+        where: { id: { in: collectionIds } },
+        select: {
+          id: true,
+          shipWindowStart: true,
+          shipWindowEnd: true,
+        },
+      })
+    : [];
+
+  const collectionWindowMap = new Map<number, { shipWindowStart: string | null; shipWindowEnd: string | null }>(
+    collectionRecords.map((c) => [
+      c.id,
+      {
+        shipWindowStart: c.shipWindowStart?.toISOString().slice(0, 10) ?? null,
+        shipWindowEnd: c.shipWindowEnd?.toISOString().slice(0, 10) ?? null,
+      },
+    ])
+  );
 
   // Get rep ID - use stored RepID for new orders, fallback to name lookup for legacy
   let salesRepId: string | null = null;
@@ -1277,14 +1424,23 @@ export async function getOrderForEditing(
       description: skuDescMap.get(item.SKU) || '',
     })),
     // Phase 5: Planned shipments for edit mode
-    plannedShipments: plannedShipments.map((ps) => ({
-      id: String(ps.ID),
-      collectionId: ps.CollectionID,
-      collectionName: ps.CollectionName,
-      plannedShipStart: ps.PlannedShipStart.toISOString().slice(0, 10),
-      plannedShipEnd: ps.PlannedShipEnd.toISOString().slice(0, 10),
-      itemSkus: ps.Items.map((i) => i.SKU),
-    })),
+    plannedShipments: plannedShipments.map((ps) => {
+      const windows = ps.CollectionID ? collectionWindowMap.get(ps.CollectionID) : null;
+      return {
+        id: String(ps.ID),
+        collectionId: ps.CollectionID,
+        collectionName: ps.CollectionName,
+        plannedShipStart: ps.PlannedShipStart.toISOString().slice(0, 10),
+        plannedShipEnd: ps.PlannedShipEnd.toISOString().slice(0, 10),
+        itemSkus: ps.Items.map((i) => i.SKU),
+        // Collection window constraints for validation (Issue 9 fix)
+        shipWindowStart: windows?.shipWindowStart ?? null,
+        shipWindowEnd: windows?.shipWindowEnd ?? null,
+        // Combined shipment tracking (Issue 5)
+        isCombined: ps.IsCombined ?? false,
+        originalShipmentIds: ps.OriginalShipmentIds ? JSON.parse(ps.OriginalShipmentIds) : null,
+      };
+    }),
   };
 }
 
@@ -1338,15 +1494,27 @@ export async function getPlannedShipmentsForOrder(
 
   const collectionMap = new Map(collections.map((c) => [c.id, c]));
 
-  // Batch fetch SKU descriptions
+  // Batch fetch SKU data including collection info
   const allSkus = [...new Set(shipments.flatMap((s) => s.Items.map((i) => i.SKU)))];
   const skuRecords = allSkus.length > 0
     ? await prisma.sku.findMany({
         where: { SkuID: { in: allSkus } },
-        select: { SkuID: true, Description: true },
+        select: {
+          SkuID: true,
+          Description: true,
+          CollectionID: true,
+          Collection: {
+            select: {
+              id: true,
+              name: true,
+              shipWindowStart: true,
+              shipWindowEnd: true,
+            },
+          },
+        },
       })
     : [];
-  const skuDescMap = new Map(skuRecords.map((s) => [s.SkuID, s.Description || '']));
+  const skuDataMap = new Map(skuRecords.map((s) => [s.SkuID, s]));
 
   // Phase 6: Batch fetch shipped quantities for all items (N+1 fix)
   const allItemIds = shipments.flatMap((s) => s.Items.map((i) => i.ID));
@@ -1378,17 +1546,25 @@ export async function getPlannedShipmentsForOrder(
       const cancelledQty = item.CancelledQty ?? 0; // Defensive null handling
       const remainingQty = Math.max(0, item.Quantity - shippedQty - cancelledQty);
 
+      // Get SKU data including collection info
+      const skuData = skuDataMap.get(item.SKU);
+      const itemCollection = skuData?.Collection;
+
       return {
         orderItemId: String(item.ID),
         sku: item.SKU,
-        description: skuDescMap.get(item.SKU) || '',
+        description: skuData?.Description || '',
         quantity: item.Quantity,
         quantityFulfilled: shippedQty,
         quantityRemaining: remainingQty,
         price: item.Price,
         lineTotal: item.Price * item.Quantity,
-        collectionId: s.CollectionID,
-        collectionName: s.CollectionName,
+        // Use item's SKU collection for move validation
+        collectionId: skuData?.CollectionID ?? null,
+        collectionName: itemCollection?.name ?? null,
+        // Collection ship window for move validation (from item's SKU)
+        minAllowedStart: itemCollection?.shipWindowStart?.toISOString().slice(0, 10) ?? null,
+        minAllowedEnd: itemCollection?.shipWindowEnd?.toISOString().slice(0, 10) ?? null,
       };
     });
 

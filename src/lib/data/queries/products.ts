@@ -207,6 +207,7 @@ export async function getProducts(
         baseSku,
         parsedSize: size,
         description,
+        rawDescription: r.Description ?? '', // Raw Shopify description for search transparency
         color: resolveColor(r.SkuColor, skuId, description),
         material: r.FabricContent ?? '',
         categoryId: r.CollectionID ?? null,
