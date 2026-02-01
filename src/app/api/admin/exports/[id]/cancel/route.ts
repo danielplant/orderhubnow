@@ -38,7 +38,7 @@ export async function POST(
     }
 
     // Check authorization (reps can only cancel their own jobs)
-    if (session.user.role === 'rep' && job.triggeredBy !== session.user.id) {
+    if (session.user.role === 'rep' && job.triggeredBy !== String(session.user.id)) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
