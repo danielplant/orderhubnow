@@ -75,6 +75,71 @@ export async function updateOrderEmail(
 }
 
 // ============================================================================
+// Phase 6: PlannedShipment Status Helper
+// ============================================================================
+
+/**
+ * Phase 6: Recalculate and update PlannedShipment.Status based on fulfillment progress.
+ * Called after creating or voiding a shipment.
+ *
+ * Status logic:
+ * - Planned: No items shipped yet
+ * - PartiallyFulfilled: Some items shipped, some remaining
+ * - Fulfilled: All items fully shipped (shipped + cancelled >= ordered)
+ * - Cancelled: All items cancelled
+ */
+export async function updatePlannedShipmentStatus(
+  plannedShipmentId: bigint
+): Promise<void> {
+  // Get all items in this planned shipment with their shipped quantities
+  const items = await prisma.customerOrdersItems.findMany({
+    where: { PlannedShipmentID: plannedShipmentId },
+    select: {
+      ID: true,
+      Quantity: true,
+      CancelledQty: true,
+      ShipmentItems: {
+        select: { QuantityShipped: true },
+        where: { Shipment: { VoidedAt: null } }, // Exclude voided shipments
+      },
+    },
+  })
+
+  if (items.length === 0) return
+
+  let totalOrdered = 0
+  let totalShipped = 0
+  let totalCancelled = 0
+
+  for (const item of items) {
+    totalOrdered += item.Quantity
+    totalCancelled += item.CancelledQty ?? 0 // Defensive null handling
+    totalShipped += item.ShipmentItems.reduce((sum, si) => sum + si.QuantityShipped, 0)
+  }
+
+  const totalRemaining = totalOrdered - totalShipped - totalCancelled
+
+  let newStatus: string
+  if (totalCancelled === totalOrdered) {
+    newStatus = 'Cancelled'
+  } else if (totalRemaining <= 0) {
+    newStatus = 'Fulfilled'
+  } else if (totalShipped > 0) {
+    newStatus = 'PartiallyFulfilled'
+  } else {
+    newStatus = 'Planned'
+  }
+
+  await prisma.plannedShipment.update({
+    where: { ID: plannedShipmentId },
+    data: {
+      Status: newStatus,
+      UpdatedAt: new Date(),
+    },
+  })
+}
+
+// ============================================================================
 // Create Shipment
 // ============================================================================
 
@@ -114,6 +179,7 @@ export async function createShipment(
             Quantity: true,
             Price: true,
             CancelledQty: true,
+            PlannedShipmentID: true,  // For cross-shipment fulfillment tracking
           },
         },
       },
@@ -144,6 +210,22 @@ export async function createShipment(
       }
     }
 
+    // Phase 6: Validate plannedShipmentId if provided
+    let plannedShipmentBigInt: bigint | null = null
+    if (input.plannedShipmentId) {
+      const plannedShipment = await prisma.plannedShipment.findUnique({
+        where: { ID: BigInt(input.plannedShipmentId) },
+        select: { ID: true, CustomerOrderID: true },
+      })
+      if (!plannedShipment) {
+        return { success: false, error: 'Planned shipment not found' }
+      }
+      if (String(plannedShipment.CustomerOrderID) !== input.orderId) {
+        return { success: false, error: 'Planned shipment does not belong to this order' }
+      }
+      plannedShipmentBigInt = plannedShipment.ID
+    }
+
     // Calculate shipped subtotal
     let shippedSubtotal = 0
     for (const item of input.items) {
@@ -160,6 +242,7 @@ export async function createShipment(
       const shipment = await tx.shipments.create({
         data: {
           CustomerOrderID: BigInt(input.orderId),
+          PlannedShipmentID: plannedShipmentBigInt, // Phase 6
           ShippedSubtotal: shippedSubtotal,
           ShippingCost: input.shippingCost,
           ShippedTotal: shippedTotal,
@@ -170,14 +253,18 @@ export async function createShipment(
         },
       })
 
-      // Create shipment items
+      // Create shipment items with PlannedShipmentID for cross-shipment fulfillment tracking
       await tx.shipmentItems.createMany({
-        data: input.items.map((item) => ({
-          ShipmentID: shipment.ID,
-          OrderItemID: BigInt(item.orderItemId),
-          QuantityShipped: item.quantityShipped,
-          PriceOverride: item.priceOverride ?? null,
-        })),
+        data: input.items.map((item) => {
+          const orderItem = orderItemMap.get(item.orderItemId)
+          return {
+            ShipmentID: shipment.ID,
+            OrderItemID: BigInt(item.orderItemId),
+            QuantityShipped: item.quantityShipped,
+            PriceOverride: item.priceOverride ?? null,
+            PlannedShipmentID: orderItem?.PlannedShipmentID ?? null,
+          }
+        }),
       })
 
       // Create tracking if provided
@@ -251,6 +338,28 @@ export async function createShipment(
 
       return shipment
     })
+
+    // Phase 6: Update ALL affected PlannedShipment statuses
+    // Get PlannedShipmentIDs from the fulfilled items
+    const fulfilledItemIds = input.items.map((i) => BigInt(i.orderItemId))
+    const affectedItems = await prisma.customerOrdersItems.findMany({
+      where: { ID: { in: fulfilledItemIds } },
+      select: { PlannedShipmentID: true },
+    })
+
+    // Get unique PlannedShipmentIDs (excluding null)
+    const affectedPlannedShipmentIds = [
+      ...new Set(
+        affectedItems
+          .map((i) => i.PlannedShipmentID)
+          .filter((id): id is bigint => id !== null)
+      ),
+    ]
+
+    // Update each affected PlannedShipment's status
+    for (const psId of affectedPlannedShipmentIds) {
+      await updatePlannedShipmentStatus(psId)
+    }
 
     // Sync with Shopify if order is transferred and has Shopify order ID
     let shopifyFulfillmentId: string | null = null
@@ -574,6 +683,7 @@ export async function voidShipment(input: VoidShipmentInput): Promise<VoidShipme
         ID: true,
         CustomerOrderID: true,
         VoidedAt: true,
+        PlannedShipmentID: true, // Phase 6
         CustomerOrders: {
           select: {
             ID: true,
@@ -678,6 +788,11 @@ export async function voidShipment(input: VoidShipmentInput): Promise<VoidShipme
           },
         })
       }
+    }
+
+    // Phase 6: Recalculate PlannedShipment status (voiding may revert to Planned/PartiallyFulfilled)
+    if (shipment.PlannedShipmentID) {
+      await updatePlannedShipmentStatus(shipment.PlannedShipmentID)
     }
 
     // Log activity
@@ -1233,6 +1348,7 @@ export async function cancelOrderItem(
         Quantity: true,
         CustomerOrderID: true,
         CancelledQty: true,
+        PlannedShipmentID: true, // Phase 6: For status update
         CustomerOrders: {
           select: { OrderNumber: true, OrderStatus: true },
         },
@@ -1301,6 +1417,11 @@ export async function cancelOrderItem(
     revalidatePath('/admin/orders')
     revalidatePath(`/admin/orders/${orderId}`)
 
+    // Phase 6: Update PlannedShipment status if item belongs to one
+    if (item.PlannedShipmentID) {
+      await updatePlannedShipmentStatus(item.PlannedShipmentID)
+    }
+
     return { success: true }
   } catch (e) {
     console.error('cancelOrderItem error:', e)
@@ -1337,6 +1458,7 @@ export async function bulkCancelItems(
         Quantity: true,
         CustomerOrderID: true,
         CancelledQty: true,
+        PlannedShipmentID: true, // Phase 6: For status update
         CustomerOrders: {
           select: { OrderStatus: true },
         },
@@ -1362,6 +1484,7 @@ export async function bulkCancelItems(
     // Process each item
     let cancelledCount = 0
     const orderIdsToRevalidate = new Set<string>()
+    const affectedPlannedShipmentIds = new Set<bigint>() // Phase 6: Track affected PlannedShipments
 
     for (const item of items) {
       // Skip invoiced/cancelled orders
@@ -1388,6 +1511,10 @@ export async function bulkCancelItems(
         })
         cancelledCount++
         orderIdsToRevalidate.add(item.CustomerOrderID.toString())
+        // Phase 6: Track PlannedShipment for status update
+        if (item.PlannedShipmentID) {
+          affectedPlannedShipmentIds.add(item.PlannedShipmentID)
+        }
       }
     }
 
@@ -1396,6 +1523,11 @@ export async function bulkCancelItems(
     revalidatePath('/admin/open-items')
     for (const orderId of orderIdsToRevalidate) {
       revalidatePath(`/admin/orders/${orderId}`)
+    }
+
+    // Phase 6: Update PlannedShipment status for all affected shipments
+    for (const psId of affectedPlannedShipmentIds) {
+      await updatePlannedShipmentStatus(psId)
     }
 
     return { success: true, cancelledCount }

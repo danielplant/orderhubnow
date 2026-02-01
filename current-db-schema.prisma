@@ -1,0 +1,1375 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlserver"
+  url      = env("DATABASE_URL")
+}
+
+model ActivityLogs {
+  ID          BigInt   @id(map: "PK_ActivityLogs") @default(autoincrement())
+  OrderNumber String?  @db.NVarChar(50)
+  Description String?  @db.NVarChar(Max)
+  DateAdded   DateTime @db.DateTime
+  CustomerId  BigInt?
+  AddressId   BigInt?
+  OrderId     BigInt?
+  Action      String?  @db.NVarChar(100)
+  EntityID    BigInt?
+  EntityType  String?  @db.NVarChar(50)
+  IPAddress   String?  @db.NVarChar(50)
+  NewValues   String?  @db.NVarChar(Max)
+  OldValues   String?  @db.NVarChar(Max)
+  PerformedBy String?  @db.NVarChar(255)
+  UserAgent   String?  @db.NVarChar(500)
+
+  @@index([EntityType, EntityID], map: "IX_ActivityLogs_EntityType")
+  @@index([Action], map: "IX_ActivityLogs_Action")
+  @@index([DateAdded(sort: Desc)], map: "IX_ActivityLogs_DateAdded")
+}
+
+model ApplicationExceptions {
+  ExceptionId         BigInt   @id(map: "PK_ApplicationExceptions") @default(autoincrement())
+  ExceptionMethod     String   @db.NVarChar(250)
+  ExceptionMessage    String   @db.NVarChar(500)
+  ExceptionStackTrace String?  @db.NVarChar(Max)
+  ExceptionDateTime   DateTime @db.DateTime
+  ExceptionURL        String?  @db.NVarChar(300)
+}
+
+model CustomerOrders {
+  ID                       BigInt                   @id(map: "PK_CustomerOrders") @default(autoincrement())
+  OrderNumber              String                   @db.NVarChar(50)
+  BuyerName                String                   @db.NVarChar(500)
+  StoreName                String                   @db.NVarChar(500)
+  SalesRep                 String                   @db.NVarChar(200)
+  CustomerEmail            String                   @db.NVarChar(500)
+  Country                  String                   @db.NVarChar(20)
+  CustomerPhone            String                   @db.NVarChar(100)
+  OrderAmount              Float
+  OrderNotes               String                   @db.NVarChar(Max)
+  CustomerPO               String                   @db.NVarChar(100)
+  ShipStartDate            DateTime                 @db.DateTime
+  ShipEndDate              DateTime                 @db.DateTime
+  OrderDate                DateTime                 @db.DateTime
+  Website                  String                   @db.NVarChar(200)
+  IsShipped                Boolean
+  OrderStatus              String                   @db.NVarChar(50)
+  IsTransferredToShopify   Boolean?
+  CustomerID               Int?
+  RepID                    Int?
+  ShopifyOrderID           String?                  @db.NVarChar(50)
+  PaymentTerms             String?                  @db.NVarChar(200)
+  ApprovalDate             DateTime?                @db.DateTime
+  BrandNotes               String?                  @db.NVarChar(Max)
+  IsPreOrder               Boolean?
+  ShopifyFinancialStatus   String?                  @db.NVarChar(20)
+  ShopifyFulfillmentStatus String?                  @db.NVarChar(20)
+  ShopifyStatusSyncedAt    DateTime?                @db.DateTime
+  EmailAdditionalTo        String?                  @db.NVarChar(Max)
+  EmailSentAdmin           Boolean?                 @default(false)
+  EmailSentAt              DateTime?                @db.DateTime
+  EmailSentCustomer        Boolean?                 @default(false)
+  EmailSentRep             Boolean?                 @default(false)
+  CustomerOrdersComments   CustomerOrdersComments[]
+  CustomerOrdersItems      CustomerOrdersItems[]
+  PlannedShipments         PlannedShipment[]
+  Shipments                Shipments[]
+
+  @@index([CustomerID], map: "IX_CustomerOrders_CustomerID")
+  @@index([OrderDate], map: "IX_CustomerOrders_OrderDate")
+  @@index([RepID], map: "IX_CustomerOrders_RepID")
+}
+
+model CustomerOrdersComments {
+  ID             BigInt         @id(map: "PK_CustomerOrdersComments") @default(autoincrement())
+  OrderID        BigInt
+  Comments       String         @db.NVarChar(Max)
+  AddedDate      DateTime       @db.DateTime
+  AddedBy        String         @db.NVarChar(500)
+  CustomerOrders CustomerOrders @relation(fields: [OrderID], references: [ID], onUpdate: NoAction, map: "FK_CustomerOrdersComments_CustomerOrders")
+}
+
+model CustomerOrdersItems {
+  ID                BigInt           @id(map: "PK_CustomerOrdersItems") @default(autoincrement())
+  CustomerOrderID   BigInt
+  OrderNumber       String           @db.NVarChar(50)
+  SKU               String           @db.NVarChar(50)
+  SKUVariantID      BigInt
+  Quantity          Int
+  Price             Float
+  PriceCurrency     String           @db.NVarChar(50)
+  Notes             String           @db.NVarChar(Max)
+  CancelledAt       DateTime?        @db.DateTime
+  CancelledBy       String?          @db.NVarChar(255)
+  CancelledQty      Int?             @default(0)
+  CancelledReason   String?          @db.NVarChar(100)
+  LineDiscount      Float?           @default(0)
+  Status            String?          @default("Open") @db.NVarChar(20)
+  ShopifyLineItemID String?          @db.NVarChar(50)
+  PlannedShipmentID BigInt?
+  CustomerOrders    CustomerOrders   @relation(fields: [CustomerOrderID], references: [ID], onUpdate: NoAction, map: "FK_CustomerOrdersItems_CustomerOrders")
+  PlannedShipment   PlannedShipment? @relation(fields: [PlannedShipmentID], references: [ID], map: "FK_CustomerOrdersItems_PlannedShipment")
+  ShipmentItems     ShipmentItems[]
+
+  @@index([CustomerOrderID], map: "IX_CustomerOrdersItems_CustomerOrderID")
+  @@index([PlannedShipmentID], map: "IX_CustomerOrdersItems_PlannedShipmentID")
+}
+
+model Customers {
+  ID                    Int       @id(map: "PK_Customers") @default(autoincrement())
+  StoreName             String    @db.NVarChar(500)
+  Email                 String?   @db.NVarChar(500)
+  CustomerName          String?   @db.NVarChar(500)
+  Phone                 String?   @db.NVarChar(500)
+  Rep                   String?   @db.NVarChar(500)
+  Street1               String?   @db.NVarChar(500)
+  Street2               String?   @db.NVarChar(500)
+  City                  String?   @db.NVarChar(500)
+  StateProvince         String?   @db.NVarChar(500)
+  ZipPostal             String?   @db.NVarChar(500)
+  Country               String?   @db.NVarChar(500)
+  AdditionalInfo        String?   @db.NVarChar(Max)
+  ShippingStreet1       String?   @db.NVarChar(500)
+  ShippingStreet2       String?   @db.NVarChar(500)
+  ShippingCity          String?   @db.NVarChar(500)
+  ShippingStateProvince String?   @db.NVarChar(500)
+  ShippingZipPostal     String?   @db.NVarChar(500)
+  ShippingCountry       String?   @db.NVarChar(500)
+  Website               String?   @db.NVarChar(500)
+  FirstOrderDate        DateTime? @db.DateTime
+  LastOrderDate         DateTime? @db.DateTime
+  LTV                   Decimal?  @db.Decimal(18, 2)
+  Segment               String?   @db.NVarChar(20)
+  OrderCount            Int?      @default(0, map: "DF__Customers__Order__1DB06A4F")
+  UsualOrderCycle       Int?
+  EstimatedPotential    Decimal?  @db.Decimal(18, 2)
+
+  @@index([LastOrderDate], map: "IX_Customers_LastOrderDate")
+  @@index([Segment], map: "IX_Customers_Segment")
+}
+
+model CustomersFromShopify {
+  ID        BigInt @id(map: "PK_CustomersFromShopify")
+  ShopifyID String @db.NVarChar(100)
+  Email     String @db.NVarChar(200)
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model DB_Errors {
+  ErrorID        Int       @default(autoincrement())
+  UserName       String?   @db.VarChar(100)
+  ErrorNumber    Int?
+  ErrorState     Int?
+  ErrorSeverity  Int?
+  ErrorLine      Int?
+  ErrorProcedure String?   @db.VarChar(Max)
+  ErrorMessage   String?   @db.VarChar(Max)
+  ErrorDateTime  DateTime? @db.DateTime
+
+  @@ignore
+}
+
+model InventorySettings {
+  ID                  Int      @id(map: "PK_InventorySettings") @default(autoincrement())
+  MinQuantityToShow   Int
+  CanadaPassword      String   @db.NVarChar(50)
+  USAPassword         String   @db.NVarChar(50)
+  CanadaUSAPassword   String?  @db.NVarChar(50)
+  AllowMultipleImages Boolean?
+  EnableZoom          Boolean?
+  ImageRefreshCounter Int
+  USDToCADConversion  Float?
+  ShowShopifyImages   Boolean?
+}
+
+/// Company settings for PDF generation and branding
+model CompanySettings {
+  ID           Int     @id(map: "PK_CompanySettings") @default(autoincrement())
+  CompanyName  String  @db.NVarChar(200)
+  AddressLine1 String? @db.NVarChar(200)
+  AddressLine2 String? @db.NVarChar(200)
+  Phone        String? @db.NVarChar(50)
+  Fax          String? @db.NVarChar(50)
+  Email        String? @db.NVarChar(200)
+  Website      String? @db.NVarChar(200)
+  LogoUrl      String? @db.NVarChar(500)
+}
+
+/// Email notification settings - configurable via admin panel
+model EmailSettings {
+  ID                       Int      @id(map: "PK_EmailSettings") @default(autoincrement())
+  FromEmail                String   @db.NVarChar(200)
+  FromName                 String?  @db.NVarChar(200)
+  SalesTeamEmails          String?  @db.NVarChar(500)
+  CCEmails                 String?  @db.NVarChar(500)
+  NotifyOnNewOrder         Boolean  @default(true)
+  NotifyOnOrderUpdate      Boolean  @default(false)
+  SendCustomerConfirmation Boolean  @default(true)
+  UpdatedAt                DateTime @default(now()) @updatedAt
+  SmtpHost                 String?  @db.NVarChar(200)
+  SmtpPassword             String?  @db.NVarChar(500)
+  SmtpPort                 Int?
+  SmtpSecure               Boolean  @default(false)
+  SmtpUser                 String?  @db.NVarChar(200)
+  AttachInvoicePdf         Boolean  @default(true)
+  AttachPackingSlipPdf     Boolean  @default(true)
+  SendRepOrderCopy         Boolean  @default(true)
+  SendShipmentConfirmation Boolean  @default(true)
+  SendShipmentRepNotify    Boolean  @default(true)
+  SendTrackingUpdates      Boolean  @default(true)
+}
+
+model MissingShopifySkus {
+  ID                      BigInt   @id(map: "PK_MissingShopifySkus") @default(autoincrement())
+  SkuID                   String   @db.NVarChar(50)
+  Description             String   @db.NVarChar(Max)
+  Quantity                Int
+  Price                   String   @db.NVarChar(50)
+  FabricContent           String   @db.NVarChar(500)
+  SkuColor                String   @db.NVarChar(50)
+  DateAdded               DateTime @db.DateTime
+  DateModified            DateTime @db.DateTime
+  CategoryID              Int
+  PriceCAD                String   @db.NVarChar(50)
+  PriceUSD                String   @db.NVarChar(50)
+  OrderEntryDescription   String   @db.NVarChar(500)
+  MSRPCAD                 String   @db.NVarChar(50)
+  MSRPUSD                 String   @db.NVarChar(50)
+  Season                  String   @db.NVarChar(500)
+  IsReviewed              Boolean
+  ShopifyProductVariantId BigInt?
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model MultiCategorySkus {
+  SkuId        String?   @db.NVarChar(100)
+  SyncOrder    Int?
+  MFCollection String?   @db.NVarChar(Max)
+  DateAdded    DateTime? @db.DateTime
+
+  @@ignore
+}
+
+model OrderDetails {
+  ID                  Int    @id(map: "PK_OrderDetails") @default(autoincrement())
+  OrderID             Int
+  SkuID               String @db.VarChar(50)
+  Size                String @db.NVarChar(50)
+  Quantity            Int
+  TotalAmount         Float
+  TotalAmountCurrency String @db.NVarChar(50)
+  Orders              Orders @relation(fields: [OrderID], references: [ID], onUpdate: NoAction, map: "FK_OrderDetails_Orders")
+}
+
+model Orders {
+  ID            Int            @id(map: "PK_Orders") @default(autoincrement())
+  DateAdded     DateTime       @default(now(), map: "DF_Orders_DateAdded") @db.DateTime
+  OrderAmount   Float
+  OrderCurrency String         @db.NVarChar(50)
+  CustomerID    Int
+  OrderDetails  OrderDetails[]
+}
+
+model PPSizes {
+  ID              Int    @id(map: "PK_PPSizes") @default(autoincrement())
+  Size            Int
+  CorrespondingPP String @db.NVarChar(50)
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model PreOrderPriceUpdates {
+  Sku      String @db.NVarChar(50)
+  PriceUSD Float
+  MSRPUSD  Float
+  PriceCAD Float
+  MSRPCAD  Float
+
+  @@ignore
+}
+
+model RawSkusFromShopify {
+  ID                                Int     @id(map: "PK_RawSkusFromShopify") @default(autoincrement())
+  SkuID                             String  @db.NVarChar(Max)
+  Quantity                          Int
+  DisplayName                       String  @db.NVarChar(Max)
+  Size                              String  @db.NVarChar(Max)
+  Price                             Float
+  AvailableForSale                  Boolean
+  RawShopifyId                      String? @db.NVarChar(Max)
+  ShopifyId                         BigInt?
+  VariantWeight                     Float?
+  VariantWeightUnit                 String? @db.NVarChar(50)
+  VariantWeightInGrams              Float?
+  productId                         String? @db.NVarChar(500)
+  metafield_order_entry_collection  String? @db.NVarChar(200)
+  metafield_order_entry_description String? @db.NVarChar(Max)
+  metafield_msrp                    String? @db.NVarChar(Max)
+  metafield_cad_ws_price            String? @db.NVarChar(Max)
+  metafield_features                String? @db.NVarChar(Max)
+  metafield_fabric                  String? @db.NVarChar(Max)
+  metafield_color                   String? @db.NVarChar(Max)
+  colorFromMetafield                String? @db.NVarChar(Max)
+  metafield_usd_ws_price            String? @db.NVarChar(Max)
+  metafield_cad_ws_price_test       String? @db.NVarChar(Max)
+  metafield_msrp_us                 String? @db.NVarChar(Max)
+  metafield_msrp_cad                String? @db.NVarChar(Max)
+  ShopifyProductImageURL            String? @db.NVarChar(500)
+  ProductType                       String? @db.NVarChar(200)
+  InventoryItemId                   String? @db.NVarChar(100)
+  ProductStatus                     String? @db.NVarChar(20)
+}
+
+model RawSkusInventoryLevelFromShopify {
+  ID                BigInt @id(map: "PK_RawSkusInventoryLevelFromShopify") @default(autoincrement())
+  InventoryLevelId  String @db.NVarChar(Max)
+  Incoming          Int
+  ParentId          String @db.NVarChar(Max)
+  CommittedQuantity Int?
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model RawSkusVariantFromShopify {
+  ID              BigInt    @default(autoincrement())
+  ParentID        String?   @db.NVarChar(Max)
+  VariantImageUrl String?   @db.NVarChar(Max)
+  AddedOn         DateTime? @default(now(), map: "DF_RawSkusVariantFromShopify_AddedOn") @db.DateTime
+
+  @@ignore
+}
+
+model Reps {
+  ID                    Int          @id(map: "PK_Reps") @default(autoincrement())
+  Name                  String       @db.NVarChar(500)
+  Code                  String       @db.NVarChar(100)
+  Address               String       @db.NVarChar(Max)
+  Phone                 String       @db.NVarChar(50)
+  Fax                   String       @db.NVarChar(50)
+  Cell                  String       @db.NVarChar(50)
+  Email1                String       @db.NVarChar(250)
+  Email2                String       @db.NVarChar(250)
+  Email3                String       @db.NVarChar(250)
+  Country               String       @db.NVarChar(50)
+  Territory             String?      @db.NVarChar(100)
+  DefaultSendOrderEmail Boolean?     @default(true)
+  RepTargets            RepTargets[]
+  Users                 Users[]
+}
+
+model ShopifySyncLog {
+  ID              BigInt   @id(map: "PK_ShopifySyncLog") @default(autoincrement())
+  RawShopifySkuID String   @db.NVarChar(100)
+  SkuID           String   @db.NVarChar(100)
+  RawSkuQuantity  Int
+  SkuQuantity     Int
+  SyncDataTime    DateTime @db.DateTime
+  SyncOrder       Int
+}
+
+/// Tracks Shopify bulk sync operations (run-level, not per-SKU).
+/// Note: This table must be created in production by DBA - see SQL script in plan.
+model ShopifySyncRun {
+  ID                BigInt    @id(map: "PK_ShopifySyncRun") @default(autoincrement())
+  SyncType          String    @db.NVarChar(20)
+  Status            String    @db.NVarChar(20)
+  OperationId       String?   @db.NVarChar(255)
+  StartedAt         DateTime  @db.DateTime
+  CompletedAt       DateTime? @db.DateTime
+  ItemCount         Int?
+  ErrorMessage      String?   @db.NVarChar(Max)
+  CurrentStep       String?   @db.NVarChar(50)
+  CurrentStepDetail String?   @db.NVarChar(500)
+  ProgressPercent   Int?
+  RecordsProcessed  Int?
+  TotalRecords      Int?
+  LastHeartbeat     DateTime? @db.DateTime
+  EntityType        String    @default("product") @db.NVarChar(20)
+
+  @@index([Status, StartedAt], map: "IX_ShopifySyncRun_Status_StartedAt")
+}
+
+model Sku {
+  ID                      BigInt         @id(map: "PK_Sku") @default(autoincrement())
+  SkuID                   String         @db.VarChar(50)
+  Description             String?        @db.NVarChar(Max)
+  Quantity                Int?
+  Price                   String?        @db.NVarChar(100)
+  Size                    String?        @db.NVarChar(50)
+  FabricContent           String?        @db.NVarChar(Max)
+  SkuColor                String?        @db.NVarChar(400)
+  DateAdded               DateTime?      @default(now(), map: "DF_Sku_DateAdded") @db.DateTime
+  DateModified            DateTime?      @default(now(), map: "DF_Sku_DateModified") @db.DateTime
+  CategoryID              Int?
+  OnRoute                 Int?
+  PriceCAD                String?        @db.NVarChar(100)
+  PriceUSD                String?        @db.NVarChar(100)
+  ShowInPreOrder          Boolean?
+  OrderEntryDescription   String?        @db.NVarChar(Max)
+  MSRPCAD                 String?        @db.NVarChar(100)
+  MSRPUSD                 String?        @db.NVarChar(100)
+  OnRouteAvailableDate    DateTime?      @db.DateTime
+  Season                  String?        @db.NVarChar(500)
+  DisplayPriority         Int?
+  ShopifyProductVariantId BigInt?
+  SyncOrderTemp           Int?
+  ShopifyImageURL         String?        @db.NVarChar(500)
+  ProductType             String?        @db.NVarChar(200)
+  CollectionID            Int?
+  ThumbnailPath           String?        @db.NVarChar(500)
+  UnitPriceCAD            Decimal?       @db.Decimal(10, 2)
+  UnitPriceUSD            Decimal?       @db.Decimal(10, 2)
+  UnitsPerSku             Int?           @default(1)
+  ThumbnailSizes          String?        @db.VarChar(100)
+  ShopifyProductId        String?        @db.NVarChar(500)
+  Collection              Collection?    @relation(fields: [CollectionID], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "FK_Sku_Collection")
+  SkuCategories           SkuCategories? @relation(fields: [CategoryID], references: [ID], onDelete: NoAction, onUpdate: NoAction, map: "FK_Sku_SkuCategories")
+}
+
+model SkuImageConfig {
+  id          String  @id @db.VarChar(50)
+  description String  @db.NVarChar(200)
+  pixelSize   Int?
+  useSrcSet   Boolean @default(false)
+  primary     String  @db.VarChar(20)
+  fallback    String? @db.VarChar(20)
+  enabled     Boolean @default(true)
+  sortOrder   Int     @default(0)
+
+  @@map("SkuImageConfig")
+}
+
+model ThumbnailSize {
+  pixelSize  Int      @id
+  quality    Int      @default(80)
+  fit        String   @default("contain") @db.VarChar(20)
+  background String   @default("#FFFFFF") @db.VarChar(10)
+  enabled    Boolean  @default(true)
+  sortOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @default(now()) @updatedAt
+
+  @@map("ThumbnailSize")
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model Sku_ForTransformationOnly {
+  ID                      BigInt    @default(autoincrement())
+  SkuID                   String    @db.VarChar(50)
+  Description             String?   @db.NVarChar(Max)
+  Quantity                Int?
+  Price                   String?   @db.NVarChar(100)
+  Size                    String?   @db.NVarChar(50)
+  FabricContent           String?   @db.NVarChar(Max)
+  SkuColor                String?   @db.NVarChar(400)
+  DateAdded               DateTime? @db.DateTime
+  DateModified            DateTime? @db.DateTime
+  CategoryID              Int?
+  OnRoute                 Int?
+  PriceCAD                String?   @db.NVarChar(100)
+  PriceUSD                String?   @db.NVarChar(100)
+  ShowInPreOrder          Boolean?
+  OrderEntryDescription   String?   @db.NVarChar(Max)
+  MSRPCAD                 String?   @db.NVarChar(100)
+  MSRPUSD                 String?   @db.NVarChar(100)
+  OnRouteAvailableDate    DateTime? @db.DateTime
+  Season                  String?   @db.NVarChar(500)
+  DisplayPriority         Int?
+  ShopifyProductVariantId BigInt?
+  SyncOrderTemp           Int?
+  ShopifyImageURL         String?   @db.NVarChar(500)
+
+  @@ignore
+}
+
+model SkuCategories {
+  ID                      Int               @id(map: "PK_SkuCategory") @default(autoincrement())
+  Name                    String            @db.NVarChar(500)
+  IsPreOrder              Boolean?
+  OnRouteAvailableDate    DateTime?         @db.DateTime
+  OnRouteAvailableDateEnd DateTime?         @db.DateTime
+  ShopifyOrderTags        String?           @db.NVarChar(Max)
+  SortOrder               Int?
+  ShopifyImages           Boolean?
+  Sku                     Sku[]
+  SkuMainSubRship         SkuMainSubRship[]
+}
+
+model SkuCategoriesShopify {
+  ID                      Int          @id(map: "PK_SkuCategoriesShopify") @default(autoincrement())
+  Name                    String       @db.NVarChar(500)
+  IsPreOrder              Boolean?
+  OnRouteAvailableDate    DateTime?    @db.DateTime
+  OnRouteAvailableDateEnd DateTime?    @db.DateTime
+  SkuShopify              SkuShopify[]
+}
+
+model SkuMainCategory {
+  ID              Int               @id(map: "PK_SkuMainCategory") @default(autoincrement())
+  Name            String            @db.NVarChar(250)
+  DisplayOrder    Int?
+  SkuMainSubRship SkuMainSubRship[]
+}
+
+model SkuMainSubRship {
+  ID              Int             @id(map: "PK_SkuMainSubRship_1") @default(autoincrement())
+  SkuMainCatID    Int
+  SkuSubCatID     Int
+  SkuCategories   SkuCategories   @relation(fields: [SkuSubCatID], references: [ID], onUpdate: NoAction, map: "FK_SkuMainSubRship_SkuCategories")
+  SkuMainCategory SkuMainCategory @relation(fields: [SkuMainCatID], references: [ID], onUpdate: NoAction, map: "FK_SkuMainSubRship_SkuMainCategory")
+}
+
+model SkuQuantity {
+  ID              Int        @id(map: "PK_SkuQuantity") @default(autoincrement())
+  SkuID           String     @db.VarChar(50)
+  WareHouseID     Int
+  ReceiptQuantity Int
+  SaleQuantity    Int
+  InvoiceQuantity Int
+  QuantityLeft    Int
+  Warehouses      Warehouses @relation(fields: [WareHouseID], references: [ID], onUpdate: NoAction, map: "FK_SkuQuantity_Warehouses")
+}
+
+model SkusFetchedFromQuickbooks {
+  ID          Int    @id(map: "PK_SkusFetchedFromQuickbooks") @default(autoincrement())
+  Sku         String @db.NVarChar(50)
+  Quantity    String @db.NVarChar(50)
+  Price       String @db.NVarChar(50)
+  Description String @db.NVarChar(500)
+  Country     String @db.NVarChar(500)
+}
+
+model SkusForQBTest {
+  ID           Int       @default(autoincrement())
+  SkuID        String    @id(map: "PK_Sku_ID_ForQBTest") @db.VarChar(50)
+  Description  String?   @db.NVarChar(Max)
+  Quantity     Int?
+  Price        String?   @db.NVarChar(100)
+  Size         String?   @db.NVarChar(50)
+  DateAdded    DateTime? @db.DateTime
+  DateModified DateTime? @db.DateTime
+  CategoryID   Int?
+}
+
+model SkuShopify {
+  ID                      BigInt                @id(map: "PK_SkuShopify") @default(autoincrement())
+  SkuID                   String                @db.VarChar(50)
+  Description             String?               @db.NVarChar(Max)
+  Quantity                Int?
+  Price                   String?               @db.NVarChar(100)
+  Size                    String?               @db.NVarChar(50)
+  FabricContent           String?               @db.NVarChar(Max)
+  SkuColor                String?               @db.NVarChar(200)
+  DateAdded               DateTime?             @default(now(), map: "DF_SkuShopify_DateAdded") @db.DateTime
+  DateModified            DateTime?             @default(now(), map: "DF_SkuShopify_DateModified") @db.DateTime
+  CategoryID              Int?
+  OnRoute                 Int?
+  PriceCAD                String?               @db.NVarChar(100)
+  PriceUSD                String?               @db.NVarChar(100)
+  ShowInPreOrder          Boolean?
+  OrderEntryDescription   String?               @db.NVarChar(Max)
+  MSRPCAD                 String?               @db.NVarChar(100)
+  MSRPUSD                 String?               @db.NVarChar(100)
+  OnRouteAvailableDate    DateTime?             @db.DateTime
+  Season                  String?               @db.NVarChar(500)
+  DisplayPriority         Int?
+  ShopifyProductVariantId BigInt?
+  SkuCategoriesShopify    SkuCategoriesShopify? @relation(fields: [CategoryID], references: [ID], onDelete: NoAction, onUpdate: NoAction, map: "FK_SkuShopify_SkuCategoriesShopify")
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model tmpJSONOrders {
+  vJSON String? @db.NVarChar(Max)
+  Id    Int?
+
+  @@ignore
+}
+
+model Users {
+  ID                Int          @id(map: "PK_Users") @default(autoincrement())
+  LoginID           String       @db.NVarChar(50)
+  Password          String?      @db.NVarChar(50)
+  UserType          String       @db.NVarChar(50)
+  RepId             Int?
+  PasswordHash      String?      @db.NVarChar(255)
+  MustResetPassword Boolean?     @default(true)
+  Email             String?      @db.NVarChar(255)
+  Status            String       @default("legacy") @db.NVarChar(20)
+  Preferences       String?      @db.NVarChar(Max)
+  AuthTokens        AuthTokens[]
+  Reps              Reps?        @relation(fields: [RepId], references: [ID], onDelete: NoAction, onUpdate: NoAction, map: "FK_Users_Reps")
+}
+
+model AuthTokens {
+  ID        Int       @id(map: "PK_AuthTokens") @default(autoincrement())
+  UserID    Int
+  TokenType String    @db.NVarChar(20)
+  ExpiresAt DateTime  @db.DateTime
+  UsedAt    DateTime? @db.DateTime
+  CreatedAt DateTime  @default(now(), map: "DF__AuthToken__Creat__5E55CAA0") @db.DateTime
+  TokenHash String    @db.NVarChar(255)
+  User      Users     @relation(fields: [UserID], references: [ID], onDelete: Cascade, map: "FK_AuthTokens_Users")
+
+  @@index([TokenHash], map: "IX_AuthTokens_TokenHash")
+  @@index([UserID, TokenType], map: "IX_AuthTokens_UserID_Type")
+}
+
+model Warehouses {
+  ID          Int           @id(map: "PK_Warehouses") @default(autoincrement())
+  Name        String        @db.NVarChar(Max)
+  SkuQuantity SkuQuantity[]
+}
+
+model OrderNumberSequence {
+  Prefix     String   @id @db.Char(1)
+  LastNumber Int      @default(10000)
+  UpdatedAt  DateTime @default(now(), map: "DF__OrderNumb__Updat__631A7FBD") @db.DateTime
+}
+
+model Collection {
+  id              Int                   @id @default(autoincrement()) @map("ID")
+  name            String                @map("Name") @db.NVarChar(500)
+  type            String                @map("Type") @db.NVarChar(20)
+  sortOrder       Int                   @default(0) @map("SortOrder")
+  imageUrl        String?               @map("ImageUrl") @db.NVarChar(500)
+  shipWindowStart DateTime?             @map("ShipWindowStart") @db.DateTime
+  shipWindowEnd   DateTime?             @map("ShipWindowEnd") @db.DateTime
+  isActive        Boolean               @default(true) @map("IsActive")
+  createdAt       DateTime              @default(now(), map: "DF__Collectio__Creat__22FFFAA8") @map("CreatedAt") @db.DateTime
+  updatedAt       DateTime              @default(now(), map: "DF__Collectio__Updat__23F41EE1") @map("UpdatedAt") @db.DateTime
+  mappings        ShopifyValueMapping[]
+  skus            Sku[]
+
+  @@map("Collection")
+}
+
+model ShopifyValueMapping {
+  id           Int         @id @default(autoincrement()) @map("ID")
+  rawValue     String      @unique @map("RawValue")
+  collectionId Int?        @map("CollectionID")
+  status       String      @default("unmapped") @map("Status") @db.NVarChar(20)
+  note         String?     @map("Note") @db.NVarChar(500)
+  skuCount     Int         @default(0) @map("SkuCount")
+  firstSeenAt  DateTime    @default(now(), map: "DF__ShopifyVa__First__29ACF837") @map("FirstSeenAt") @db.DateTime
+  lastSeenAt   DateTime    @default(now(), map: "DF__ShopifyVa__LastS__2AA11C70") @map("LastSeenAt") @db.DateTime
+  collection   Collection? @relation(fields: [collectionId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "FK_ShopifyValueMapping_Collection")
+
+  @@map("ShopifyValueMapping")
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model PG_Desc_OED {
+  ID                    String? @db.NVarChar(255)
+  SkuID                 String? @db.NVarChar(255)
+  Description           String? @db.NVarChar(255)
+  Quantity              Float?
+  Pack_Size             String? @map("Pack Size") @db.NVarChar(255)
+  Price                 String? @db.NVarChar(255)
+  Fabric_Content        String? @map("Fabric Content") @db.NVarChar(255)
+  SkuColor              String? @db.NVarChar(255)
+  DateAdded             String? @db.NVarChar(255)
+  DateModified          String? @db.NVarChar(255)
+  CategoryID            Float?
+  PriceCAD              Float?
+  PriceUSD              Float?
+  Price_Pack_CAD        Float?  @map("Price Pack CAD")
+  Price_Pack_USD        Float?  @map("Price Pack USD")
+  OrderEntryDescription String? @db.NVarChar(255)
+  MSRPCAD               Float?
+  MSRPUSD               Float?
+  Season                String? @db.NVarChar(255)
+  IsReviewed            String? @db.NVarChar(255)
+
+  @@ignore
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model PGSkus20240204 {
+  ID                    String? @db.NVarChar(255)
+  SkuID                 String? @db.NVarChar(255)
+  Description           String? @db.NVarChar(255)
+  Quantity              Float?
+  Fabric_Content        String? @map("Fabric Content") @db.NVarChar(255)
+  SkuColor              String? @db.NVarChar(255)
+  DateAdded             String? @db.NVarChar(255)
+  DateModified          String? @db.NVarChar(255)
+  CategoryID            Float?
+  PriceCAD              Float?
+  PriceUSD              Float?
+  OrderEntryDescription String? @db.NVarChar(255)
+  MSRPCAD               Float?
+  MSRPUSD               Float?
+  Season                String? @db.NVarChar(255)
+  IsReviewed            String? @db.NVarChar(255)
+
+  @@ignore
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model PPGPrices {
+  SkuID        String? @db.NVarChar(255)
+  CategoryID   Float?
+  PriceCAD     Float?
+  PriceUSD     Float?
+  PricePackCAD Float?
+  PricePackUSD Float?
+  MSRPCAD      Float?
+  MSRPUSD      Float?
+
+  @@ignore
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model PPGPricesN {
+  SkuID        String? @db.NVarChar(255)
+  CategoryID   Float?
+  PriceCAD     Float?
+  PriceUSD     Float?
+  PricePackCAD Float?
+  PricePackUSD Float?
+  MSRPCAD      Float?
+  MSRPUSD      Float?
+
+  @@ignore
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model PPGPricesN_20240110 {
+  SkuID        String? @db.NVarChar(255)
+  CategoryID   Float?
+  PriceCAD     Float?
+  PriceUSD     Float?
+  PricePackCAD Float?
+  PricePackUSD Float?
+  MSRPCAD      Float?
+  MSRPUSD      Float?
+
+  @@ignore
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model PPGPricesN_Modified {
+  SkuID        String? @db.NVarChar(255)
+  CategoryID   Float?
+  PriceCAD     Float?
+  PriceUSD     Float?
+  PricePackCAD Float?
+  PricePackUSD Float?
+  MSRPCAD      Float?
+  MSRPUSD      Float?
+
+  @@ignore
+}
+
+model RepTargets {
+  ID           Int       @id(map: "PK__RepTarge__3214EC27E6929715") @default(autoincrement())
+  RepID        Int
+  PeriodType   String    @db.NVarChar(20)
+  PeriodStart  DateTime  @db.DateTime
+  TargetAmount Decimal   @db.Decimal(18, 2)
+  CreatedAt    DateTime  @default(now(), map: "DF__RepTarget__Creat__67DF34DA") @db.DateTime
+  UpdatedAt    DateTime? @db.DateTime
+  Reps         Reps      @relation(fields: [RepID], references: [ID], onUpdate: NoAction, map: "FK_RepTargets_Reps")
+
+  @@index([PeriodType, PeriodStart], map: "IX_RepTargets_Period")
+  @@index([RepID], map: "IX_RepTargets_RepID")
+}
+
+model AliasSignals {
+  ID             Int       @id(map: "PK__AliasSig__3214EC27A01A4005") @default(autoincrement())
+  EntityType     String    @db.NVarChar(50)
+  SelectedValues String    @db.NVarChar(Max)
+  ReportType     String    @db.NVarChar(50)
+  CreatedBy      Int?
+  CreatedAt      DateTime? @default(now(), map: "DF__AliasSign__Creat__5A8539BC")
+  SessionID      String?   @db.NVarChar(100)
+
+  @@index([CreatedAt], map: "IX_AliasSignals_CreatedAt")
+  @@index([EntityType], map: "IX_AliasSignals_EntityType")
+  @@index([ReportType], map: "IX_AliasSignals_ReportType")
+}
+
+/// Shipment records for orders - tracks what was actually shipped vs ordered
+model Shipments {
+  ID                   BigInt              @id(map: "PK_Shipments") @default(autoincrement())
+  CustomerOrderID      BigInt
+  ShippedSubtotal      Float               @default(0)
+  ShippingCost         Float               @default(0)
+  ShippedTotal         Float               @default(0)
+  ShipDate             DateTime?           @db.DateTime
+  InternalNotes        String?             @db.NVarChar(Max)
+  CreatedBy            String              @db.NVarChar(255)
+  CreatedAt            DateTime            @default(now(), map: "DF__Shipments__Creat__7EC29A32") @db.DateTime
+  UpdatedAt            DateTime?           @db.DateTime
+  ShopifyFulfillmentID String?             @db.NVarChar(50)
+  VoidNotes            String?             @db.NVarChar(Max)
+  VoidReason           String?             @db.NVarChar(100)
+  VoidedAt             DateTime?           @db.DateTime
+  VoidedBy             String?             @db.NVarChar(255)
+  PlannedShipmentID    BigInt?
+  ShipmentDocuments    ShipmentDocuments[]
+  ShipmentItems        ShipmentItems[]
+  CustomerOrders       CustomerOrders      @relation(fields: [CustomerOrderID], references: [ID], onUpdate: NoAction, map: "FK_Shipments_CustomerOrders")
+  PlannedShipment      PlannedShipment?    @relation(fields: [PlannedShipmentID], references: [ID], map: "FK_Shipments_PlannedShipment")
+  ShipmentTracking     ShipmentTracking[]
+
+  @@index([CustomerOrderID], map: "IX_Shipments_CustomerOrderID")
+  @@index([VoidedAt], map: "IX_Shipments_VoidedAt")
+  @@index([PlannedShipmentID], map: "IX_Shipments_PlannedShipmentID")
+}
+
+/// Line items included in a shipment - links to order items with quantity shipped
+model ShipmentItems {
+  ID                BigInt              @id(map: "PK_ShipmentItems") @default(autoincrement())
+  ShipmentID        BigInt
+  OrderItemID       BigInt
+  QuantityShipped   Int
+  PriceOverride     Float?
+  PlannedShipmentID BigInt?
+  OrderItem         CustomerOrdersItems @relation(fields: [OrderItemID], references: [ID], onUpdate: NoAction, map: "FK_ShipmentItems_CustomerOrdersItems")
+  PlannedShipment   PlannedShipment?    @relation(fields: [PlannedShipmentID], references: [ID], onUpdate: NoAction, map: "FK_ShipmentItems_PlannedShipment")
+  Shipment          Shipments           @relation(fields: [ShipmentID], references: [ID], onUpdate: NoAction, map: "FK_ShipmentItems_Shipments")
+
+  @@index([ShipmentID], map: "IX_ShipmentItems_ShipmentID")
+  @@index([OrderItemID], map: "IX_ShipmentItems_OrderItemID")
+  @@index([PlannedShipmentID], map: "IX_ShipmentItems_PlannedShipmentID")
+}
+
+/// Tracking numbers for shipments - supports multiple tracking numbers per shipment
+model ShipmentTracking {
+  ID             BigInt    @id(map: "PK_ShipmentTracking") @default(autoincrement())
+  ShipmentID     BigInt
+  Carrier        String    @db.NVarChar(50)
+  TrackingNumber String    @db.NVarChar(100)
+  AddedAt        DateTime  @default(now(), map: "DF__ShipmentT__Added__0663BBFA") @db.DateTime
+  Shipment       Shipments @relation(fields: [ShipmentID], references: [ID], onUpdate: NoAction, map: "FK_ShipmentTracking_Shipments")
+
+  @@index([ShipmentID], map: "IX_ShipmentTracking_ShipmentID")
+}
+
+/// Tracks which SQL migrations have been applied to the database
+model SchemaMigrations {
+  ID        Int      @id(map: "PK_SchemaMigrations") @default(autoincrement())
+  Name      String   @unique(map: "UQ_SchemaMigrations_Name") @db.NVarChar(255)
+  AppliedAt DateTime @default(now(), map: "DF__SchemaMig__Appli__4460EE73") @db.DateTime
+
+  @@map("SchemaMigrations")
+}
+
+/// Feature interest tracking - captures user expectations for upcoming features
+model FeatureInterest {
+  ID              BigInt   @id(map: "PK_FeatureInterest") @default(autoincrement())
+  Feature         String   @db.NVarChar(100)
+  SelectedOptions String?  @db.NVarChar(Max)
+  FreeText        String?  @db.NVarChar(Max)
+  OrderId         BigInt?
+  OrderNumber     String?  @db.NVarChar(50)
+  UserId          String?  @db.NVarChar(255)
+  CreatedAt       DateTime @default(now()) @db.DateTime
+
+  @@index([Feature], map: "IX_FeatureInterest_Feature")
+  @@index([CreatedAt], map: "IX_FeatureInterest_CreatedAt")
+}
+
+/// Shipment documents - stores generated PDFs (packing slips, invoices)
+model ShipmentDocuments {
+  ID             BigInt    @id(map: "PK_ShipmentDocuments") @default(autoincrement())
+  ShipmentID     BigInt
+  OrderID        BigInt
+  DocumentType   String    @db.NVarChar(50)
+  DocumentNumber String    @db.NVarChar(100)
+  FileName       String    @db.NVarChar(255)
+  FilePath       String    @db.NVarChar(500)
+  FileSize       Int?
+  MimeType       String    @default("application/pdf") @db.NVarChar(100)
+  GeneratedAt    DateTime  @default(now()) @db.DateTime
+  GeneratedBy    String?   @db.NVarChar(255)
+  SentToCustomer Boolean   @default(false)
+  SentAt         DateTime? @db.DateTime
+  Shipment       Shipments @relation(fields: [ShipmentID], references: [ID], onDelete: Cascade, map: "FK_ShipmentDocuments_Shipment")
+
+  @@index([ShipmentID], map: "IX_ShipmentDocuments_ShipmentID")
+  @@index([OrderID], map: "IX_ShipmentDocuments_OrderID")
+  @@index([DocumentNumber], map: "IX_ShipmentDocuments_DocumentNumber")
+  @@index([DocumentType], map: "IX_ShipmentDocuments_DocumentType")
+}
+
+/// Backup table for orphaned CustomerOrdersItems (audit/archive purposes)
+/// Created during migration to clean up data integrity issues
+model CustomerOrdersItems_Orphaned_Backup {
+  ID              BigInt    @id(map: "PK_CustomerOrdersItems_Orphaned_Backup")
+  CustomerOrderID BigInt
+  OrderNumber     String    @db.NVarChar(50)
+  SKU             String    @db.NVarChar(50)
+  SKUVariantID    BigInt
+  Quantity        Int
+  Price           Float
+  PriceCurrency   String    @db.NVarChar(50)
+  Notes           String    @db.NVarChar(Max)
+  LineDiscount    Float?
+  Status          String?   @db.NVarChar(20)
+  CancelledQty    Int?
+  CancelledAt     DateTime? @db.DateTime
+  CancelledBy     String?   @db.NVarChar(255)
+  CancelledReason String?   @db.NVarChar(100)
+}
+
+/// Backup table for orphaned AuthTokens (audit/archive purposes)
+/// Created during migration to clean up data integrity issues
+model AuthTokens_Orphaned_Backup {
+  ID        BigInt   @id(map: "PK_AuthTokens_Orphaned_Backup")
+  UserID    BigInt
+  Token     String   @db.NVarChar(500)
+  ExpiresAt DateTime @db.DateTime
+  CreatedAt DateTime @db.DateTime
+}
+
+/// A set of backup rows created at a specific point in time
+model BackupSet {
+  id          Int         @id @default(autoincrement())
+  backupType  String      @db.NVarChar(50)
+  description String?     @db.NVarChar(255)
+  rowCount    Int
+  sizeBytes   Int?
+  createdAt   DateTime    @default(now())
+  createdBy   String?     @db.NVarChar(100)
+  status      String      @default("active") @db.NVarChar(20)
+  rows        BackupRow[]
+
+  @@index([backupType, createdAt])
+  @@index([status])
+}
+
+/// Individual rows within a backup set, stored as JSON
+model BackupRow {
+  id          BigInt    @id @default(autoincrement())
+  backupSetId Int
+  rowData     String    @db.NVarChar(Max)
+  backupSet   BackupSet @relation(fields: [backupSetId], references: [id], onDelete: Cascade)
+
+  @@index([backupSetId])
+}
+
+/// Configuration for which Shopify fields to sync per entity type
+model SyncFieldConfig {
+  id           Int       @id @default(autoincrement())
+  entityType   String    @db.NVarChar(50)
+  fieldPath    String    @db.NVarChar(200)
+  fieldType    String    @db.NVarChar(50)
+  category     String?   @db.NVarChar(50)
+  description  String?   @db.NVarChar(500)
+  displayOrder Int       @default(0)
+  enabled      Boolean   @default(false)
+  isProtected  Boolean   @default(false)
+  isMetafield  Boolean   @default(false)
+  accessStatus String?   @db.NVarChar(20)
+  lastProbedAt DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@unique([entityType, fieldPath])
+  @@index([entityType])
+  @@index([isProtected])
+}
+
+/// Filter rules for sync (e.g., only sync ACTIVE products)
+/// Multiple filters on same entity are AND'd together
+model SyncFilterConfig {
+  id         Int      @id @default(autoincrement())
+  entityType String   @db.NVarChar(50)
+  fieldPath  String   @db.NVarChar(200)
+  operator   String   @db.NVarChar(20)
+  value      String   @db.NVarChar(500)
+  enabled    Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([entityType, fieldPath])
+  @@index([entityType, enabled])
+}
+
+/// Runtime config for sync behavior (status cascade arrays, flags)
+model SyncRuntimeConfig {
+  id          Int      @id @default(autoincrement())
+  entityType  String   @db.NVarChar(50)
+  configKey   String   @db.NVarChar(100)
+  enabled     Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  configValue String?  @db.NVarChar(Max)
+
+  @@unique([entityType, configKey])
+  @@index([entityType, enabled])
+}
+
+/// Cached Shopify GraphQL schema introspection results
+model ShopifySchemaCache {
+  id         Int       @id @default(autoincrement())
+  entityType String    @unique @db.NVarChar(50)
+  apiVersion String    @db.NVarChar(20)
+  schemaJson String    @db.NVarChar(Max)
+  fetchedAt  DateTime  @default(now())
+  expiresAt  DateTime?
+}
+
+/// Audit trail for all sync configuration changes
+model SyncConfigAudit {
+  id            Int      @id @default(autoincrement())
+  configType    String   @db.NVarChar(50)
+  entityType    String   @db.NVarChar(50)
+  fieldPath     String   @db.NVarChar(200)
+  action        String   @db.NVarChar(20)
+  previousValue String?  @db.NVarChar(500)
+  newValue      String?  @db.NVarChar(500)
+  changedBy     String   @db.NVarChar(255)
+  changedAt     DateTime @default(now())
+
+  @@index([entityType, changedAt])
+  @@index([changedBy])
+}
+
+/// Field-level mapping: Shopify GraphQL field -> SQL column with transforms.
+/// Used by the schema graph UI for configuring how individual fields sync.
+/// Separate from SyncFieldConfig (which tracks field discovery/selection).
+model ShopifyFieldMapping {
+  id                 Int      @id @default(autoincrement())
+  /// The root entity type (e.g., "ProductVariant", "Product", "InventoryItem")
+  entityType         String   @db.NVarChar(50)
+  /// The field path within the entity (e.g., "price", "price.amount", "inventoryItem.measurement.weight")
+  fieldPath          String   @db.NVarChar(200)
+  /// Full path from root: entityType + "." + fieldPath (stored for query convenience)
+  fullPath           String   @db.NVarChar(255)
+  /// Nesting depth: 1 for direct fields, 2+ for nested (e.g., "price" = 1, "price.amount" = 2)
+  depth              Int
+  /// Target database table (e.g., "Sku", "RawSkusFromShopify")
+  targetTable        String?  @db.NVarChar(100)
+  /// Target column in the table (e.g., "Price", "ShopifyProductVariantId")
+  targetColumn       String?  @db.NVarChar(100)
+  /// How to transform the value before writing
+  transformType      String   @default("direct") @db.NVarChar(20)
+  /// Additional transform configuration as JSON (e.g., lookup table name, custom function)
+  transformConfig    String?  @db.NVarChar(Max)
+  /// Whether this mapping is active (included in sync)
+  enabled            Boolean  @default(false)
+  /// Protected fields cannot be disabled (id, sku, price, etc.)
+  isProtected        Boolean  @default(false)
+  /// Access verification status from introspection probing
+  accessStatus       String   @default("untested") @db.NVarChar(20)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  /// Connection/tenant identifier for multi-tenant support
+  connectionId       String   @default("default") @db.NVarChar(100)
+  /// Which sync service uses this field: 'bulk_sync', 'customer_sync', etc.
+  /// NULL means field is not yet assigned to any service
+  serviceName        String?  @db.NVarChar(50)
+  /// For metafield accessors: the Shopify metafield namespace
+  /// Example: "custom" for metafield(namespace: "custom", key: "fabric")
+  metafieldNamespace String?  @db.NVarChar(100)
+  /// For metafield accessors: the Shopify metafield key
+  /// Example: "fabric" for metafield(namespace: "custom", key: "fabric")
+  metafieldKey       String?  @db.NVarChar(100)
+  /// For connection fields: the pagination limit
+  /// Example: 10 for inventoryLevels(first: 10)
+  paginationLimit    Int?
+  /// For fields with arguments: JSON-encoded arguments
+  /// Example: '{"names": ["incoming", "committed"]}' for quantities(names: [...])
+  queryArguments     String?  @db.NVarChar(500)
+  /// Field type for query generation logic
+  /// - 'scalar': Direct field (product.title)
+  /// - 'connection': Has edges/node structure (inventoryLevels)
+  /// - 'metafield': Uses alias: metafield(...) accessor
+  /// - 'object': Inline object (selectedOptions { name value })
+  fieldType          String   @default("scalar") @db.NVarChar(20)
+  /// Order in generated query (preserves exact hardcoded query order)
+  /// 1 = first field, 2 = second, etc.
+  sortOrder          Int?
+
+  @@unique([connectionId, entityType, fieldPath])
+  @@index([entityType])
+  @@index([fullPath])
+  @@index([enabled])
+  @@index([connectionId])
+  @@index([serviceName])
+  @@map("ShopifyFieldMapping")
+}
+
+/// Unified cache for Shopify schema: types, enums, and metafields.
+/// Replaces ShopifySchemaCache with full-depth introspection.
+model ShopifyTypeCache {
+  id           Int      @id @default(autoincrement())
+  /// Unique key: "type:Product", "enum:CurrencyCode", "metafield:PRODUCT:custom:fabric"
+  cacheKey     String   @db.NVarChar(300)
+  /// Category discriminator
+  category     String   @db.NVarChar(20)
+  /// For entities/object_types/enums: the GraphQL type name
+  typeName     String?  @db.NVarChar(100)
+  /// For entities/object_types: IntrospectionField[] as JSON
+  schemaJson   String?  @db.NVarChar(Max)
+  /// For enums: JSON array of values ["USD", "CAD", "EUR"]
+  enumValues   String?  @db.NVarChar(Max)
+  /// For metafields: owner type (PRODUCT, PRODUCTVARIANT, etc.)
+  ownerType    String?  @db.NVarChar(50)
+  /// For metafields: namespace
+  namespace    String?  @db.NVarChar(100)
+  /// For metafields: key
+  key          String?  @db.NVarChar(100)
+  /// For metafields: human-readable name from definition
+  displayName  String?  @db.NVarChar(200)
+  /// For metafields: data type (single_line_text_field, number_decimal, etc.)
+  dataType     String?  @db.NVarChar(100)
+  /// For metafields: description
+  description  String?  @db.NVarChar(500)
+  /// For metafields: discovery source
+  source       String?  @db.NVarChar(20)
+  /// Shopify API version
+  apiVersion   String   @db.NVarChar(20)
+  /// When cached
+  fetchedAt    DateTime @default(now())
+  /// Connection/tenant identifier for multi-tenant support
+  connectionId String   @default("default") @db.NVarChar(100)
+
+  @@unique([connectionId, cacheKey])
+  @@index([category])
+  @@index([ownerType])
+  @@index([typeName])
+  @@index([connectionId])
+  @@map("ShopifyTypeCache")
+}
+
+/// Mapping configuration: source resource -> target table with field transformations
+model SyncMapping {
+  id             String         @id @default(uuid())
+  name           String         @db.NVarChar(200)
+  description    String?        @db.NVarChar(500)
+  sourceResource String         @db.NVarChar(100)
+  targetTable    String         @db.NVarChar(200)
+  keyMapping     String?        @db.NVarChar(Max)
+  mappingsJson   String         @db.NVarChar(Max)
+  webhookTopics  String?        @db.NVarChar(500)
+  enabled        Boolean        @default(true)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  runs           SyncRun[]
+  schedules      SyncSchedule[]
+
+  @@index([enabled])
+  @@index([sourceResource])
+}
+
+/// Schedule configuration for automated syncs
+model SyncSchedule {
+  id               String      @id @default(uuid())
+  mappingId        String
+  type             String      @db.NVarChar(20)
+  cronPattern      String      @db.NVarChar(100)
+  timezone         String      @default("UTC") @db.NVarChar(50)
+  enabled          Boolean     @default(true)
+  options          String?     @db.NVarChar(Max)
+  nextRun          DateTime?
+  lastRun          DateTime?
+  lastStatus       String?     @db.NVarChar(20)
+  consecutiveFails Int         @default(0)
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+  mapping          SyncMapping @relation(fields: [mappingId], references: [id], onDelete: Cascade)
+
+  @@index([enabled, nextRun])
+  @@index([mappingId])
+}
+
+/// History of sync run executions
+model SyncRun {
+  id             String       @id @default(uuid())
+  mappingId      String?
+  syncType       String       @db.NVarChar(20)
+  status         String       @db.NVarChar(20)
+  triggeredBy    String?      @db.NVarChar(100)
+  startedAt      DateTime     @default(now())
+  completedAt    DateTime?
+  recordsFetched Int?
+  recordsWritten Int?
+  recordsSkipped Int?
+  recordsFailed  Int?
+  durationMs     Int?
+  errorMessage   String?      @db.NVarChar(Max)
+  metadata       String?      @db.NVarChar(Max)
+  mapping        SyncMapping? @relation(fields: [mappingId], references: [id])
+
+  @@index([status, startedAt])
+  @@index([mappingId])
+  @@index([syncType])
+}
+
+/// History of received Shopify webhooks
+model WebhookHistory {
+  id                String    @id @default(uuid())
+  shopifyWebhookId  String    @unique @db.NVarChar(100)
+  topic             String    @db.NVarChar(100)
+  shopDomain        String    @db.NVarChar(200)
+  receivedAt        DateTime  @default(now())
+  processedAt       DateTime?
+  status            String    @db.NVarChar(20)
+  mappingsProcessed Int?
+  recordsWritten    Int?
+  processingMs      Int?
+  errorMessage      String?   @db.NVarChar(Max)
+
+  @@index([status, receivedAt])
+  @@index([topic])
+  @@index([shopifyWebhookId])
+}
+
+/// Global sync settings - configurable via admin UI at /admin/shopify/settings
+model SyncSettings {
+  id                         Int                   @id @default(autoincrement()) @map("ID")
+  version                    Int                   @default(1) @map("Version")
+  thumbnailSettingsVersion   Int                   @default(5) @map("ThumbnailSettingsVersion")
+  thumbnailSizeSm            Int                   @default(120) @map("ThumbnailSizeSm")
+  thumbnailSizeMd            Int                   @default(240) @map("ThumbnailSizeMd")
+  thumbnailSizeLg            Int                   @default(480) @map("ThumbnailSizeLg")
+  thumbnailQuality           Int                   @default(80) @map("ThumbnailQuality")
+  thumbnailFit               String                @default("contain") @map("ThumbnailFit") @db.NVarChar(20)
+  thumbnailBackground        String                @default("#FFFFFF") @map("ThumbnailBackground") @db.NVarChar(10)
+  thumbnailFetchTimeoutMs    Int                   @default(15000) @map("ThumbnailFetchTimeoutMs")
+  thumbnailBatchConcurrency  Int                   @default(10) @map("ThumbnailBatchConcurrency")
+  thumbnailEnabled           Boolean               @default(true) @map("ThumbnailEnabled")
+  backupEnabled              Boolean               @default(true) @map("BackupEnabled")
+  backupRetentionDays        Int                   @default(7) @map("BackupRetentionDays")
+  cleanupStaleBackups        Boolean               @default(true) @map("CleanupStaleBackups")
+  syncMaxWaitMs              Int                   @default(600000) @map("SyncMaxWaitMs")
+  syncPollIntervalMs         Int                   @default(3000) @map("SyncPollIntervalMs")
+  updatedAt                  DateTime              @default(now()) @updatedAt @map("UpdatedAt")
+  thumbnailSizeXl            Int                   @default(720) @map("ThumbnailSizeXl")
+  thumbnailDuringSync        Boolean               @default(false) @map("ThumbnailDuringSync")
+  thumbnailSizeLgEnabled     Boolean               @default(true) @map("ThumbnailSizeLgEnabled")
+  thumbnailSizeMdEnabled     Boolean               @default(true) @map("ThumbnailSizeMdEnabled")
+  thumbnailSizeSmEnabled     Boolean               @default(true) @map("ThumbnailSizeSmEnabled")
+  thumbnailSizeXlEnabled     Boolean               @default(true) @map("ThumbnailSizeXlEnabled")
+  useProductImageGallery     Boolean               @default(false) @map("UseProductImageGallery")
+  shopifyStoreDomain         String?               @map("ShopifyStoreDomain") @db.NVarChar(200)
+  introspectMetafieldLimit   Int                   @default(100) @map("IntrospectMetafieldLimit")
+  introspectRecordSampleSize Int                   @default(250) @map("IntrospectRecordSampleSize")
+  exportAllowShopifyFallback Boolean               @default(true) @map("ExportAllowShopifyFallback")
+  exportExcelDisplayPx       Int                   @default(96) @map("ExportExcelDisplayPx")
+  exportImageConcurrency     Int                   @default(10) @map("ExportImageConcurrency")
+  exportPdfDisplayPx         Int                   @default(60) @map("ExportPdfDisplayPx")
+  exportRequireS3            Boolean               @default(true) @map("ExportRequireS3")
+  exportThumbnailSize        Int                   @default(120) @map("ExportThumbnailSize")
+  history                    SyncSettingsHistory[]
+
+  @@map("SyncSettings")
+}
+
+/// History of sync settings changes for audit trail
+model SyncSettingsHistory {
+  id         Int          @id @default(autoincrement()) @map("ID")
+  settingsId Int          @map("SettingsID")
+  version    Int          @map("Version")
+  snapshot   String       @map("Snapshot") @db.NVarChar(Max)
+  changedBy  String?      @map("ChangedBy") @db.NVarChar(100)
+  changedAt  DateTime     @default(now()) @map("ChangedAt")
+  changeNote String?      @map("ChangeNote") @db.NVarChar(500)
+  settings   SyncSettings @relation(fields: [settingsId], references: [id], onDelete: Cascade)
+
+  @@index([settingsId])
+  @@map("SyncSettingsHistory")
+}
+
+/// Tracks standalone thumbnail generation runs (separate from sync)
+model ThumbnailGenerationRun {
+  id                BigInt    @id @default(autoincrement()) @map("ID")
+  status            String    @map("Status") @db.NVarChar(20)
+  startedAt         DateTime  @map("StartedAt")
+  completedAt       DateTime? @map("CompletedAt")
+  currentStep       String?   @map("CurrentStep") @db.NVarChar(50)
+  currentStepDetail String?   @map("CurrentStepDetail") @db.NVarChar(500)
+  progressPercent   Int?      @map("ProgressPercent")
+  totalImages       Int?      @map("TotalImages")
+  processedCount    Int?      @default(0) @map("ProcessedCount")
+  skippedCount      Int?      @default(0) @map("SkippedCount")
+  failedCount       Int?      @default(0) @map("FailedCount")
+  enabledSizes      String?   @map("EnabledSizes") @db.NVarChar(50)
+  errorMessage      String?   @map("ErrorMessage") @db.NVarChar(Max)
+
+  @@index([status, startedAt], map: "IX_ThumbnailGenerationRun_Status_StartedAt")
+  @@map("ThumbnailGenerationRun")
+}
+
+/// Export job tracking for durable XLSX/PDF generation
+/// Follows same patterns as SyncRun and ThumbnailGenerationRun
+model ExportJob {
+  id                String    @id @default(uuid()) @map("id")
+  type              String    @map("type") @db.NVarChar(20)
+  triggeredBy       String    @map("triggeredBy") @db.NVarChar(100)
+  triggeredByRole   String    @map("triggeredByRole") @db.NVarChar(20)
+  filters           String    @map("filters") @db.NVarChar(Max)
+  status            String    @default("pending") @map("status") @db.NVarChar(20)
+  currentStep       String?   @map("currentStep") @db.NVarChar(50)
+  currentStepDetail String?   @map("currentStepDetail") @db.NVarChar(500)
+  progressPercent   Int?      @map("progressPercent")
+  createdAt         DateTime  @default(now()) @map("createdAt")
+  startedAt         DateTime? @map("startedAt")
+  completedAt       DateTime? @map("completedAt")
+  durationMs        Int?      @map("durationMs")
+  totalSkus         Int?      @map("totalSkus")
+  imagesProcessed   Int?      @map("imagesProcessed")
+  s3Hits            Int?      @map("s3Hits")
+  shopifyFallbacks  Int?      @map("shopifyFallbacks")
+  imageFetchFails   Int?      @map("imageFetchFails")
+  outputS3Key       String?   @map("outputS3Key") @db.NVarChar(500)
+  outputFilename    String?   @map("outputFilename") @db.NVarChar(200)
+  outputSizeBytes   Int?      @map("outputSizeBytes")
+  expiresAt         DateTime? @map("expiresAt")
+  errorMessage      String?   @map("errorMessage") @db.NVarChar(Max)
+  retryCount        Int       @default(0) @map("retryCount")
+
+  @@index([status, createdAt], map: "IX_ExportJob_status_createdAt")
+  @@index([triggeredBy], map: "IX_ExportJob_triggeredBy")
+  @@map("ExportJob")
+}
+
+/// Size ordering configuration - defines how sizes sort across the system
+model SizeOrderConfig {
+  ID             Int      @id(map: "PK_SizeOrderConfig") @default(autoincrement())
+  Sizes          String   @db.NVarChar(Max)
+  UpdatedAt      DateTime @default(now()) @updatedAt
+  UpdatedBy      String?  @db.NVarChar(255)
+  ValidatedSizes String?  @db.NVarChar(Max)
+}
+
+/// Size alias - maps raw Shopify size to canonical size for sorting
+model SizeAlias {
+  ID            Int      @id(map: "PK_SizeAlias") @default(autoincrement())
+  RawSize       String   @unique @db.NVarChar(100)
+  CanonicalSize String   @db.NVarChar(100)
+  UpdatedAt     DateTime @default(now()) @updatedAt
+  UpdatedBy     String?  @db.NVarChar(255)
+
+  @@index([CanonicalSize])
+  @@map("SizeAlias")
+}
+
+/// Planned shipment - groups items by collection with specific ship dates
+model PlannedShipment {
+  ID                  BigInt                @id(map: "PK_PlannedShipment") @default(autoincrement())
+  CustomerOrderID     BigInt
+  CollectionID        Int?
+  CollectionName      String?               @db.NVarChar(500)
+  PlannedShipStart    DateTime              @db.DateTime
+  PlannedShipEnd      DateTime              @db.DateTime
+  Status              String                @default("Planned") @db.NVarChar(20)
+  CreatedAt           DateTime              @default(now()) @db.DateTime
+  UpdatedAt           DateTime?             @db.DateTime
+  IsCombined          Boolean               @default(false)
+  OriginalShipmentIds String?               @db.NVarChar(Max)
+  Items               CustomerOrdersItems[]
+  CustomerOrders      CustomerOrders        @relation(fields: [CustomerOrderID], references: [ID], onDelete: Cascade, map: "FK_PlannedShipment_CustomerOrders")
+  ShipmentItems       ShipmentItems[]
+  Shipments           Shipments[]
+
+  @@index([CustomerOrderID], map: "IX_PlannedShipment_CustomerOrderID")
+  @@index([Status], map: "IX_PlannedShipment_Status")
+  @@map("PlannedShipments")
+}
+
+

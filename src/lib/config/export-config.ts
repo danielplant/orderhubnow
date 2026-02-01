@@ -6,6 +6,11 @@
  * - Row heights (image row vs data rows)
  * - Visual styling (colors, fonts, borders)
  * - Currency display options
+ *
+ * DEPRECATION NOTE (Phase 1 - Export Policy):
+ * Thumbnail/image settings have been migrated to the database (SyncSettings table).
+ * Use getExportPolicy() from '@/lib/data/queries/export-policy' instead of hardcoded values.
+ * The EXPORT_THUMBNAIL constant has been removed - export routes now read from DB.
  */
 
 import type {
@@ -14,24 +19,6 @@ import type {
   ExportStyleConfig,
   CurrencyConfig,
 } from '@/lib/types/export'
-
-import { THUMBNAIL_SIZES, type ThumbnailSize } from '@/lib/utils/thumbnails'
-
-/**
- * Thumbnail settings for export
- * Thumbnails are stored in S3 at multiple sizes (120, 240, 480px, 720px)
- * Exports use the smallest size for efficiency
- */
-export const EXPORT_THUMBNAIL = {
-  /** Which size variant to use for exports */
-  exportSize: 'sm' as ThumbnailSize,
-  /** Display width in Excel (1 inch at 96dpi) */
-  excelDisplayPx: 96,
-  /** Display width in PDF */
-  pdfDisplayPx: 60,
-  /** The actual pixel size of the source thumbnail */
-  sourceSize: THUMBNAIL_SIZES.sm, // 120px
-} as const
 
 /**
  * Row and layout configuration
@@ -106,9 +93,11 @@ export const EXPORT_BRANDING = {
 
 /**
  * Combined export config for convenience
+ *
+ * Note: Thumbnail settings are now in the database (SyncSettings).
+ * Use getExportPolicy() from '@/lib/data/queries/export-policy' for thumbnail config.
  */
 export const EXPORT_CONFIG = {
-  thumbnail: EXPORT_THUMBNAIL,
   layout: EXPORT_LAYOUT,
   styling: EXPORT_STYLING,
   columns: EXPORT_COLUMNS,

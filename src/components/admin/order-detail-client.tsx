@@ -53,6 +53,15 @@ interface ShipmentHistoryProps {
   customerEmail?: string
   repEmail?: string
   repName?: string
+  // Phase 6: PlannedShipments for linking fulfillments
+  plannedShipments?: Array<{
+    id: string
+    collectionName: string | null
+    plannedShipStart: string
+    plannedShipEnd: string
+    status: string
+    itemIds: string[]
+  }>
 }
 
 // ============================================================================
@@ -109,6 +118,7 @@ export function ShipmentHistory({
   customerEmail,
   repEmail,
   repName,
+  plannedShipments,
 }: ShipmentHistoryProps) {
   const [editingShipment, setEditingShipment] = React.useState<ShipmentRow | null>(null)
   const [showCreateShipment, setShowCreateShipment] = React.useState(false)
@@ -413,6 +423,7 @@ export function ShipmentHistory({
         repName={repName}
         open={showCreateShipment}
         onOpenChange={setShowCreateShipment}
+        plannedShipments={plannedShipments}
       />
 
       {/* Void Shipment Dialog */}

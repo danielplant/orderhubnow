@@ -8,7 +8,7 @@ on:
 
 jobs:
   validate:
-    name: Type Check, Lint, Build
+    name: validate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -18,15 +18,20 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
-      - run: npm ci
+      - name: Clean install
+        run: npm ci
 
-      - run: npx prisma generate
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Clean stale build artifacts
+        run: rm -rf .next
 
       - name: Type check
         run: npm run type-check
 
       - name: Lint
-        run: npm run lint
+        run: npm run lint -- --max-warnings=65
 
       - name: Build
         run: npm run build

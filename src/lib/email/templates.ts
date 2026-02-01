@@ -28,6 +28,46 @@ interface OrderEmailData {
   }>
 }
 
+// Phase 9: Type for planned shipments in emails
+export interface PlannedShipmentForEmail {
+  id: string
+  collectionName: string | null
+  plannedShipStart: string
+  plannedShipEnd: string
+  items: Array<{
+    sku: string
+    quantity: number
+    price: number
+    lineTotal: number
+  }>
+  subtotal: number
+}
+
+// Phase 9: Generate grouped items HTML for multi-shipment orders
+function generateGroupedItemsHtml(
+  shipments: PlannedShipmentForEmail[],
+  currency: 'USD' | 'CAD'
+): string {
+  return shipments
+    .map(
+      (shipment) => `
+      <tr>
+        <td colspan="4" style="padding: 16px 10px 8px; background-color: #f8fafc; border-bottom: 2px solid #e5e5e5;">
+          <strong style="color: #1e293b; font-size: 14px;">${shipment.collectionName || 'Available to Ship'}</strong>
+          <span style="color: #64748b; font-size: 13px; margin-left: 12px;">Ships: ${shipment.plannedShipStart} - ${shipment.plannedShipEnd}</span>
+        </td>
+      </tr>
+      ${shipment.items.map((item) => `
+        <tr>
+          <td style="padding: 10px; border-bottom: 1px solid #e5e5e5;">${item.sku}</td>
+          <td style="padding: 10px; border-bottom: 1px solid #e5e5e5; text-align: center;">${item.quantity}</td>
+          <td style="padding: 10px; border-bottom: 1px solid #e5e5e5; text-align: right;">${formatCurrency(item.price, currency)}</td>
+          <td style="padding: 10px; border-bottom: 1px solid #e5e5e5; text-align: right;">${formatCurrency(item.lineTotal, currency)}</td>
+        </tr>
+      `).join('')}
+    `).join('')
+}
+
 function formatCurrency(amount: number, currency: 'USD' | 'CAD'): string {
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
@@ -38,20 +78,27 @@ function formatCurrency(amount: number, currency: 'USD' | 'CAD'): string {
 
 /**
  * Customer Order Confirmation Email
+ * Phase 9: Added shipments parameter for grouped rendering
  */
-export function customerConfirmationHtml(data: OrderEmailData): string {
-  const itemRows = data.items
-    .map(
-      (item) => `
-      <tr>
-        <td style="padding: 10px; border-bottom: 1px solid #e5e5e5;">${item.sku}</td>
-        <td style="padding: 10px; border-bottom: 1px solid #e5e5e5; text-align: center;">${item.quantity}</td>
-        <td style="padding: 10px; border-bottom: 1px solid #e5e5e5; text-align: right;">${formatCurrency(item.price, data.currency)}</td>
-        <td style="padding: 10px; border-bottom: 1px solid #e5e5e5; text-align: right; font-weight: 500;">${formatCurrency(item.lineTotal, data.currency)}</td>
-      </tr>
-    `
-    )
-    .join('')
+export function customerConfirmationHtml(data: OrderEmailData, shipments?: PlannedShipmentForEmail[]): string {
+  // Phase 9: Use grouped rendering if 2+ shipments
+  const useGrouping = shipments && shipments.length > 1
+  const shipWindowDisplay = useGrouping
+    ? `${shipments.length} planned shipments (see below)`
+    : `${data.shipStartDate} - ${data.shipEndDate}`
+
+  const itemRows = useGrouping
+    ? generateGroupedItemsHtml(shipments, data.currency)
+    : data.items.map(
+        (item) => `
+        <tr>
+          <td style="padding: 10px; border-bottom: 1px solid #e5e5e5;">${item.sku}</td>
+          <td style="padding: 10px; border-bottom: 1px solid #e5e5e5; text-align: center;">${item.quantity}</td>
+          <td style="padding: 10px; border-bottom: 1px solid #e5e5e5; text-align: right;">${formatCurrency(item.price, data.currency)}</td>
+          <td style="padding: 10px; border-bottom: 1px solid #e5e5e5; text-align: right; font-weight: 500;">${formatCurrency(item.lineTotal, data.currency)}</td>
+        </tr>
+      `
+      ).join('')
 
   return `
 <!DOCTYPE html>
@@ -100,7 +147,7 @@ export function customerConfirmationHtml(data: OrderEmailData): string {
                 </tr>
                 <tr>
                   <td style="padding: 6px 0; color: #64748b;">Ship Window:</td>
-                  <td style="padding: 6px 0; color: #1e293b;">${data.shipStartDate} - ${data.shipEndDate}</td>
+                  <td style="padding: 6px 0; color: #1e293b;">${shipWindowDisplay}</td>
                 </tr>
                 ${data.customerPO ? `
                 <tr>
@@ -170,8 +217,15 @@ export function customerConfirmationHtml(data: OrderEmailData): string {
 
 /**
  * Sales Team Order Notification Email
+ * Phase 9: Added shipments parameter for grouped rendering
  */
-export function salesNotificationHtml(data: OrderEmailData & { adminUrl: string }): string {
+export function salesNotificationHtml(data: OrderEmailData & { adminUrl: string }, shipments?: PlannedShipmentForEmail[]): string {
+  // Phase 9: Use grouped rendering if 2+ shipments
+  const useGrouping = shipments && shipments.length > 1
+  const shipmentSummary = useGrouping
+    ? `${shipments.length} shipments`
+    : `${data.items.length} item${data.items.length !== 1 ? 's' : ''}`
+
   return `
 <!DOCTYPE html>
 <html>

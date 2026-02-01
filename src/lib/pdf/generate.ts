@@ -66,13 +66,18 @@ export async function generatePdf(
   if (isDev) {
     // Try local Chrome first in development
     const fs = await import('fs')
+    const os = await import('os')
+    const path = await import('path')
     if (fs.existsSync(localChromePath)) {
       execPath = localChromePath
+      // Use a unique temp directory to avoid conflicts with user's Chrome
+      const tempUserDataDir = path.join(os.tmpdir(), `puppeteer-chrome-${Date.now()}`)
       browserArgs = [
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--font-render-hinting=none',
         '--disable-font-subpixel-positioning',
+        `--user-data-dir=${tempUserDataDir}`,
       ]
       console.log('Using local Chrome:', execPath)
     } else {

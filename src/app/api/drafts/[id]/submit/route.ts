@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { sendOrderEmails } from '@/lib/email/send-order-emails'
+import { deriveShipmentsFromItems, findShipmentIdForSku } from '@/lib/utils/shipment-helpers'
+import { validateShipDates } from '@/lib/validation/ship-window'
 
 interface RouteParams {
   params: Promise<{ id: string }>
@@ -46,7 +48,7 @@ async function getNextOrderNumber(isPreOrder: boolean): Promise<string> {
  * Derive order type (ATS vs Pre-Order) from SKU data.
  * Master source: Collection.type
  */
-async function deriveIsPreOrderFromSkus(
+async function _deriveIsPreOrderFromSkus(
   skuVariantIds: bigint[]
 ): Promise<Map<string, boolean>> {
   if (skuVariantIds.length === 0) {
@@ -74,29 +76,7 @@ async function deriveIsPreOrderFromSkus(
   return result
 }
 
-/**
- * Get order grouping key that includes both Collection AND order type.
- * This ensures ATS and Pre-Order items are split into separate orders.
- * 
- * Grouping: CollectionID → default
- * (No CategoryID fallback - Collection is the source of truth)
- */
-function getOrderGroupKey(
-  item: {
-    collectionId?: number | null
-    skuVariantId: bigint
-  },
-  skuPreOrderMap: Map<string, boolean>
-): string {
-  const isPreOrder = skuPreOrderMap.get(String(item.skuVariantId)) ?? false
-  const typePrefix = isPreOrder ? 'preorder' : 'ats'
-  
-  // Group by order type first, then by collection
-  if (item.collectionId) {
-    return `${typePrefix}-collection-${item.collectionId}`
-  }
-  return `${typePrefix}-default`
-}
+// Phase 9: getOrderGroupKey removed - now using planned shipments instead of order splitting
 
 /**
  * POST /api/drafts/[id]/submit - Convert draft to real order
@@ -165,7 +145,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const missing = required.filter(f => !formData[f])
     if (missing.length > 0) {
       return NextResponse.json(
-        { error: `Missing required fields: ${missing.join(', ')}` },
+        {
+          error: 'Please complete all required fields before submitting',
+          missingFields: missing,
+          message: `Missing: ${missing.join(', ')}. Please fill out the order form completely.`,
+        },
         { status: 400 }
       )
     }
@@ -183,19 +167,20 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     // NOTE: Order type will be derived from SKU data below, not preOrderMeta
 
-    // Look up rep name and email
+    // Look up rep name, code, and email
     const rep = await prisma.reps.findUnique({
       where: { ID: parseInt(formData.salesRepId) },
-      select: { Name: true, Email1: true, Email2: true },
+      select: { Name: true, Code: true, Email1: true, Email2: true },
     })
     const salesRepName = rep?.Name || 'Unknown Rep'
-    const salesRepEmail = rep?.Email1 || rep?.Email2 || undefined
+    const salesRepCode = rep?.Code || null
+    const _salesRepEmail = rep?.Email1 || rep?.Email2 || undefined
 
-    // Look up or create customer
+    // Gap 3 Fix: Customer lookup (upsert happens inside transaction for parity with createOrder)
     let customerId: number | null = null
     const existingCustomer = await prisma.customers.findFirst({
       where: { StoreName: formData.storeName },
-      select: { ID: true },
+      select: { ID: true, OrderCount: true },
     })
     if (existingCustomer) {
       customerId = existingCustomer.ID
@@ -266,31 +251,80 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       }
     }
 
-    // Group items by order type AND ship window (auto-split mixed ATS/Pre-Order)
-    const itemGroups = new Map<string, typeof items>()
-    for (const item of items) {
-      const key = getOrderGroupKey(item, skuPreOrderMap)
-      if (!itemGroups.has(key)) {
-        itemGroups.set(key, [])
+    // Phase 9: Use planned shipments instead of splitting orders
+    const plannedShipments = deriveShipmentsFromItems(
+      items.map(i => ({
+        sku: i.sku,
+        skuVariantId: i.skuVariantId,
+        quantity: i.quantity,
+        price: i.price,
+        collectionId: i.collectionId,
+        collectionName: i.collectionName,
+        shipWindowStart: i.shipWindowStart,
+        shipWindowEnd: i.shipWindowEnd,
+      })),
+      {
+        shipStartDate: formData.shipStartDate,
+        shipEndDate: formData.shipEndDate,
       }
-      itemGroups.get(key)!.push(item)
+    )
+
+    // Validate ship dates against collection windows
+    const collectionIds = plannedShipments
+      .map((s) => s.collectionId)
+      .filter((id): id is number => id !== null)
+
+    if (collectionIds.length > 0) {
+      const collections = await prisma.collection.findMany({
+        where: { id: { in: collectionIds } },
+        select: { id: true, name: true, shipWindowStart: true, shipWindowEnd: true },
+      })
+      const collectionMap = new Map(collections.map((c) => [c.id, c]))
+
+      for (const shipment of plannedShipments) {
+        if (shipment.collectionId) {
+          const collection = collectionMap.get(shipment.collectionId)
+          if (collection?.shipWindowStart && collection?.shipWindowEnd) {
+            const normalizeDate = (d: Date | string): string => {
+              const date = typeof d === 'string' ? new Date(d) : d
+              return date.toISOString().split('T')[0]
+            }
+
+            const result = validateShipDates(
+              normalizeDate(shipment.plannedShipStart),
+              normalizeDate(shipment.plannedShipEnd),
+              [{
+                id: shipment.collectionId,
+                name: collection.name,
+                shipWindowStart: normalizeDate(collection.shipWindowStart),
+                shipWindowEnd: normalizeDate(collection.shipWindowEnd),
+              }]
+            )
+            if (!result.valid) {
+              return NextResponse.json(
+                { error: `Invalid dates for ${collection.name}: ${result.errors[0]?.message}` },
+                { status: 400 }
+              )
+            }
+          }
+        }
+      }
     }
+
+    // Determine order type (any PreOrder item makes it a PreOrder)
+    const hasPreOrderItems = [...skuPreOrderMap.values()].some((v) => v)
+    const orderNumber = await getNextOrderNumber(hasPreOrderItems)
+
+    // Calculate legacy dates from all shipments
+    const allStarts = plannedShipments.map((s) => new Date(s.plannedShipStart))
+    const allEnds = plannedShipments.map((s) => new Date(s.plannedShipEnd))
+    const shipStart = allStarts.length ? new Date(Math.min(...allStarts.map(d => d.getTime()))) : new Date(formData.shipStartDate)
+    const shipEnd = allEnds.length ? new Date(Math.max(...allEnds.map(d => d.getTime()))) : new Date(formData.shipEndDate)
 
     const currency = formData.currency || 'CAD'
 
-    // Track created orders
-    const createdOrders: Array<{
-      orderId: string
-      orderNumber: string
-      collectionName: string | null
-      shipWindowStart: string | null
-      shipWindowEnd: string | null
-      orderAmount: number
-      items: typeof items
-    }> = []
-
-    await prisma.$transaction(async (tx) => {
-      // Delete the draft first (we'll create new orders)
+    const createdOrder = await prisma.$transaction(async (tx) => {
+      // Delete the draft first
       await tx.customerOrdersItems.deleteMany({
         where: { CustomerOrderID: draft.ID },
       })
@@ -298,117 +332,184 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         where: { ID: draft.ID },
       })
 
-      // Create one order per ship window group (and order type)
-      for (const [, groupItems] of itemGroups) {
-        // Derive order type from first item's SKU (all items in group have same type)
-        const firstItemVariantId = String(groupItems[0].skuVariantId)
-        const isPreOrder = skuPreOrderMap.get(firstItemVariantId) ?? false
-        const groupOrderNumber = await getNextOrderNumber(isPreOrder)
-        const groupAmount = groupItems.reduce((sum, item) => sum + item.price * item.quantity, 0)
+      // Create SINGLE order
+      const newOrder = await tx.customerOrders.create({
+        data: {
+          OrderNumber: orderNumber,
+          OrderStatus: 'Pending',
+          BuyerName: formData.buyerName,
+          StoreName: formData.storeName,
+          SalesRep: salesRepName,
+          CustomerEmail: formData.customerEmail,
+          CustomerPhone: formData.customerPhone,
+          Country: currency,
+          OrderAmount: orderAmount,
+          OrderNotes: formData.orderNotes || '',
+          CustomerPO: formData.customerPO || '',
+          ShipStartDate: shipStart,
+          ShipEndDate: shipEnd,
+          OrderDate: new Date(),
+          Website: formData.website || '',
+          IsShipped: false,
+          IsTransferredToShopify: false,
+          IsPreOrder: hasPreOrderItems,
+          RepID: parseInt(formData.salesRepId),
+          CustomerID: customerId,
+        },
+      })
 
-        // Use item's ship window if available, else form dates
-        const firstItem = groupItems[0]
-        const shipStart = firstItem.shipWindowStart
-          ? new Date(firstItem.shipWindowStart)
-          : new Date(formData.shipStartDate)
-        const shipEnd = firstItem.shipWindowEnd
-          ? new Date(firstItem.shipWindowEnd)
-          : new Date(formData.shipEndDate)
-
-        // Create order header
-        const newOrder = await tx.customerOrders.create({
+      // Create planned shipments
+      const shipmentIdMap = new Map<string, bigint>()
+      for (const shipment of plannedShipments) {
+        const created = await tx.plannedShipment.create({
           data: {
-            OrderNumber: groupOrderNumber,
-            OrderStatus: 'Pending',
-            BuyerName: formData.buyerName,
-            StoreName: formData.storeName,
-            SalesRep: salesRepName,
-            CustomerEmail: formData.customerEmail,
-            CustomerPhone: formData.customerPhone,
-            Country: currency,
-            OrderAmount: groupAmount,
-            OrderNotes: formData.orderNotes || '',
-            CustomerPO: formData.customerPO || '',
-            ShipStartDate: shipStart,
-            ShipEndDate: shipEnd,
-            OrderDate: new Date(),
-            Website: formData.website || '',
-            IsShipped: false,
-            IsTransferredToShopify: false,
-            IsPreOrder: isPreOrder, // Derived from SKU category, not preOrderMeta
-            RepID: parseInt(formData.salesRepId),
-            CustomerID: customerId,
+            CustomerOrderID: newOrder.ID,
+            CollectionID: shipment.collectionId,
+            CollectionName: shipment.collectionName,
+            PlannedShipStart: new Date(shipment.plannedShipStart),
+            PlannedShipEnd: new Date(shipment.plannedShipEnd),
+            Status: 'Planned',
           },
         })
+        shipmentIdMap.set(shipment.id, created.ID)
+      }
 
-        // Create order items for this group
-        await tx.customerOrdersItems.createMany({
-          data: groupItems.map(item => ({
+      // Create order items with PlannedShipmentID
+      for (const item of items) {
+        const plannedShipmentId = findShipmentIdForSku(
+          item.sku,
+          plannedShipments.map(s => ({
+            ...s,
+            itemSkus: s.itemSkus || [],
+          })),
+          shipmentIdMap
+        )
+
+        await tx.customerOrdersItems.create({
+          data: {
             CustomerOrderID: newOrder.ID,
-            OrderNumber: groupOrderNumber,
+            OrderNumber: orderNumber,
             SKU: item.sku,
             SKUVariantID: item.skuVariantId,
             Quantity: item.quantity,
             Price: item.price,
             PriceCurrency: currency,
+            PlannedShipmentID: plannedShipmentId,
             Notes: '',
-          })),
-        })
-
-        createdOrders.push({
-          orderId: String(newOrder.ID),
-          orderNumber: groupOrderNumber,
-          collectionName: firstItem.collectionName,
-          shipWindowStart: firstItem.shipWindowStart,
-          shipWindowEnd: firstItem.shipWindowEnd,
-          orderAmount: groupAmount,
-          items: groupItems,
+          },
         })
       }
+
+      // =========================================================================
+      // Gap 3 Fix: Customer upsert/create for parity with createOrder
+      // =========================================================================
+      if (existingCustomer) {
+        // Update existing customer with latest info and increment OrderCount
+        await tx.customers.update({
+          where: { ID: existingCustomer.ID },
+          data: {
+            CustomerName: formData.buyerName,
+            Email: formData.customerEmail,
+            Phone: formData.customerPhone,
+            Rep: salesRepCode,
+            Street1: formData.street1 ?? '',
+            Street2: formData.street2 ?? '',
+            City: formData.city ?? '',
+            StateProvince: formData.stateProvince ?? '',
+            ZipPostal: formData.zipPostal ?? '',
+            Country: formData.country ?? 'USA',
+            ShippingStreet1: formData.shippingStreet1 ?? formData.street1 ?? '',
+            ShippingStreet2: formData.shippingStreet2 ?? formData.street2 ?? '',
+            ShippingCity: formData.shippingCity ?? formData.city ?? '',
+            ShippingStateProvince: formData.shippingStateProvince ?? formData.stateProvince ?? '',
+            ShippingZipPostal: formData.shippingZipPostal ?? formData.zipPostal ?? '',
+            ShippingCountry: formData.shippingCountry ?? formData.country ?? 'USA',
+            Website: formData.website ?? '',
+            LastOrderDate: new Date(),
+            OrderCount: (existingCustomer.OrderCount ?? 0) + 1,
+          },
+        })
+      } else {
+        // Create new customer and update order with CustomerID
+        const newCustomer = await tx.customers.create({
+          data: {
+            StoreName: formData.storeName,
+            CustomerName: formData.buyerName,
+            Email: formData.customerEmail,
+            Phone: formData.customerPhone,
+            Rep: salesRepCode,
+            Street1: formData.street1 ?? '',
+            Street2: formData.street2 ?? '',
+            City: formData.city ?? '',
+            StateProvince: formData.stateProvince ?? '',
+            ZipPostal: formData.zipPostal ?? '',
+            Country: formData.country ?? 'USA',
+            ShippingStreet1: formData.shippingStreet1 ?? formData.street1 ?? '',
+            ShippingStreet2: formData.shippingStreet2 ?? formData.street2 ?? '',
+            ShippingCity: formData.shippingCity ?? formData.city ?? '',
+            ShippingStateProvince: formData.shippingStateProvince ?? formData.stateProvince ?? '',
+            ShippingZipPostal: formData.shippingZipPostal ?? formData.zipPostal ?? '',
+            ShippingCountry: formData.shippingCountry ?? formData.country ?? 'USA',
+            Website: formData.website ?? '',
+            FirstOrderDate: new Date(),
+            LastOrderDate: new Date(),
+            OrderCount: 1,
+          },
+          select: { ID: true },
+        })
+
+        // Update order with new customer's ID
+        await tx.customerOrders.update({
+          where: { ID: newOrder.ID },
+          data: { CustomerID: newCustomer.ID },
+        })
+      }
+
+      // Return created order info from transaction
+      return { ID: newOrder.ID, OrderNumber: orderNumber }
     })
 
-    // Send confirmation emails for each created order (non-blocking)
-    for (const order of createdOrders) {
-      sendOrderEmails({
-        orderId: order.orderId,
-        orderNumber: order.orderNumber,
-        storeName: formData.storeName,
-        buyerName: formData.buyerName,
-        salesRep: salesRepName,
-        salesRepEmail,
-        customerEmail: formData.customerEmail,
-        customerPhone: formData.customerPhone,
-        shipStartDate: order.shipWindowStart ? new Date(order.shipWindowStart) : new Date(formData.shipStartDate),
-        shipEndDate: order.shipWindowEnd ? new Date(order.shipWindowEnd) : new Date(formData.shipEndDate),
-        orderDate: new Date(),
-        orderNotes: formData.orderNotes,
-        customerPO: formData.customerPO,
-        items: order.items.map(i => ({
-          sku: i.sku,
-          quantity: i.quantity,
-          price: i.price,
-          lineTotal: i.price * i.quantity,
-        })),
-        currency,
-        orderAmount: order.orderAmount,
-      }).catch(err => {
-        console.error(`Failed to send order emails for ${order.orderNumber}:`, err)
-      })
-    }
+    // Send confirmation email for the single order
+    void sendOrderEmails({
+      orderId: String(createdOrder.ID),
+      orderNumber: createdOrder.OrderNumber,
+      storeName: formData.storeName,
+      buyerName: formData.buyerName,
+      customerEmail: formData.customerEmail,
+      customerPhone: formData.customerPhone,
+      salesRep: salesRepName,
+      salesRepEmail: rep?.Email1 ?? undefined,
+      orderAmount: orderAmount,
+      currency: currency as 'USD' | 'CAD',
+      shipStartDate: shipStart,
+      shipEndDate: shipEnd,
+      orderDate: new Date(),
+      orderNotes: formData.orderNotes,
+      customerPO: formData.customerPO,
+      items: items.map((item) => ({
+        sku: item.sku,
+        quantity: item.quantity,
+        price: item.price,
+        lineTotal: item.price * item.quantity,
+      })),
+    })
 
-    // Return first order for backwards compatibility, plus full orders array
-    const primaryOrder = createdOrders[0]
+    // Return with backward compatibility
     return NextResponse.json({
       success: true,
-      orderId: primaryOrder?.orderId,
-      orderNumber: primaryOrder?.orderNumber,
-      orders: createdOrders.map(o => ({
-        orderId: o.orderId,
-        orderNumber: o.orderNumber,
-        collectionName: o.collectionName,
-        shipWindowStart: o.shipWindowStart,
-        shipWindowEnd: o.shipWindowEnd,
-      })),
+      orderId: String(createdOrder.ID),
+      orderNumber: createdOrder.OrderNumber,
+      orderAmount: orderAmount,
+      plannedShipmentCount: plannedShipments.length,
+      // Gap 4 Fix: Use MIN/MAX dates for backward compatibility (not first shipment)
+      orders: [{
+        orderId: String(createdOrder.ID),
+        orderNumber: createdOrder.OrderNumber,
+        orderAmount: orderAmount,
+        collectionName: plannedShipments[0]?.collectionName ?? null,
+        shipWindowStart: shipStart.toISOString().split('T')[0],
+        shipWindowEnd: shipEnd.toISOString().split('T')[0],
+      }],
     })
   } catch (error) {
     console.error('Submit draft error:', error)

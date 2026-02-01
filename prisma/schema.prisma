@@ -15,13 +15,14 @@ model ActivityLogs {
   CustomerId  BigInt?
   AddressId   BigInt?
   OrderId     BigInt?
-  Action      String?  @db.NVarChar(100)
+  // Extended audit fields
+  EntityType  String?  @db.NVarChar(50)    // 'order', 'shipment', 'customer', 'item'
   EntityID    BigInt?
-  EntityType  String?  @db.NVarChar(50)
-  IPAddress   String?  @db.NVarChar(50)
-  NewValues   String?  @db.NVarChar(Max)
-  OldValues   String?  @db.NVarChar(Max)
+  Action      String?  @db.NVarChar(100)   // 'shipment_created', 'item_cancelled', etc.
+  OldValues   String?  @db.NVarChar(Max)   // JSON of previous state
+  NewValues   String?  @db.NVarChar(Max)   // JSON of new state
   PerformedBy String?  @db.NVarChar(255)
+  IPAddress   String?  @db.NVarChar(50)
   UserAgent   String?  @db.NVarChar(500)
 
   @@index([EntityType, EntityID], map: "IX_ActivityLogs_EntityType")
@@ -39,43 +40,44 @@ model ApplicationExceptions {
 }
 
 model CustomerOrders {
-  ID                       BigInt                   @id(map: "PK_CustomerOrders") @default(autoincrement())
-  OrderNumber              String                   @db.NVarChar(50)
-  BuyerName                String                   @db.NVarChar(500)
-  StoreName                String                   @db.NVarChar(500)
-  SalesRep                 String                   @db.NVarChar(200)
-  CustomerEmail            String                   @db.NVarChar(500)
-  Country                  String                   @db.NVarChar(20)
-  CustomerPhone            String                   @db.NVarChar(100)
-  OrderAmount              Float
-  OrderNotes               String                   @db.NVarChar(Max)
-  CustomerPO               String                   @db.NVarChar(100)
-  ShipStartDate            DateTime                 @db.DateTime
-  ShipEndDate              DateTime                 @db.DateTime
-  OrderDate                DateTime                 @db.DateTime
-  Website                  String                   @db.NVarChar(200)
-  IsShipped                Boolean
-  OrderStatus              String                   @db.NVarChar(50)
-  IsTransferredToShopify   Boolean?
-  CustomerID               Int?
-  RepID                    Int?
-  ShopifyOrderID           String?                  @db.NVarChar(50)
-  PaymentTerms             String?                  @db.NVarChar(200)
-  ApprovalDate             DateTime?                @db.DateTime
-  BrandNotes               String?                  @db.NVarChar(Max)
-  IsPreOrder               Boolean?
-  ShopifyFinancialStatus   String?                  @db.NVarChar(20)
-  ShopifyFulfillmentStatus String?                  @db.NVarChar(20)
-  ShopifyStatusSyncedAt    DateTime?                @db.DateTime
-  EmailAdditionalTo        String?                  @db.NVarChar(Max)
-  EmailSentAdmin           Boolean?                 @default(false)
-  EmailSentAt              DateTime?                @db.DateTime
-  EmailSentCustomer        Boolean?                 @default(false)
-  EmailSentRep             Boolean?                 @default(false)
-  CustomerOrdersComments   CustomerOrdersComments[]
-  CustomerOrdersItems      CustomerOrdersItems[]
-  PlannedShipments         PlannedShipment[]
-  Shipments                Shipments[]
+  ID                     BigInt                   @id(map: "PK_CustomerOrders") @default(autoincrement())
+  OrderNumber            String                   @db.NVarChar(50)
+  BuyerName              String                   @db.NVarChar(500)
+  StoreName              String                   @db.NVarChar(500)
+  SalesRep               String                   @db.NVarChar(200)
+  CustomerEmail          String                   @db.NVarChar(500)
+  Country                String                   @db.NVarChar(20)
+  CustomerPhone          String                   @db.NVarChar(100)
+  OrderAmount            Float
+  OrderNotes             String                   @db.NVarChar(Max)
+  CustomerPO             String                   @db.NVarChar(100)
+  ShipStartDate          DateTime                 @db.DateTime
+  ShipEndDate            DateTime                 @db.DateTime
+  OrderDate              DateTime                 @db.DateTime
+  Website                String                   @db.NVarChar(200)
+  IsShipped              Boolean
+  OrderStatus            String                   @db.NVarChar(50)
+  IsTransferredToShopify Boolean?
+  IsPreOrder             Boolean?
+  CustomerID             Int?
+  RepID                  Int?
+  ShopifyOrderID             String?                  @db.NVarChar(50)
+  ShopifyFulfillmentStatus   String?                  @db.NVarChar(20)
+  ShopifyFinancialStatus     String?                  @db.NVarChar(20)
+  ShopifyStatusSyncedAt      DateTime?                @db.DateTime
+  PaymentTerms               String?                  @db.NVarChar(200)
+  ApprovalDate               DateTime?                @db.DateTime
+  BrandNotes                 String?                  @db.NVarChar(Max)
+  // Email preference tracking for order confirmation popup
+  EmailSentCustomer          Boolean?                 @default(false)
+  EmailSentRep               Boolean?                 @default(false)
+  EmailSentAdmin             Boolean?                 @default(false)
+  EmailAdditionalTo          String?                  @db.NVarChar(Max) // JSON array of additional recipients
+  EmailSentAt                DateTime?                @db.DateTime
+  CustomerOrdersComments     CustomerOrdersComments[]
+  CustomerOrdersItems        CustomerOrdersItems[]
+  Shipments                  Shipments[]
+  PlannedShipments           PlannedShipment[]
 
   @@index([CustomerID], map: "IX_CustomerOrders_CustomerID")
   @@index([OrderDate], map: "IX_CustomerOrders_OrderDate")
@@ -92,25 +94,26 @@ model CustomerOrdersComments {
 }
 
 model CustomerOrdersItems {
-  ID                BigInt           @id(map: "PK_CustomerOrdersItems") @default(autoincrement())
+  ID                BigInt          @id(map: "PK_CustomerOrdersItems") @default(autoincrement())
   CustomerOrderID   BigInt
-  OrderNumber       String           @db.NVarChar(50)
-  SKU               String           @db.NVarChar(50)
+  OrderNumber       String          @db.NVarChar(50)
+  SKU               String          @db.NVarChar(50)
   SKUVariantID      BigInt
+  ShopifyLineItemID String?         @db.NVarChar(50) // Shopify line_item.id for precise fulfillment mapping
   Quantity          Int
-  Price             Float
-  PriceCurrency     String           @db.NVarChar(50)
-  Notes             String           @db.NVarChar(Max)
-  CancelledAt       DateTime?        @db.DateTime
-  CancelledBy       String?          @db.NVarChar(255)
-  CancelledQty      Int?             @default(0)
-  CancelledReason   String?          @db.NVarChar(100)
-  LineDiscount      Float?           @default(0)
-  Status            String?          @default("Open") @db.NVarChar(20)
-  ShopifyLineItemID String?          @db.NVarChar(50)
+  Price           Float
+  PriceCurrency   String          @db.NVarChar(50)
+  Notes           String          @db.NVarChar(Max)
+  LineDiscount    Float?          @default(0)
+  // Line item fulfillment status tracking
+  Status          String?         @default("Open") @db.NVarChar(20) // Open | Shipped | Cancelled
+  CancelledQty    Int?            @default(0)
+  CancelledReason String?         @db.NVarChar(100) // "Out of stock", "Discontinued", "Customer request", etc.
+  CancelledAt       DateTime?         @db.DateTime
+  CancelledBy       String?           @db.NVarChar(255)
   PlannedShipmentID BigInt?
-  CustomerOrders    CustomerOrders   @relation(fields: [CustomerOrderID], references: [ID], onUpdate: NoAction, map: "FK_CustomerOrdersItems_CustomerOrders")
-  PlannedShipment   PlannedShipment? @relation(fields: [PlannedShipmentID], references: [ID], map: "FK_CustomerOrdersItems_PlannedShipment")
+  CustomerOrders    CustomerOrders    @relation(fields: [CustomerOrderID], references: [ID], onUpdate: NoAction, map: "FK_CustomerOrdersItems_CustomerOrders")
+  PlannedShipment   PlannedShipment?  @relation(fields: [PlannedShipmentID], references: [ID], onDelete: SetNull, map: "FK_CustomerOrdersItems_PlannedShipment")
   ShipmentItems     ShipmentItems[]
 
   @@index([CustomerOrderID], map: "IX_CustomerOrdersItems_CustomerOrderID")
@@ -139,11 +142,11 @@ model Customers {
   ShippingCountry       String?   @db.NVarChar(500)
   Website               String?   @db.NVarChar(500)
   FirstOrderDate        DateTime? @db.DateTime
-  LastOrderDate         DateTime? @db.DateTime
   LTV                   Decimal?  @db.Decimal(18, 2)
   Segment               String?   @db.NVarChar(20)
-  OrderCount            Int?      @default(0, map: "DF__Customers__Order__1DB06A4F")
   UsualOrderCycle       Int?
+  LastOrderDate         DateTime? @db.DateTime
+  OrderCount            Int?      @default(0, map: "DF__Customers__Order__1DB06A4F")
   EstimatedPotential    Decimal?  @db.Decimal(18, 2)
 
   @@index([LastOrderDate], map: "IX_Customers_LastOrderDate")
@@ -204,21 +207,25 @@ model EmailSettings {
   FromName                 String?  @db.NVarChar(200)
   SalesTeamEmails          String?  @db.NVarChar(500)
   CCEmails                 String?  @db.NVarChar(500)
+  // Order email toggles
   NotifyOnNewOrder         Boolean  @default(true)
   NotifyOnOrderUpdate      Boolean  @default(false)
   SendCustomerConfirmation Boolean  @default(true)
-  UpdatedAt                DateTime @default(now()) @updatedAt
-  SmtpHost                 String?  @db.NVarChar(200)
-  SmtpPassword             String?  @db.NVarChar(500)
-  SmtpPort                 Int?
-  SmtpSecure               Boolean  @default(false)
-  SmtpUser                 String?  @db.NVarChar(200)
-  AttachInvoicePdf         Boolean  @default(true)
-  AttachPackingSlipPdf     Boolean  @default(true)
   SendRepOrderCopy         Boolean  @default(true)
+  // Shipment email toggles
   SendShipmentConfirmation Boolean  @default(true)
   SendShipmentRepNotify    Boolean  @default(true)
   SendTrackingUpdates      Boolean  @default(true)
+  AttachInvoicePdf         Boolean  @default(true)
+  AttachPackingSlipPdf     Boolean  @default(true)
+  UpdatedAt                DateTime @default(now()) @updatedAt
+
+  // SMTP Configuration (DB only)
+  SmtpHost                 String?  @db.NVarChar(200)
+  SmtpPort                 Int?
+  SmtpUser                 String?  @db.NVarChar(200)
+  SmtpPassword             String?  @db.NVarChar(500)
+  SmtpSecure               Boolean  @default(false)
 }
 
 model MissingShopifySkus {
@@ -303,6 +310,7 @@ model RawSkusFromShopify {
   VariantWeightUnit                 String? @db.NVarChar(50)
   VariantWeightInGrams              Float?
   productId                         String? @db.NVarChar(500)
+  ProductType                       String? @db.NVarChar(200)
   metafield_order_entry_collection  String? @db.NVarChar(200)
   metafield_order_entry_description String? @db.NVarChar(Max)
   metafield_msrp                    String? @db.NVarChar(Max)
@@ -316,9 +324,8 @@ model RawSkusFromShopify {
   metafield_msrp_us                 String? @db.NVarChar(Max)
   metafield_msrp_cad                String? @db.NVarChar(Max)
   ShopifyProductImageURL            String? @db.NVarChar(500)
-  ProductType                       String? @db.NVarChar(200)
   InventoryItemId                   String? @db.NVarChar(100)
-  ProductStatus                     String? @db.NVarChar(20)
+  ProductStatus                     String? @db.NVarChar(20) // ACTIVE, ARCHIVED, DRAFT
 }
 
 model RawSkusInventoryLevelFromShopify {
@@ -352,6 +359,7 @@ model Reps {
   Email3                String       @db.NVarChar(250)
   Country               String       @db.NVarChar(50)
   Territory             String?      @db.NVarChar(100)
+  // Default email preference for order confirmation popup
   DefaultSendOrderEmail Boolean?     @default(true)
   RepTargets            RepTargets[]
   Users                 Users[]
@@ -371,20 +379,21 @@ model ShopifySyncLog {
 /// Note: This table must be created in production by DBA - see SQL script in plan.
 model ShopifySyncRun {
   ID                BigInt    @id(map: "PK_ShopifySyncRun") @default(autoincrement())
-  SyncType          String    @db.NVarChar(20)
+  SyncType          String    @db.NVarChar(20)   // 'scheduled' | 'on-demand'
+  EntityType        String    @default("product") @db.NVarChar(20)  // 'product' | 'customer'
   Status            String    @db.NVarChar(20)
   OperationId       String?   @db.NVarChar(255)
   StartedAt         DateTime  @db.DateTime
   CompletedAt       DateTime? @db.DateTime
   ItemCount         Int?
   ErrorMessage      String?   @db.NVarChar(Max)
-  CurrentStep       String?   @db.NVarChar(50)
-  CurrentStepDetail String?   @db.NVarChar(500)
-  ProgressPercent   Int?
-  RecordsProcessed  Int?
-  TotalRecords      Int?
-  LastHeartbeat     DateTime? @db.DateTime
-  EntityType        String    @default("product") @db.NVarChar(20)
+  // Progress tracking fields for real-time dashboard
+  CurrentStep       String?   @db.NVarChar(50)   // e.g., "Step 2/5"
+  CurrentStepDetail String?   @db.NVarChar(500)  // e.g., "Polling: RUNNING, 12,450 objects"
+  ProgressPercent   Int?                          // 0-100
+  RecordsProcessed  Int?                          // Current count processed
+  TotalRecords      Int?                          // Expected total (from bulk op)
+  LastHeartbeat     DateTime? @db.DateTime        // Updated during processing to detect dead processes
 
   @@index([Status, StartedAt], map: "IX_ShopifySyncRun_Status_StartedAt")
 }
@@ -398,6 +407,7 @@ model Sku {
   Size                    String?        @db.NVarChar(50)
   FabricContent           String?        @db.NVarChar(Max)
   SkuColor                String?        @db.NVarChar(400)
+  ProductType             String?        @db.NVarChar(200)
   DateAdded               DateTime?      @default(now(), map: "DF_Sku_DateAdded") @db.DateTime
   DateModified            DateTime?      @default(now(), map: "DF_Sku_DateModified") @db.DateTime
   CategoryID              Int?
@@ -408,46 +418,47 @@ model Sku {
   OrderEntryDescription   String?        @db.NVarChar(Max)
   MSRPCAD                 String?        @db.NVarChar(100)
   MSRPUSD                 String?        @db.NVarChar(100)
+  UnitsPerSku             Int?           @default(1)
+  UnitPriceCAD            Decimal?       @db.Decimal(10, 2)
+  UnitPriceUSD            Decimal?       @db.Decimal(10, 2)
   OnRouteAvailableDate    DateTime?      @db.DateTime
   Season                  String?        @db.NVarChar(500)
   DisplayPriority         Int?
   ShopifyProductVariantId BigInt?
+  ShopifyProductId        String?        @db.NVarChar(500)
   SyncOrderTemp           Int?
   ShopifyImageURL         String?        @db.NVarChar(500)
-  ProductType             String?        @db.NVarChar(200)
-  CollectionID            Int?
   ThumbnailPath           String?        @db.NVarChar(500)
-  UnitPriceCAD            Decimal?       @db.Decimal(10, 2)
-  UnitPriceUSD            Decimal?       @db.Decimal(10, 2)
-  UnitsPerSku             Int?           @default(1)
-  ThumbnailSizes          String?        @db.VarChar(100)
-  ShopifyProductId        String?        @db.NVarChar(500)
-  Collection              Collection?    @relation(fields: [CollectionID], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "FK_Sku_Collection")
+  ThumbnailSizes          String?        @db.VarChar(100)   // Comma-separated pixel sizes that exist: "120,240,480"
+  CollectionID            Int?
   SkuCategories           SkuCategories? @relation(fields: [CategoryID], references: [ID], onDelete: NoAction, onUpdate: NoAction, map: "FK_Sku_SkuCategories")
+  Collection              Collection?    @relation(fields: [CollectionID], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "FK_Sku_Collection")
 }
 
+// Configuration for where SKU images are displayed and what sizes are needed
 model SkuImageConfig {
-  id          String  @id @db.VarChar(50)
-  description String  @db.NVarChar(200)
-  pixelSize   Int?
-  useSrcSet   Boolean @default(false)
-  primary     String  @db.VarChar(20)
-  fallback    String? @db.VarChar(20)
-  enabled     Boolean @default(true)
-  sortOrder   Int     @default(0)
+  id          String   @id @db.VarChar(50)      // e.g., "admin_products_table"
+  description String   @db.NVarChar(200)        // Human-readable description
+  pixelSize   Int?                              // Target pixel size (null if using srcSet)
+  useSrcSet   Boolean  @default(false)          // Whether to use responsive srcSet
+  primary     String   @db.VarChar(20)          // "s3_thumbnail" | "shopify_cdn"
+  fallback    String?  @db.VarChar(20)          // "shopify_cdn" | null
+  enabled     Boolean  @default(true)
+  sortOrder   Int      @default(0)
 
   @@map("SkuImageConfig")
 }
 
+// Available thumbnail sizes that can be generated
 model ThumbnailSize {
-  pixelSize  Int      @id
-  quality    Int      @default(80)
-  fit        String   @default("contain") @db.VarChar(20)
-  background String   @default("#FFFFFF") @db.VarChar(10)
-  enabled    Boolean  @default(true)
-  sortOrder  Int      @default(0)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @default(now()) @updatedAt
+  pixelSize   Int      @id                        // e.g., 120, 240, 480, 720
+  quality     Int      @default(80)               // 1-100, compression quality
+  fit         String   @default("contain") @db.VarChar(20)  // contain | cover | fill
+  background  String   @default("#FFFFFF") @db.VarChar(10)  // Background color for padding
+  enabled     Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now()) @updatedAt
 
   @@map("ThumbnailSize")
 }
@@ -588,26 +599,26 @@ model tmpJSONOrders {
 model Users {
   ID                Int          @id(map: "PK_Users") @default(autoincrement())
   LoginID           String       @db.NVarChar(50)
-  Password          String?      @db.NVarChar(50)
+  Password          String?      @db.NVarChar(50) // Legacy plaintext - deprecated
+  PasswordHash      String?      @db.NVarChar(255) // bcrypt hash
   UserType          String       @db.NVarChar(50)
   RepId             Int?
-  PasswordHash      String?      @db.NVarChar(255)
+  Status            String       @default("legacy") @db.NVarChar(20) // invited, active, legacy, disabled
   MustResetPassword Boolean?     @default(true)
   Email             String?      @db.NVarChar(255)
-  Status            String       @default("legacy") @db.NVarChar(20)
-  Preferences       String?      @db.NVarChar(Max)
-  AuthTokens        AuthTokens[]
+  Preferences       String?      @db.NVarChar(Max) // JSON object for user preferences
   Reps              Reps?        @relation(fields: [RepId], references: [ID], onDelete: NoAction, onUpdate: NoAction, map: "FK_Users_Reps")
+  AuthTokens        AuthTokens[]
 }
 
 model AuthTokens {
   ID        Int       @id(map: "PK_AuthTokens") @default(autoincrement())
   UserID    Int
-  TokenType String    @db.NVarChar(20)
+  TokenHash String    @db.NVarChar(255)
+  TokenType String    @db.NVarChar(20) // 'invite' or 'password_reset'
   ExpiresAt DateTime  @db.DateTime
   UsedAt    DateTime? @db.DateTime
-  CreatedAt DateTime  @default(now(), map: "DF__AuthToken__Creat__5E55CAA0") @db.DateTime
-  TokenHash String    @db.NVarChar(255)
+  CreatedAt DateTime  @default(now()) @db.DateTime
   User      Users     @relation(fields: [UserID], references: [ID], onDelete: Cascade, map: "FK_AuthTokens_Users")
 
   @@index([TokenHash], map: "IX_AuthTokens_TokenHash")
@@ -621,7 +632,7 @@ model Warehouses {
 }
 
 model OrderNumberSequence {
-  Prefix     String   @id @db.Char(1)
+  Prefix     String   @id @db.Char(1) // 'A' or 'P'
   LastNumber Int      @default(10000)
   UpdatedAt  DateTime @default(now(), map: "DF__OrderNumb__Updat__631A7FBD") @db.DateTime
 }
@@ -629,29 +640,29 @@ model OrderNumberSequence {
 model Collection {
   id              Int                   @id @default(autoincrement()) @map("ID")
   name            String                @map("Name") @db.NVarChar(500)
-  type            String                @map("Type") @db.NVarChar(20)
+  type            String                @map("Type") @db.NVarChar(20) // 'ATS' or 'PreOrder'
   sortOrder       Int                   @default(0) @map("SortOrder")
   imageUrl        String?               @map("ImageUrl") @db.NVarChar(500)
   shipWindowStart DateTime?             @map("ShipWindowStart") @db.DateTime
   shipWindowEnd   DateTime?             @map("ShipWindowEnd") @db.DateTime
   isActive        Boolean               @default(true) @map("IsActive")
-  createdAt       DateTime              @default(now(), map: "DF__Collectio__Creat__22FFFAA8") @map("CreatedAt") @db.DateTime
-  updatedAt       DateTime              @default(now(), map: "DF__Collectio__Updat__23F41EE1") @map("UpdatedAt") @db.DateTime
-  mappings        ShopifyValueMapping[]
+  createdAt       DateTime              @default(now()) @map("CreatedAt") @db.DateTime
+  updatedAt       DateTime              @default(now()) @map("UpdatedAt") @db.DateTime
   skus            Sku[]
+  mappings        ShopifyValueMapping[]
 
   @@map("Collection")
 }
 
 model ShopifyValueMapping {
   id           Int         @id @default(autoincrement()) @map("ID")
-  rawValue     String      @unique @map("RawValue")
+  rawValue     String      @unique @map("RawValue") @db.NVarChar(1000)
   collectionId Int?        @map("CollectionID")
-  status       String      @default("unmapped") @map("Status") @db.NVarChar(20)
+  status       String      @default("unmapped") @map("Status") @db.NVarChar(20) // 'mapped', 'unmapped', 'deferred'
   note         String?     @map("Note") @db.NVarChar(500)
   skuCount     Int         @default(0) @map("SkuCount")
-  firstSeenAt  DateTime    @default(now(), map: "DF__ShopifyVa__First__29ACF837") @map("FirstSeenAt") @db.DateTime
-  lastSeenAt   DateTime    @default(now(), map: "DF__ShopifyVa__LastS__2AA11C70") @map("LastSeenAt") @db.DateTime
+  firstSeenAt  DateTime    @default(now()) @map("FirstSeenAt") @db.DateTime
+  lastSeenAt   DateTime    @default(now()) @map("LastSeenAt") @db.DateTime
   collection   Collection? @relation(fields: [collectionId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "FK_ShopifyValueMapping_Collection")
 
   @@map("ShopifyValueMapping")
@@ -767,7 +778,7 @@ model RepTargets {
   PeriodType   String    @db.NVarChar(20)
   PeriodStart  DateTime  @db.DateTime
   TargetAmount Decimal   @db.Decimal(18, 2)
-  CreatedAt    DateTime  @default(now(), map: "DF__RepTarget__Creat__67DF34DA") @db.DateTime
+  CreatedAt    DateTime  @default(now(), map: "DF__RepTarget__Creat__208CD6FA") @db.DateTime
   UpdatedAt    DateTime? @db.DateTime
   Reps         Reps      @relation(fields: [RepID], references: [ID], onUpdate: NoAction, map: "FK_RepTargets_Reps")
 
@@ -781,7 +792,7 @@ model AliasSignals {
   SelectedValues String    @db.NVarChar(Max)
   ReportType     String    @db.NVarChar(50)
   CreatedBy      Int?
-  CreatedAt      DateTime? @default(now(), map: "DF__AliasSign__Creat__5A8539BC")
+  CreatedAt      DateTime? @default(now(), map: "DF__AliasSign__Creat__245D67DE")
   SessionID      String?   @db.NVarChar(100)
 
   @@index([CreatedAt], map: "IX_AliasSignals_CreatedAt")
@@ -791,27 +802,29 @@ model AliasSignals {
 
 /// Shipment records for orders - tracks what was actually shipped vs ordered
 model Shipments {
-  ID                   BigInt              @id(map: "PK_Shipments") @default(autoincrement())
-  CustomerOrderID      BigInt
-  ShippedSubtotal      Float               @default(0)
-  ShippingCost         Float               @default(0)
-  ShippedTotal         Float               @default(0)
-  ShipDate             DateTime?           @db.DateTime
-  InternalNotes        String?             @db.NVarChar(Max)
-  CreatedBy            String              @db.NVarChar(255)
-  CreatedAt            DateTime            @default(now(), map: "DF__Shipments__Creat__7EC29A32") @db.DateTime
-  UpdatedAt            DateTime?           @db.DateTime
-  ShopifyFulfillmentID String?             @db.NVarChar(50)
-  VoidNotes            String?             @db.NVarChar(Max)
-  VoidReason           String?             @db.NVarChar(100)
-  VoidedAt             DateTime?           @db.DateTime
-  VoidedBy             String?             @db.NVarChar(255)
-  PlannedShipmentID    BigInt?
-  ShipmentDocuments    ShipmentDocuments[]
-  ShipmentItems        ShipmentItems[]
-  CustomerOrders       CustomerOrders      @relation(fields: [CustomerOrderID], references: [ID], onUpdate: NoAction, map: "FK_Shipments_CustomerOrders")
-  PlannedShipment      PlannedShipment?    @relation(fields: [PlannedShipmentID], references: [ID], map: "FK_Shipments_PlannedShipment")
-  ShipmentTracking     ShipmentTracking[]
+  ID               BigInt             @id(map: "PK_Shipments") @default(autoincrement())
+  CustomerOrderID  BigInt
+  ShippedSubtotal  Float              @default(0)
+  ShippingCost     Float              @default(0)
+  ShippedTotal     Float              @default(0)
+  ShipDate         DateTime?          @db.DateTime
+  InternalNotes    String?            @db.NVarChar(Max)
+  CreatedBy        String             @db.NVarChar(255)
+  CreatedAt        DateTime           @default(now()) @db.DateTime
+  UpdatedAt        DateTime?          @db.DateTime
+  ShopifyFulfillmentID String?        @db.NVarChar(50)
+  // Void fields - allows marking shipments as voided without deletion
+  VoidedAt         DateTime?          @db.DateTime
+  VoidedBy         String?            @db.NVarChar(255)
+  VoidReason       String?            @db.NVarChar(100)
+  VoidNotes        String?            @db.NVarChar(Max)
+  // Phase 6: Link to PlannedShipment this fulfillment satisfies
+  PlannedShipmentID BigInt?
+  PlannedShipment   PlannedShipment?  @relation(fields: [PlannedShipmentID], references: [ID], onDelete: SetNull, map: "FK_Shipments_PlannedShipment")
+  CustomerOrders   CustomerOrders     @relation(fields: [CustomerOrderID], references: [ID], onUpdate: NoAction, map: "FK_Shipments_CustomerOrders")
+  ShipmentItems    ShipmentItems[]
+  ShipmentTracking ShipmentTracking[]
+  ShipmentDocuments ShipmentDocuments[]
 
   @@index([CustomerOrderID], map: "IX_Shipments_CustomerOrderID")
   @@index([VoidedAt], map: "IX_Shipments_VoidedAt")
@@ -820,16 +833,19 @@ model Shipments {
 
 /// Line items included in a shipment - links to order items with quantity shipped
 model ShipmentItems {
-  ID              BigInt              @id(map: "PK_ShipmentItems") @default(autoincrement())
-  ShipmentID      BigInt
-  OrderItemID     BigInt
-  QuantityShipped Int
-  PriceOverride   Float?
-  OrderItem       CustomerOrdersItems @relation(fields: [OrderItemID], references: [ID], onUpdate: NoAction, map: "FK_ShipmentItems_CustomerOrdersItems")
-  Shipment        Shipments           @relation(fields: [ShipmentID], references: [ID], onUpdate: NoAction, map: "FK_ShipmentItems_Shipments")
+  ID                BigInt              @id(map: "PK_ShipmentItems") @default(autoincrement())
+  ShipmentID        BigInt
+  OrderItemID       BigInt
+  QuantityShipped   Int
+  PriceOverride     Float?
+  PlannedShipmentID BigInt?             // Direct link to planned shipment for cross-shipment fulfillment tracking
+  Shipment          Shipments           @relation(fields: [ShipmentID], references: [ID], onUpdate: NoAction, map: "FK_ShipmentItems_Shipments")
+  OrderItem         CustomerOrdersItems @relation(fields: [OrderItemID], references: [ID], onUpdate: NoAction, map: "FK_ShipmentItems_CustomerOrdersItems")
+  PlannedShipment   PlannedShipment?    @relation(fields: [PlannedShipmentID], references: [ID], onUpdate: NoAction, map: "FK_ShipmentItems_PlannedShipment")
 
   @@index([ShipmentID], map: "IX_ShipmentItems_ShipmentID")
   @@index([OrderItemID], map: "IX_ShipmentItems_OrderItemID")
+  @@index([PlannedShipmentID], map: "IX_ShipmentItems_PlannedShipmentID")
 }
 
 /// Tracking numbers for shipments - supports multiple tracking numbers per shipment
@@ -838,7 +854,7 @@ model ShipmentTracking {
   ShipmentID     BigInt
   Carrier        String    @db.NVarChar(50)
   TrackingNumber String    @db.NVarChar(100)
-  AddedAt        DateTime  @default(now(), map: "DF__ShipmentT__Added__0663BBFA") @db.DateTime
+  AddedAt        DateTime  @default(now()) @db.DateTime
   Shipment       Shipments @relation(fields: [ShipmentID], references: [ID], onUpdate: NoAction, map: "FK_ShipmentTracking_Shipments")
 
   @@index([ShipmentID], map: "IX_ShipmentTracking_ShipmentID")
@@ -848,7 +864,7 @@ model ShipmentTracking {
 model SchemaMigrations {
   ID        Int      @id(map: "PK_SchemaMigrations") @default(autoincrement())
   Name      String   @unique(map: "UQ_SchemaMigrations_Name") @db.NVarChar(255)
-  AppliedAt DateTime @default(now(), map: "DF__SchemaMig__Appli__4460EE73") @db.DateTime
+  AppliedAt DateTime @default(now()) @db.DateTime
 
   @@map("SchemaMigrations")
 }
@@ -873,10 +889,10 @@ model ShipmentDocuments {
   ID             BigInt    @id(map: "PK_ShipmentDocuments") @default(autoincrement())
   ShipmentID     BigInt
   OrderID        BigInt
-  DocumentType   String    @db.NVarChar(50)
-  DocumentNumber String    @db.NVarChar(100)
+  DocumentType   String    @db.NVarChar(50)  // 'packing_slip', 'shipping_invoice'
+  DocumentNumber String    @db.NVarChar(100) // 'PS-A10001-1', 'INV-A10001-1'
   FileName       String    @db.NVarChar(255)
-  FilePath       String    @db.NVarChar(500)
+  FilePath       String    @db.NVarChar(500) // S3 key or local path
   FileSize       Int?
   MimeType       String    @default("application/pdf") @db.NVarChar(100)
   GeneratedAt    DateTime  @default(now()) @db.DateTime
@@ -894,17 +910,17 @@ model ShipmentDocuments {
 /// Backup table for orphaned CustomerOrdersItems (audit/archive purposes)
 /// Created during migration to clean up data integrity issues
 model CustomerOrdersItems_Orphaned_Backup {
-  ID              BigInt    @id(map: "PK_CustomerOrdersItems_Orphaned_Backup")
+  ID              BigInt  @id(map: "PK_CustomerOrdersItems_Orphaned_Backup")
   CustomerOrderID BigInt
-  OrderNumber     String    @db.NVarChar(50)
-  SKU             String    @db.NVarChar(50)
+  OrderNumber     String  @db.NVarChar(50)
+  SKU             String  @db.NVarChar(50)
   SKUVariantID    BigInt
   Quantity        Int
   Price           Float
-  PriceCurrency   String    @db.NVarChar(50)
-  Notes           String    @db.NVarChar(Max)
+  PriceCurrency   String  @db.NVarChar(50)
+  Notes           String  @db.NVarChar(Max)
   LineDiscount    Float?
-  Status          String?   @db.NVarChar(20)
+  Status          String? @db.NVarChar(20)
   CancelledQty    Int?
   CancelledAt     DateTime? @db.DateTime
   CancelledBy     String?   @db.NVarChar(255)
@@ -921,17 +937,31 @@ model AuthTokens_Orphaned_Backup {
   CreatedAt DateTime @db.DateTime
 }
 
+// ============================================================================
+// Backup System (Normalized Data Model)
+// ============================================================================
+// Backups are stored as proper data, not dynamic tables. This allows:
+// - Full Prisma management (no schema conflicts)
+// - Admin UI visibility and controls
+// - Configurable retention policies
+// - Easy querying and restoration
+//
+// Created by: backupSkuTable() in sync.ts
+// Cleaned up by: cleanupOldBackups() based on retention settings
+// ============================================================================
+
 /// A set of backup rows created at a specific point in time
 model BackupSet {
-  id          Int         @id @default(autoincrement())
-  backupType  String      @db.NVarChar(50)
-  description String?     @db.NVarChar(255)
-  rowCount    Int
-  sizeBytes   Int?
-  createdAt   DateTime    @default(now())
-  createdBy   String?     @db.NVarChar(100)
-  status      String      @default("active") @db.NVarChar(20)
-  rows        BackupRow[]
+  id            Int       @id @default(autoincrement())
+  backupType    String    @db.NVarChar(50)   // 'Sku', 'Order', 'Customer', etc.
+  description   String?   @db.NVarChar(255)  // 'Pre-sync backup', 'Manual backup', etc.
+  rowCount      Int                          // Number of rows in this backup
+  sizeBytes     Int?                         // Approximate size for UI display
+  createdAt     DateTime  @default(now())
+  createdBy     String?   @db.NVarChar(100)  // 'system' or user email
+  status        String    @default("active") @db.NVarChar(20) // active, restored, deleted
+
+  rows          BackupRow[]
 
   @@index([backupType, createdAt])
   @@index([status])
@@ -941,25 +971,36 @@ model BackupSet {
 model BackupRow {
   id          BigInt    @id @default(autoincrement())
   backupSetId Int
-  rowData     String    @db.NVarChar(Max)
+  rowData     String    @db.NVarChar(Max)   // JSON serialization of the original row
+
   backupSet   BackupSet @relation(fields: [backupSetId], references: [id], onDelete: Cascade)
 
   @@index([backupSetId])
 }
 
+// ============================================================================
+// Shopify Sync Configuration (Developer Tools)
+// ============================================================================
+// These tables power the Developer Tools UI for configuring Shopify sync:
+// - Which fields to sync from each entity type
+// - Filters to apply (e.g., only ACTIVE products)
+// - Cached schema introspection results
+// - Audit trail of all configuration changes
+// ============================================================================
+
 /// Configuration for which Shopify fields to sync per entity type
 model SyncFieldConfig {
   id           Int       @id @default(autoincrement())
-  entityType   String    @db.NVarChar(50)
-  fieldPath    String    @db.NVarChar(200)
-  fieldType    String    @db.NVarChar(50)
-  category     String?   @db.NVarChar(50)
-  description  String?   @db.NVarChar(500)
-  displayOrder Int       @default(0)
+  entityType   String    @db.NVarChar(50)   // Product, ProductVariant, Collection
+  fieldPath    String    @db.NVarChar(200)  // status, metafield_custom_season
+  fieldType    String    @db.NVarChar(50)   // SCALAR, OBJECT, CONNECTION, ENUM
+  category     String?   @db.NVarChar(50)   // system, scalar, enum, connection, metafield
+  description  String?   @db.NVarChar(500)  // From schema introspection
+  displayOrder Int       @default(0)        // For UI sorting
   enabled      Boolean   @default(false)
-  isProtected  Boolean   @default(false)
+  isProtected  Boolean   @default(false)    // Cannot be disabled (id, sku, price, etc.)
   isMetafield  Boolean   @default(false)
-  accessStatus String?   @db.NVarChar(20)
+  accessStatus String?   @db.NVarChar(20)   // accessible, restricted, untested
   lastProbedAt DateTime?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
@@ -972,14 +1013,14 @@ model SyncFieldConfig {
 /// Filter rules for sync (e.g., only sync ACTIVE products)
 /// Multiple filters on same entity are AND'd together
 model SyncFilterConfig {
-  id         Int      @id @default(autoincrement())
-  entityType String   @db.NVarChar(50)
-  fieldPath  String   @db.NVarChar(200)
-  operator   String   @db.NVarChar(20)
-  value      String   @db.NVarChar(500)
-  enabled    Boolean  @default(true)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id          Int      @id @default(autoincrement())
+  entityType  String   @db.NVarChar(50)   // Product
+  fieldPath   String   @db.NVarChar(200)  // status
+  operator    String   @db.NVarChar(20)   // equals, in, not_in
+  value       String   @db.NVarChar(500)  // ACTIVE or ["ACTIVE","DRAFT"] (JSON)
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   @@unique([entityType, fieldPath])
   @@index([entityType, enabled])
@@ -988,12 +1029,12 @@ model SyncFilterConfig {
 /// Runtime config for sync behavior (status cascade arrays, flags)
 model SyncRuntimeConfig {
   id          Int      @id @default(autoincrement())
-  entityType  String   @db.NVarChar(50)
-  configKey   String   @db.NVarChar(100)
+  entityType  String   @db.NVarChar(50)   // Product
+  configKey   String   @db.NVarChar(100)  // ingestionAllowed, skuAllowed, transferAllowed
+  configValue String?  @db.NVarChar(Max)  // JSON value (e.g., '["ACTIVE","DRAFT"]')
   enabled     Boolean  @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
-  configValue String?  @db.NVarChar(Max)
 
   @@unique([entityType, configKey])
   @@index([entityType, enabled])
@@ -1001,21 +1042,21 @@ model SyncRuntimeConfig {
 
 /// Cached Shopify GraphQL schema introspection results
 model ShopifySchemaCache {
-  id         Int       @id @default(autoincrement())
-  entityType String    @unique @db.NVarChar(50)
-  apiVersion String    @db.NVarChar(20)
-  schemaJson String    @db.NVarChar(Max)
-  fetchedAt  DateTime  @default(now())
-  expiresAt  DateTime?
+  id          Int       @id @default(autoincrement())
+  entityType  String    @unique @db.NVarChar(50)  // Product, ProductVariant, etc.
+  apiVersion  String    @db.NVarChar(20)          // e.g., "2024-01"
+  schemaJson  String    @db.NVarChar(Max)         // Full introspection result
+  fetchedAt   DateTime  @default(now())
+  expiresAt   DateTime?                           // Optional TTL
 }
 
 /// Audit trail for all sync configuration changes
 model SyncConfigAudit {
   id            Int      @id @default(autoincrement())
-  configType    String   @db.NVarChar(50)
+  configType    String   @db.NVarChar(50)   // 'field' or 'filter'
   entityType    String   @db.NVarChar(50)
   fieldPath     String   @db.NVarChar(200)
-  action        String   @db.NVarChar(20)
+  action        String   @db.NVarChar(20)   // 'enabled', 'disabled', 'created', 'updated', 'deleted'
   previousValue String?  @db.NVarChar(500)
   newValue      String?  @db.NVarChar(500)
   changedBy     String   @db.NVarChar(255)
@@ -1029,101 +1070,138 @@ model SyncConfigAudit {
 /// Used by the schema graph UI for configuring how individual fields sync.
 /// Separate from SyncFieldConfig (which tracks field discovery/selection).
 model ShopifyFieldMapping {
-  id                 Int      @id @default(autoincrement())
-  /// The root entity type (e.g., "ProductVariant", "Product", "InventoryItem")
-  entityType         String   @db.NVarChar(50)
-  /// The field path within the entity (e.g., "price", "price.amount", "inventoryItem.measurement.weight")
-  fieldPath          String   @db.NVarChar(200)
-  /// Full path from root: entityType + "." + fieldPath (stored for query convenience)
-  fullPath           String   @db.NVarChar(255)
-  /// Nesting depth: 1 for direct fields, 2+ for nested (e.g., "price" = 1, "price.amount" = 2)
-  depth              Int
-  /// Target database table (e.g., "Sku", "RawSkusFromShopify")
-  targetTable        String?  @db.NVarChar(100)
-  /// Target column in the table (e.g., "Price", "ShopifyProductVariantId")
-  targetColumn       String?  @db.NVarChar(100)
-  /// How to transform the value before writing
-  transformType      String   @default("direct") @db.NVarChar(20)
-  /// Additional transform configuration as JSON (e.g., lookup table name, custom function)
-  transformConfig    String?  @db.NVarChar(Max)
-  /// Whether this mapping is active (included in sync)
-  enabled            Boolean  @default(false)
-  /// Protected fields cannot be disabled (id, sku, price, etc.)
-  isProtected        Boolean  @default(false)
-  /// Access verification status from introspection probing
-  accessStatus       String   @default("untested") @db.NVarChar(20)
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  id              Int       @id @default(autoincrement())
+
   /// Connection/tenant identifier for multi-tenant support
-  connectionId       String   @default("default") @db.NVarChar(100)
+  connectionId    String    @default("default") @db.NVarChar(100)
+
+  // Source (Shopify GraphQL field)
+  /// The root entity type (e.g., "ProductVariant", "Product", "InventoryItem")
+  entityType      String    @db.NVarChar(50)
+  /// The field path within the entity (e.g., "price", "price.amount", "inventoryItem.measurement.weight")
+  fieldPath       String    @db.NVarChar(200)
+  /// Full path from root: entityType + "." + fieldPath (stored for query convenience)
+  fullPath        String    @db.NVarChar(255)
+  /// Nesting depth: 1 for direct fields, 2+ for nested (e.g., "price" = 1, "price.amount" = 2)
+  depth           Int
+
+  // Target (SQL destination)
+  /// Target database table (e.g., "Sku", "RawSkusFromShopify")
+  targetTable     String?   @db.NVarChar(100)
+  /// Target column in the table (e.g., "Price", "ShopifyProductVariantId")
+  targetColumn    String?   @db.NVarChar(100)
+
+  // Transform
+  /// How to transform the value before writing
+  transformType   String    @default("direct") @db.NVarChar(20) // direct, parseFloat, parseInt, lookup, custom
+  /// Additional transform configuration as JSON (e.g., lookup table name, custom function)
+  transformConfig String?   @db.NVarChar(Max)
+
+  // Status
+  /// Whether this mapping is active (included in sync)
+  enabled         Boolean   @default(false)
+  /// Protected fields cannot be disabled (id, sku, price, etc.)
+  isProtected     Boolean   @default(false)
+  /// Access verification status from introspection probing
+  accessStatus    String    @default("untested") @db.NVarChar(20) // accessible, restricted, untested
+
+  // ===== QUERY GENERATION METADATA =====
+
   /// Which sync service uses this field: 'bulk_sync', 'customer_sync', etc.
   /// NULL means field is not yet assigned to any service
-  serviceName        String?  @db.NVarChar(50)
+  serviceName         String?   @db.NVarChar(50)
+
   /// For metafield accessors: the Shopify metafield namespace
   /// Example: "custom" for metafield(namespace: "custom", key: "fabric")
-  metafieldNamespace String?  @db.NVarChar(100)
+  metafieldNamespace  String?   @db.NVarChar(100)
+
   /// For metafield accessors: the Shopify metafield key
   /// Example: "fabric" for metafield(namespace: "custom", key: "fabric")
-  metafieldKey       String?  @db.NVarChar(100)
+  metafieldKey        String?   @db.NVarChar(100)
+
   /// For connection fields: the pagination limit
   /// Example: 10 for inventoryLevels(first: 10)
-  paginationLimit    Int?
+  paginationLimit     Int?
+
   /// For fields with arguments: JSON-encoded arguments
   /// Example: '{"names": ["incoming", "committed"]}' for quantities(names: [...])
-  queryArguments     String?  @db.NVarChar(500)
+  queryArguments      String?   @db.NVarChar(500)
+
   /// Field type for query generation logic
   /// - 'scalar': Direct field (product.title)
   /// - 'connection': Has edges/node structure (inventoryLevels)
   /// - 'metafield': Uses alias: metafield(...) accessor
   /// - 'object': Inline object (selectedOptions { name value })
-  fieldType          String   @default("scalar") @db.NVarChar(20)
+  fieldType           String    @default("scalar") @db.NVarChar(20)
+
   /// Order in generated query (preserves exact hardcoded query order)
   /// 1 = first field, 2 = second, etc.
-  sortOrder          Int?
+  sortOrder           Int?
 
+  // Timestamps
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  // Constraints
   @@unique([connectionId, entityType, fieldPath])
   @@index([entityType])
   @@index([fullPath])
   @@index([enabled])
   @@index([connectionId])
   @@index([serviceName])
+
   @@map("ShopifyFieldMapping")
 }
 
 /// Unified cache for Shopify schema: types, enums, and metafields.
 /// Replaces ShopifySchemaCache with full-depth introspection.
 model ShopifyTypeCache {
-  id           Int      @id @default(autoincrement())
-  /// Unique key: "type:Product", "enum:CurrencyCode", "metafield:PRODUCT:custom:fabric"
-  cacheKey     String   @db.NVarChar(300)
-  /// Category discriminator
-  category     String   @db.NVarChar(20)
-  /// For entities/object_types/enums: the GraphQL type name
-  typeName     String?  @db.NVarChar(100)
-  /// For entities/object_types: IntrospectionField[] as JSON
-  schemaJson   String?  @db.NVarChar(Max)
-  /// For enums: JSON array of values ["USD", "CAD", "EUR"]
-  enumValues   String?  @db.NVarChar(Max)
-  /// For metafields: owner type (PRODUCT, PRODUCTVARIANT, etc.)
-  ownerType    String?  @db.NVarChar(50)
-  /// For metafields: namespace
-  namespace    String?  @db.NVarChar(100)
-  /// For metafields: key
-  key          String?  @db.NVarChar(100)
-  /// For metafields: human-readable name from definition
-  displayName  String?  @db.NVarChar(200)
-  /// For metafields: data type (single_line_text_field, number_decimal, etc.)
-  dataType     String?  @db.NVarChar(100)
-  /// For metafields: description
-  description  String?  @db.NVarChar(500)
-  /// For metafields: discovery source
-  source       String?  @db.NVarChar(20)
-  /// Shopify API version
-  apiVersion   String   @db.NVarChar(20)
-  /// When cached
-  fetchedAt    DateTime @default(now())
+  id            Int       @id @default(autoincrement())
+
   /// Connection/tenant identifier for multi-tenant support
-  connectionId String   @default("default") @db.NVarChar(100)
+  connectionId  String    @default("default") @db.NVarChar(100)
+
+  /// Unique key: "type:Product", "enum:CurrencyCode", "metafield:PRODUCT:custom:fabric"
+  cacheKey      String    @db.NVarChar(300)
+
+  /// Category discriminator
+  category      String    @db.NVarChar(20)   // "entity", "object_type", "enum", "metafield"
+
+  /// For entities/object_types/enums: the GraphQL type name
+  typeName      String?   @db.NVarChar(100)
+
+  /// For entities/object_types: IntrospectionField[] as JSON
+  schemaJson    String?   @db.NVarChar(Max)
+
+  /// For enums: JSON array of values ["USD", "CAD", "EUR"]
+  enumValues    String?   @db.NVarChar(Max)
+
+  /// For metafields: owner type (PRODUCT, PRODUCTVARIANT, etc.)
+  ownerType     String?   @db.NVarChar(50)
+
+  /// For metafields: namespace
+  namespace     String?   @db.NVarChar(100)
+
+  /// For metafields: key
+  key           String?   @db.NVarChar(100)
+
+  /// For metafields: human-readable name from definition
+  displayName   String?   @db.NVarChar(200)
+
+  /// For metafields: data type (single_line_text_field, number_decimal, etc.)
+  dataType      String?   @db.NVarChar(100)
+
+  /// For metafields: description
+  description   String?   @db.NVarChar(500)
+
+  /// For metafields: discovery source
+  source        String?   @db.NVarChar(20)   // "definition" | "sampled" | "manual"
+
+  /// Shopify API version
+  apiVersion    String    @db.NVarChar(20)
+
+  /// When cached
+  fetchedAt     DateTime  @default(now())
 
   @@unique([connectionId, cacheKey])
   @@index([category])
@@ -1133,21 +1211,36 @@ model ShopifyTypeCache {
   @@map("ShopifyTypeCache")
 }
 
+// ============================================================================
+// Sync Service: ETL Pipeline (Mapping & Scheduling)
+// ============================================================================
+// These tables power the sync service's ETL pipeline:
+// - SyncMapping: HOW to transform Shopify data and WHERE to write it
+// - SyncSchedule: WHEN to run syncs (cron-based scheduling)
+// - SyncRun: History of sync execution runs
+// - WebhookHistory: Incoming webhook tracking
+//
+// Relationship to SyncFieldConfig:
+// - SyncFieldConfig = WHAT fields to fetch from Shopify (field selection)
+// - SyncMapping = HOW to transform + WHERE to write (ETL mapping)
+// They are complementary, not duplicates.
+// ============================================================================
+
 /// Mapping configuration: source resource -> target table with field transformations
 model SyncMapping {
   id             String         @id @default(uuid())
   name           String         @db.NVarChar(200)
   description    String?        @db.NVarChar(500)
-  sourceResource String         @db.NVarChar(100)
-  targetTable    String         @db.NVarChar(200)
-  keyMapping     String?        @db.NVarChar(Max)
-  mappingsJson   String         @db.NVarChar(Max)
-  webhookTopics  String?        @db.NVarChar(500)
+  sourceResource String         @db.NVarChar(100)  // products, collections, orders, etc.
+  targetTable    String         @db.NVarChar(200)  // dbo.Sku, dbo.RawSkusFromShopify, etc.
+  keyMapping     String?        @db.NVarChar(Max)  // JSON: source key -> target key mapping
+  mappingsJson   String         @db.NVarChar(Max)  // JSON: array of field mappings with transforms
+  webhookTopics  String?        @db.NVarChar(500)  // Comma-separated: products/update, products/create
   enabled        Boolean        @default(true)
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
-  runs           SyncRun[]
   schedules      SyncSchedule[]
+  runs           SyncRun[]
 
   @@index([enabled])
   @@index([sourceResource])
@@ -1155,20 +1248,20 @@ model SyncMapping {
 
 /// Schedule configuration for automated syncs
 model SyncSchedule {
-  id               String      @id @default(uuid())
+  id               String       @id @default(uuid())
   mappingId        String
-  type             String      @db.NVarChar(20)
-  cronPattern      String      @db.NVarChar(100)
-  timezone         String      @default("UTC") @db.NVarChar(50)
-  enabled          Boolean     @default(true)
-  options          String?     @db.NVarChar(Max)
+  type             String       @db.NVarChar(20)   // full, incremental
+  cronPattern      String       @db.NVarChar(100)  // e.g., "0 */15 * * *" (every 15 min)
+  timezone         String       @default("UTC") @db.NVarChar(50)
+  enabled          Boolean      @default(true)
+  options          String?      @db.NVarChar(Max)  // JSON: { lookbackMinutes, deleteStale, etc. }
   nextRun          DateTime?
   lastRun          DateTime?
-  lastStatus       String?     @db.NVarChar(20)
-  consecutiveFails Int         @default(0)
-  createdAt        DateTime    @default(now())
-  updatedAt        DateTime    @updatedAt
-  mapping          SyncMapping @relation(fields: [mappingId], references: [id], onDelete: Cascade)
+  lastStatus       String?      @db.NVarChar(20)   // success, failed, skipped
+  consecutiveFails Int          @default(0)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  mapping          SyncMapping  @relation(fields: [mappingId], references: [id], onDelete: Cascade)
 
   @@index([enabled, nextRun])
   @@index([mappingId])
@@ -1178,9 +1271,9 @@ model SyncSchedule {
 model SyncRun {
   id             String       @id @default(uuid())
   mappingId      String?
-  syncType       String       @db.NVarChar(20)
-  status         String       @db.NVarChar(20)
-  triggeredBy    String?      @db.NVarChar(100)
+  syncType       String       @db.NVarChar(20)   // full, incremental, webhook
+  status         String       @db.NVarChar(20)   // running, completed, failed, cancelled
+  triggeredBy    String?      @db.NVarChar(100)  // manual, schedule, webhook, api
   startedAt      DateTime     @default(now())
   completedAt    DateTime?
   recordsFetched Int?
@@ -1189,8 +1282,8 @@ model SyncRun {
   recordsFailed  Int?
   durationMs     Int?
   errorMessage   String?      @db.NVarChar(Max)
-  metadata       String?      @db.NVarChar(Max)
-  mapping        SyncMapping? @relation(fields: [mappingId], references: [id])
+  metadata       String?      @db.NVarChar(Max)  // JSON: additional run details
+  mapping        SyncMapping? @relation(fields: [mappingId], references: [id], onDelete: SetNull)
 
   @@index([status, startedAt])
   @@index([mappingId])
@@ -1201,11 +1294,11 @@ model SyncRun {
 model WebhookHistory {
   id                String    @id @default(uuid())
   shopifyWebhookId  String    @unique @db.NVarChar(100)
-  topic             String    @db.NVarChar(100)
+  topic             String    @db.NVarChar(100)  // products/update, orders/create, etc.
   shopDomain        String    @db.NVarChar(200)
   receivedAt        DateTime  @default(now())
   processedAt       DateTime?
-  status            String    @db.NVarChar(20)
+  status            String    @db.NVarChar(20)   // pending, processing, completed, failed, skipped
   mappingsProcessed Int?
   recordsWritten    Int?
   processingMs      Int?
@@ -1216,51 +1309,93 @@ model WebhookHistory {
   @@index([shopifyWebhookId])
 }
 
+// ============================================================================
+// Sync Settings (Configurable via UI)
+// ============================================================================
+// Centralized settings for sync behavior, thumbnails, backups.
+// Versioned for audit trail - see what changed if sync behavior differs.
+//
+// Related: SyncSettingsHistory stores snapshots of previous versions.
+// ============================================================================
+
 /// Global sync settings - configurable via admin UI at /admin/shopify/settings
 model SyncSettings {
-  id                         Int                   @id @default(autoincrement()) @map("ID")
-  version                    Int                   @default(1) @map("Version")
-  thumbnailSettingsVersion   Int                   @default(5) @map("ThumbnailSettingsVersion")
-  thumbnailSizeSm            Int                   @default(120) @map("ThumbnailSizeSm")
-  thumbnailSizeMd            Int                   @default(240) @map("ThumbnailSizeMd")
-  thumbnailSizeLg            Int                   @default(480) @map("ThumbnailSizeLg")
-  thumbnailQuality           Int                   @default(80) @map("ThumbnailQuality")
-  thumbnailFit               String                @default("contain") @map("ThumbnailFit") @db.NVarChar(20)
-  thumbnailBackground        String                @default("#FFFFFF") @map("ThumbnailBackground") @db.NVarChar(10)
-  thumbnailFetchTimeoutMs    Int                   @default(15000) @map("ThumbnailFetchTimeoutMs")
-  thumbnailBatchConcurrency  Int                   @default(10) @map("ThumbnailBatchConcurrency")
-  thumbnailEnabled           Boolean               @default(true) @map("ThumbnailEnabled")
-  backupEnabled              Boolean               @default(true) @map("BackupEnabled")
-  backupRetentionDays        Int                   @default(7) @map("BackupRetentionDays")
-  cleanupStaleBackups        Boolean               @default(true) @map("CleanupStaleBackups")
-  syncMaxWaitMs              Int                   @default(600000) @map("SyncMaxWaitMs")
-  syncPollIntervalMs         Int                   @default(3000) @map("SyncPollIntervalMs")
-  updatedAt                  DateTime              @default(now()) @updatedAt @map("UpdatedAt")
-  thumbnailSizeXl            Int                   @default(720) @map("ThumbnailSizeXl")
-  thumbnailDuringSync        Boolean               @default(false) @map("ThumbnailDuringSync")
-  thumbnailSizeLgEnabled     Boolean               @default(true) @map("ThumbnailSizeLgEnabled")
-  thumbnailSizeMdEnabled     Boolean               @default(true) @map("ThumbnailSizeMdEnabled")
-  thumbnailSizeSmEnabled     Boolean               @default(true) @map("ThumbnailSizeSmEnabled")
-  thumbnailSizeXlEnabled     Boolean               @default(true) @map("ThumbnailSizeXlEnabled")
-  useProductImageGallery     Boolean               @default(false) @map("UseProductImageGallery")
-  shopifyStoreDomain         String?               @map("ShopifyStoreDomain") @db.NVarChar(200)
-  introspectMetafieldLimit   Int                   @default(100) @map("IntrospectMetafieldLimit")
-  introspectRecordSampleSize Int                   @default(250) @map("IntrospectRecordSampleSize")
-  history                    SyncSettingsHistory[]
+  id                        Int      @id @default(autoincrement()) @map("ID")
+  version                   Int      @default(1) @map("Version")
+
+  // Thumbnail Configuration
+  thumbnailSettingsVersion  Int      @default(5) @map("ThumbnailSettingsVersion")
+  thumbnailSizeSm           Int      @default(120) @map("ThumbnailSizeSm")
+  thumbnailSizeMd           Int      @default(240) @map("ThumbnailSizeMd")
+  thumbnailSizeLg           Int      @default(480) @map("ThumbnailSizeLg")
+  thumbnailSizeXl           Int      @default(720) @map("ThumbnailSizeXl")
+  thumbnailQuality          Int      @default(80) @map("ThumbnailQuality")
+  thumbnailFit              String   @default("contain") @map("ThumbnailFit") @db.NVarChar(20)
+  thumbnailBackground       String   @default("#FFFFFF") @map("ThumbnailBackground") @db.NVarChar(10)
+
+  // Thumbnail Processing
+  thumbnailFetchTimeoutMs   Int      @default(15000) @map("ThumbnailFetchTimeoutMs")
+  thumbnailBatchConcurrency Int      @default(10) @map("ThumbnailBatchConcurrency")
+  thumbnailEnabled          Boolean  @default(true) @map("ThumbnailEnabled")
+
+  // Per-size enable toggles
+  thumbnailSizeSmEnabled    Boolean  @default(true) @map("ThumbnailSizeSmEnabled")
+  thumbnailSizeMdEnabled    Boolean  @default(true) @map("ThumbnailSizeMdEnabled")
+  thumbnailSizeLgEnabled    Boolean  @default(true) @map("ThumbnailSizeLgEnabled")
+  thumbnailSizeXlEnabled    Boolean  @default(true) @map("ThumbnailSizeXlEnabled")
+
+  // Control whether thumbnails run during sync (OFF by default - generate separately)
+  thumbnailDuringSync       Boolean  @default(false) @map("ThumbnailDuringSync")
+
+  // Backup Settings
+  backupEnabled             Boolean  @default(true) @map("BackupEnabled")
+  backupRetentionDays       Int      @default(7) @map("BackupRetentionDays")
+  cleanupStaleBackups       Boolean  @default(true) @map("CleanupStaleBackups")
+
+  // Sync Settings
+  syncMaxWaitMs             Int      @default(600000) @map("SyncMaxWaitMs")
+  syncPollIntervalMs        Int      @default(3000) @map("SyncPollIntervalMs")
+
+  // Image Source Settings
+  // false = use product.featuredMedia (single featured image)
+  // true = use product.images gallery (first image from gallery)
+  useProductImageGallery    Boolean  @default(false) @map("UseProductImageGallery")
+
+  // Shopify Store Domain (for building admin links in Missing Data panels)
+  shopifyStoreDomain        String?  @db.NVarChar(200) @map("ShopifyStoreDomain")
+
+  // Schema Introspection Settings
+  introspectRecordSampleSize  Int      @default(250) @map("IntrospectRecordSampleSize")
+  introspectMetafieldLimit    Int      @default(100) @map("IntrospectMetafieldLimit")
+
+  // Export Policy Configuration
+  // Controls how XLSX/PDF exports fetch and display product images
+  exportThumbnailSize         Int      @default(120) @map("ExportThumbnailSize")
+  exportExcelDisplayPx        Int      @default(96) @map("ExportExcelDisplayPx")
+  exportPdfDisplayPx          Int      @default(60) @map("ExportPdfDisplayPx")
+  exportRequireS3             Boolean  @default(true) @map("ExportRequireS3")
+  exportAllowShopifyFallback  Boolean  @default(true) @map("ExportAllowShopifyFallback")
+  exportImageConcurrency      Int      @default(10) @map("ExportImageConcurrency")
+
+  updatedAt                 DateTime @default(now()) @updatedAt @map("UpdatedAt")
+
+  // Relation to history
+  history                   SyncSettingsHistory[]
 
   @@map("SyncSettings")
 }
 
 /// History of sync settings changes for audit trail
 model SyncSettingsHistory {
-  id         Int          @id @default(autoincrement()) @map("ID")
-  settingsId Int          @map("SettingsID")
-  version    Int          @map("Version")
-  snapshot   String       @map("Snapshot") @db.NVarChar(Max)
-  changedBy  String?      @map("ChangedBy") @db.NVarChar(100)
-  changedAt  DateTime     @default(now()) @map("ChangedAt")
-  changeNote String?      @map("ChangeNote") @db.NVarChar(500)
-  settings   SyncSettings @relation(fields: [settingsId], references: [id], onDelete: Cascade)
+  id          Int          @id @default(autoincrement()) @map("ID")
+  settingsId  Int          @map("SettingsID")
+  version     Int          @map("Version")
+  snapshot    String       @map("Snapshot") @db.NVarChar(Max)  // JSON of settings at that version
+  changedBy   String?      @map("ChangedBy") @db.NVarChar(100)
+  changedAt   DateTime     @default(now()) @map("ChangedAt")
+  changeNote  String?      @map("ChangeNote") @db.NVarChar(500)
+
+  settings    SyncSettings @relation(fields: [settingsId], references: [id], onDelete: Cascade)
 
   @@index([settingsId])
   @@map("SyncSettingsHistory")
@@ -1269,37 +1404,108 @@ model SyncSettingsHistory {
 /// Tracks standalone thumbnail generation runs (separate from sync)
 model ThumbnailGenerationRun {
   id                BigInt    @id @default(autoincrement()) @map("ID")
-  status            String    @map("Status") @db.NVarChar(20)
+  status            String    @db.NVarChar(20) @map("Status") // started | completed | failed
   startedAt         DateTime  @map("StartedAt")
   completedAt       DateTime? @map("CompletedAt")
-  currentStep       String?   @map("CurrentStep") @db.NVarChar(50)
-  currentStepDetail String?   @map("CurrentStepDetail") @db.NVarChar(500)
+  currentStep       String?   @db.NVarChar(50) @map("CurrentStep")
+  currentStepDetail String?   @db.NVarChar(500) @map("CurrentStepDetail")
   progressPercent   Int?      @map("ProgressPercent")
   totalImages       Int?      @map("TotalImages")
   processedCount    Int?      @default(0) @map("ProcessedCount")
   skippedCount      Int?      @default(0) @map("SkippedCount")
   failedCount       Int?      @default(0) @map("FailedCount")
-  enabledSizes      String?   @map("EnabledSizes") @db.NVarChar(50)
-  errorMessage      String?   @map("ErrorMessage") @db.NVarChar(Max)
+  enabledSizes      String?   @db.NVarChar(50) @map("EnabledSizes") // JSON array
+  errorMessage      String?   @db.NVarChar(Max) @map("ErrorMessage")
 
   @@index([status, startedAt], map: "IX_ThumbnailGenerationRun_Status_StartedAt")
   @@map("ThumbnailGenerationRun")
 }
 
+// ============================================================================
+// Export Job Tracking (Phase 3: Durable Background Jobs)
+// ============================================================================
+// Tracks async export operations for XLSX and PDF generation.
+// Jobs are queued via BullMQ and processed by background workers.
+// Completed exports are stored in S3 with signed URL downloads.
+// ============================================================================
+
+/// Export job tracking for durable XLSX/PDF generation
+/// Follows same patterns as SyncRun and ThumbnailGenerationRun
+model ExportJob {
+  id                String    @id @default(uuid()) @map("id")
+  
+  // Job identity
+  type              String    @db.NVarChar(20) @map("type")                   // xlsx | pdf
+  triggeredBy       String    @db.NVarChar(100) @map("triggeredBy")           // userId or system
+  triggeredByRole   String    @db.NVarChar(20) @map("triggeredByRole")        // admin | rep
+  
+  // Input parameters (stored as JSON for flexibility)
+  filters           String    @db.NVarChar(Max) @map("filters")               // JSON: { collections, currency, q, orientation }
+  
+  // Status tracking
+  status            String    @db.NVarChar(20) @default("pending") @map("status")  // pending | processing | completed | failed | cancelled | expired
+  currentStep       String?   @db.NVarChar(50) @map("currentStep")            // querying | fetching_images | generating | uploading
+  currentStepDetail String?   @db.NVarChar(500) @map("currentStepDetail")     // Human-readable detail
+  progressPercent   Int?      @map("progressPercent")                          // 0-100
+  
+  // Timing
+  createdAt         DateTime  @default(now()) @map("createdAt")
+  startedAt         DateTime? @map("startedAt")
+  completedAt       DateTime? @map("completedAt")
+  durationMs        Int?      @map("durationMs")
+  
+  // Results
+  totalSkus         Int?      @map("totalSkus")
+  imagesProcessed   Int?      @map("imagesProcessed")
+  s3Hits            Int?      @map("s3Hits")
+  shopifyFallbacks  Int?      @map("shopifyFallbacks")
+  imageFetchFails   Int?      @map("imageFetchFails")
+  
+  // Output
+  outputS3Key       String?   @db.NVarChar(500) @map("outputS3Key")           // S3 key for completed file
+  outputFilename    String?   @db.NVarChar(200) @map("outputFilename")        // Original filename for download
+  outputSizeBytes   Int?      @map("outputSizeBytes")
+  expiresAt         DateTime? @map("expiresAt")                                // When S3 file should be cleaned up
+  
+  // Error handling
+  errorMessage      String?   @db.NVarChar(Max) @map("errorMessage")
+  retryCount        Int       @default(0) @map("retryCount")
+  
+  @@index([status, createdAt], map: "IX_ExportJob_status_createdAt")
+  @@index([triggeredBy], map: "IX_ExportJob_triggeredBy")
+  @@map("ExportJob")
+}
+
+// ============================================================================
+// Size Order Configuration
+// ============================================================================
+// Configurable size ordering for product displays and reports.
+// Replaces hardcoded SIZE_ORDER array in size-sort.ts.
+// Single-row table pattern (like InventorySettings, CompanySettings).
+// ============================================================================
+
 /// Size ordering configuration - defines how sizes sort across the system
 model SizeOrderConfig {
   ID             Int      @id(map: "PK_SizeOrderConfig") @default(autoincrement())
-  Sizes          String   @db.NVarChar(Max)
+  Sizes          String   @db.NVarChar(Max)  // JSON array of ALL size strings in order
+  ValidatedSizes String?  @db.NVarChar(Max)  // JSON array of validated size strings (subset of Sizes)
   UpdatedAt      DateTime @default(now()) @updatedAt
   UpdatedBy      String?  @db.NVarChar(255)
-  ValidatedSizes String?  @db.NVarChar(Max)
 }
+
+// ============================================================================
+// Size Alias Configuration
+// ============================================================================
+// Maps raw size strings to canonical sizes for sorting.
+// Allows format variants (e.g., "XS/S (6-8)" vs "XS/S(6-8)") to sort identically
+// without modifying the stored raw values.
+// ============================================================================
 
 /// Size alias - maps raw Shopify size to canonical size for sorting
 model SizeAlias {
   ID            Int      @id(map: "PK_SizeAlias") @default(autoincrement())
-  RawSize       String   @unique @db.NVarChar(100)
-  CanonicalSize String   @db.NVarChar(100)
+  RawSize       String   @unique @db.NVarChar(100)  // Exact string from Shopify
+  CanonicalSize String   @db.NVarChar(100)          // Mapped size for sorting
   UpdatedAt     DateTime @default(now()) @updatedAt
   UpdatedBy     String?  @db.NVarChar(255)
 
@@ -1307,20 +1513,33 @@ model SizeAlias {
   @@map("SizeAlias")
 }
 
+// ============================================================================
+// Planned Shipments
+// ============================================================================
+// Groups order items by collection with specific ship date windows.
+// Created at order time to represent customer's requested delivery windows.
+// Separate from fulfillment Shipments - this is what customer requested,
+// Shipments is what was actually shipped.
+// ============================================================================
+
 /// Planned shipment - groups items by collection with specific ship dates
 model PlannedShipment {
-  ID               BigInt                @id(map: "PK_PlannedShipment") @default(autoincrement())
-  CustomerOrderID  BigInt
-  CollectionID     Int?
-  CollectionName   String?               @db.NVarChar(500)
-  PlannedShipStart DateTime              @db.DateTime
-  PlannedShipEnd   DateTime              @db.DateTime
-  Status           String                @default("Planned") @db.NVarChar(20)
-  CreatedAt        DateTime              @default(now()) @db.DateTime
-  UpdatedAt        DateTime?             @db.DateTime
-  Items            CustomerOrdersItems[]
-  CustomerOrders   CustomerOrders        @relation(fields: [CustomerOrderID], references: [ID], onDelete: Cascade, map: "FK_PlannedShipment_CustomerOrders")
-  Shipments        Shipments[]
+  ID                  BigInt              @id(map: "PK_PlannedShipment") @default(autoincrement())
+  CustomerOrderID     BigInt
+  CollectionID        Int?                // Nullable for combined/ATS shipments
+  CollectionName      String?             @db.NVarChar(500)
+  PlannedShipStart    DateTime            @db.DateTime
+  PlannedShipEnd      DateTime            @db.DateTime
+  Status              String              @default("Planned") @db.NVarChar(20) // Planned|PartiallyFulfilled|Fulfilled|Cancelled
+  IsCombined          Boolean             @default(false)  // True if manually combined from multiple shipments
+  OriginalShipmentIds String?             @db.NVarChar(Max) // JSON array of original shipment IDs if combined
+  CreatedAt           DateTime            @default(now()) @db.DateTime
+  UpdatedAt           DateTime?           @db.DateTime
+
+  CustomerOrders    CustomerOrders      @relation(fields: [CustomerOrderID], references: [ID], onDelete: Cascade, map: "FK_PlannedShipment_CustomerOrders")
+  Items             CustomerOrdersItems[]
+  Shipments         Shipments[]  // Phase 6: Back-relation to linked fulfillments
+  ShipmentItems     ShipmentItems[]  // Cross-shipment fulfillment: per-item tracking
 
   @@index([CustomerOrderID], map: "IX_PlannedShipment_CustomerOrderID")
   @@index([Status], map: "IX_PlannedShipment_Status")

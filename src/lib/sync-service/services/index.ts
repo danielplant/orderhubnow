@@ -118,3 +118,20 @@ export type { WebhookQueueOptions, QueueStats } from './webhook-queue';
 
 // Webhook Stats
 export { WebhookStatsService, getWebhookStatsService } from './webhook-stats';
+
+// Export Queue (BullMQ - Phase 3)
+export {
+  getExportQueue,
+  initializeExportQueue,
+} from './export-queue';
+export type { ExportJobData, ExportJobResult } from './export-queue';
+
+// Thumbnail Queue (BullMQ - Phase 3)
+export {
+  getThumbnailQueue,
+  initializeThumbnailQueue,
+} from './thumbnail-queue';
+export type { ThumbnailJobData, ThumbnailJobResult } from './thumbnail-queue';
+
+// Export Cleanup (Phase 3)
+export { cleanupExpiredExports, getCleanupStats } from './export-cleanup';

@@ -17,10 +17,10 @@ import type { EmailRecipientInfo } from '@/lib/types/email'
 import { formatCurrency } from '@/lib/utils'
 
 /**
- * Represents a submitted order for the email confirmation modal.
- * When a cart is split by Collection, multiple orders are created.
+ * Represents a shipment summary for the email confirmation modal.
+ * An order may have multiple planned shipments grouped by Collection.
  */
-export interface SubmittedOrder {
+export interface ShipmentSummary {
   orderId: string
   orderNumber: string
   // Collection name - what users see on pre-order pages
@@ -33,7 +33,7 @@ export interface SubmittedOrder {
 interface EmailConfirmationModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  orders: SubmittedOrder[]
+  shipments: ShipmentSummary[]
   currency?: 'USD' | 'CAD'
   onConfirm: () => void
   onSkip: () => void
@@ -42,14 +42,14 @@ interface EmailConfirmationModalProps {
 export function EmailConfirmationModal({
   open,
   onOpenChange,
-  orders,
+  shipments,
   currency = 'USD',
   onConfirm,
   onSkip,
 }: EmailConfirmationModalProps) {
-  // Use first order for fetching recipients (all orders share same customer/rep)
-  const primaryOrderId = orders[0]?.orderId || ''
-  const orderCount = orders.length
+  // Use first shipment for fetching recipients (all shipments share same customer/rep)
+  const primaryOrderId = shipments[0]?.orderId || ''
+  const shipmentCount = shipments.length
   const [isLoading, setIsLoading] = useState(true)
   const [isSending, setIsSending] = useState(false)
   const [recipients, setRecipients] = useState<EmailRecipientInfo | null>(null)
@@ -126,11 +126,15 @@ export function EmailConfirmationModal({
         saveAsRepDefault,
       }
 
+      // De-duplicate by orderId - send once per unique order
+      // All shipments in multi-shipment orders have the same orderId
+      const uniqueOrderIds = [...new Set(shipments.map((s) => s.orderId))]
       const errors: string[] = []
 
-      for (const order of orders) {
+      for (const orderId of uniqueOrderIds) {
+        const orderNumber = shipments.find((s) => s.orderId === orderId)?.orderNumber || orderId
         try {
-          const res = await fetch(`/api/orders/${order.orderId}/send-emails`, {
+          const res = await fetch(`/api/orders/${orderId}/send-emails`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(emailPayload),
@@ -139,14 +143,14 @@ export function EmailConfirmationModal({
           const data = await res.json()
 
           if (!res.ok) {
-            errors.push(`${order.orderNumber}: ${data.error || 'Failed'}`)
+            errors.push(`${orderNumber}: ${data.error || 'Failed'}`)
           }
         } catch (err) {
-          errors.push(`${order.orderNumber}: ${err instanceof Error ? err.message : 'Failed'}`)
+          errors.push(`${orderNumber}: ${err instanceof Error ? err.message : 'Failed'}`)
         }
       }
 
-      if (errors.length > 0 && errors.length === orders.length) {
+      if (errors.length > 0 && errors.length === shipments.length) {
         // All failed
         throw new Error(`Failed to send emails: ${errors.join(', ')}`)
       }
@@ -172,8 +176,8 @@ export function EmailConfirmationModal({
     return startDate || endDate || 'TBD'
   }
 
-  // Calculate total across all orders
-  const totalAmount = orders.reduce((sum, o) => sum + o.orderAmount, 0)
+  // Calculate total across all shipments
+  const totalAmount = shipments.reduce((sum, s) => sum + s.orderAmount, 0)
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -181,7 +185,7 @@ export function EmailConfirmationModal({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Mail className="h-5 w-5" />
-            {orderCount > 1 ? 'Orders Submitted Successfully' : `Order ${orders[0]?.orderNumber} Submitted`}
+            Order {shipments[0]?.orderNumber} Submitted
           </DialogTitle>
         </DialogHeader>
 
@@ -196,29 +200,26 @@ export function EmailConfirmationModal({
           </div>
         ) : recipients && (
           <div className="space-y-6">
-            {/* Orders Summary Section - shown when multiple orders */}
-            {orderCount > 1 && (
+            {/* Shipments Summary Section */}
+            {shipmentCount > 1 && (
               <div className="space-y-3">
                 <div className="flex items-center gap-2">
                   <Package className="h-4 w-4 text-muted-foreground" />
                   <Label className="text-base font-semibold">
-                    Your cart was split into {orderCount} orders by delivery window:
+                    Your order will ship in {shipmentCount} shipments:
                   </Label>
                 </div>
                 <div className="bg-muted/50 rounded-lg p-3 space-y-2">
-                  {orders.map((order) => (
-                    <div key={order.orderId} className="flex items-center justify-between text-sm">
+                  {shipments.map((shipment) => (
+                    <div key={shipment.orderId} className="flex items-center justify-between text-sm">
                       <div className="flex items-center gap-3">
-                        <span className="font-mono font-medium">{order.orderNumber}</span>
+                        <span className="font-mono font-medium">{shipment.collectionName || 'Standard'}</span>
                         <span className="text-muted-foreground">
-                          {order.collectionName || 'Standard'}
-                        </span>
-                        <span className="text-muted-foreground">
-                          Ships {formatShipWindow(order.shipWindowStart, order.shipWindowEnd)}
+                          Ships {formatShipWindow(shipment.shipWindowStart, shipment.shipWindowEnd)}
                         </span>
                       </div>
                       <span className="font-medium">
-                        {formatCurrency(order.orderAmount, currency)}
+                        {formatCurrency(shipment.orderAmount, currency)}
                       </span>
                     </div>
                   ))}
@@ -228,7 +229,7 @@ export function EmailConfirmationModal({
                   </div>
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  Each order will receive its own confirmation email.
+                  A confirmation email will be sent for your order.
                 </p>
               </div>
             )}
@@ -408,10 +409,10 @@ export function EmailConfirmationModal({
             {isSending ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Sending{orderCount > 1 ? ` ${orderCount} emails...` : '...'}
+                Sending...
               </>
             ) : (
-              orderCount > 1 ? `Send ${orderCount} Emails` : 'Confirm and Send'
+              'Confirm and Send'
             )}
           </Button>
         </DialogFooter>

@@ -1,6 +1,7 @@
 // shadcn/ui components (Radix-based, accessible)
 export { Button, buttonVariants } from "./button";
 export { Input } from "./input";
+export { Progress } from "./progress";
 export { SearchInput, type SearchInputProps } from "./search-input";
 export { Popover, PopoverTrigger, PopoverContent, PopoverAnchor } from "./popover";
 export { Card, CardHeader, CardFooter, CardTitle, CardDescription, CardContent } from "./card";
@@ -74,3 +75,6 @@ export { FeatureInterestModal, type FeatureInterestModalProps } from "./feature-
 
 // Filter components
 export { FilterPill, type FilterPillProps, type FilterPillOption } from "./filter-pill";
+
+// Shipment components
+export { ShipmentTimeline } from "./shipment-timeline";

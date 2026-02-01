@@ -161,6 +161,19 @@ export type SyncSettingsRecord = {
   // Shopify Store Domain (for building admin links in Missing Data panels)
   shopifyStoreDomain: string | null
 
+  // Schema Introspection Settings
+  introspectRecordSampleSize: number
+  introspectMetafieldLimit: number
+
+  // Export Policy Configuration
+  // Controls how XLSX/PDF exports fetch and display product images
+  exportThumbnailSize: number
+  exportExcelDisplayPx: number
+  exportPdfDisplayPx: number
+  exportRequireS3: boolean
+  exportAllowShopifyFallback: boolean
+  exportImageConcurrency: number
+
   updatedAt: Date
 }
 
@@ -210,6 +223,15 @@ export const SYNC_SETTINGS_DEFAULTS: SyncSettingsEditableFields = {
   syncPollIntervalMs: 3000,
   useProductImageGallery: false, // Default: use featured image only
   shopifyStoreDomain: null, // Set to e.g. "limeappleonline.myshopify.com" for Shopify admin links
+  introspectRecordSampleSize: 250,
+  introspectMetafieldLimit: 100,
+  // Export Policy - matches previous hardcoded values in export-config.ts
+  exportThumbnailSize: 120, // Pixel size for S3 thumbnails
+  exportExcelDisplayPx: 96, // Display width in Excel (1 inch at 96dpi)
+  exportPdfDisplayPx: 60, // Display width in PDF
+  exportRequireS3: true, // Block if S3 missing (vs fallback)
+  exportAllowShopifyFallback: true, // Allow Shopify CDN fallback
+  exportImageConcurrency: 10, // Max parallel image fetches
 }
 
 // ============================================================================

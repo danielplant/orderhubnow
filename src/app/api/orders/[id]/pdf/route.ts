@@ -106,9 +106,11 @@ export async function GET(
     }
 
     // Fetch order items with LineDiscount
+    // Phase 9: Added ID for shipment matching
     const orderItems = await prisma.customerOrdersItems.findMany({
       where: { CustomerOrderID: BigInt(orderId) },
       select: {
+        ID: true,  // Phase 9: Required for shipment matching
         SKU: true,
         Quantity: true,
         Price: true,
@@ -257,6 +259,74 @@ export async function GET(
       })
     )
 
+    // Phase 9: Fetch planned shipments for grouped PDF rendering
+    interface PlannedShipmentForPdf {
+      id: string
+      collectionName: string | null
+      plannedShipStart: Date
+      plannedShipEnd: Date
+      items: typeof items
+      subtotal: number
+    }
+    let shipmentsForPdf: PlannedShipmentForPdf[] = []
+    try {
+      const plannedShipments = await prisma.plannedShipment.findMany({
+        where: { CustomerOrderID: BigInt(orderId) },
+        select: {
+          ID: true,
+          CollectionName: true,
+          PlannedShipStart: true,
+          PlannedShipEnd: true,
+          Items: {
+            select: { ID: true },
+          },
+        },
+        orderBy: { PlannedShipStart: 'asc' },
+      })
+
+      // Build item-to-shipment mapping using IDs
+      const itemShipmentMap = new Map<bigint, bigint>()
+      for (const shipment of plannedShipments) {
+        for (const item of shipment.Items) {
+          itemShipmentMap.set(item.ID, shipment.ID)
+        }
+      }
+
+      // Build a map from orderItem ID to built LineItem
+      const orderItemToLineItem = new Map<bigint, typeof items[0]>()
+      for (let i = 0; i < orderItems.length; i++) {
+        const oi = orderItems[i]
+        const li = items.find(item => item.sku === oi.SKU)
+        if (li) {
+          orderItemToLineItem.set(oi.ID, li)
+        }
+      }
+
+      // Group LineItem objects by shipment
+      shipmentsForPdf = plannedShipments.map((shipment) => {
+        const shipmentItems: typeof items = []
+        
+        for (const shipmentItem of shipment.Items) {
+          const lineItem = orderItemToLineItem.get(shipmentItem.ID)
+          if (lineItem) {
+            shipmentItems.push(lineItem)
+          }
+        }
+
+        return {
+          id: String(shipment.ID),
+          collectionName: shipment.CollectionName,
+          plannedShipStart: shipment.PlannedShipStart,
+          plannedShipEnd: shipment.PlannedShipEnd,
+          items: shipmentItems,
+          subtotal: shipmentItems.reduce((sum, i) => sum + i.lineTotal, 0),
+        }
+      })
+    } catch (err) {
+      console.error('Failed to fetch planned shipments for PDF:', err)
+      // Continue with empty array - will render flat format
+    }
+
     // Build order data for PDF
     const orderData = {
       orderNumber: order.OrderNumber || `#${orderId}`,
@@ -287,9 +357,11 @@ export async function GET(
     }
 
     // Generate HTML
+    // Phase 9: Pass planned shipments for grouped rendering
     const html = generateOrderConfirmationHtml({
       order: orderData,
       items,
+      plannedShipments: shipmentsForPdf.length > 0 ? shipmentsForPdf : undefined,
       company: {
         companyName: companySettings.CompanyName,
         logoUrl: companySettings.LogoUrl,

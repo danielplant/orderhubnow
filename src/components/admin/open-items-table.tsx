@@ -2,7 +2,8 @@
 
 import * as React from 'react'
 import Link from 'next/link'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useRouter } from 'next/navigation'
+import { useTableSearch } from '@/lib/hooks'
 import {
   Button,
   Card,
@@ -12,9 +13,9 @@ import {
   DataTable,
   type DataTableColumn,
 } from '@/components/ui'
-import { Input } from '@/components/ui/input'
+import { SearchInput } from '@/components/ui/search-input'
 import { cn, formatCurrency } from '@/lib/utils'
-import { Package, List, X, Loader2, Search } from 'lucide-react'
+import { Package, List, X, Loader2 } from 'lucide-react'
 import type { OpenItem, OpenItemsBySkuRow } from '@/lib/data/queries/open-items'
 import { bulkCancelItems } from '@/lib/data/actions/shipments'
 import { toast } from 'sonner'
@@ -43,58 +44,37 @@ export function OpenItemsTable({
   searchQuery,
 }: OpenItemsTableProps) {
   const router = useRouter()
-  const searchParams = useSearchParams()
+
+  // Use shared table search hook
+  const { q, page: _page, setParam, setPage, setSort, setParams, getParam: _getParam } = useTableSearch({
+    basePath: '/admin/open-items'
+  })
+
   const [selectedIds, setSelectedIds] = React.useState<string[]>([])
   const [isCancelling, setIsCancelling] = React.useState(false)
-  const [localSearch, setLocalSearch] = React.useState(searchQuery)
-
-  // URL update helper
-  const updateParams = React.useCallback(
-    (updates: Record<string, string | undefined>) => {
-      const params = new URLSearchParams(searchParams.toString())
-      for (const [key, value] of Object.entries(updates)) {
-        if (value === undefined || value === '') {
-          params.delete(key)
-        } else {
-          params.set(key, value)
-        }
-      }
-      router.push(`/admin/open-items?${params.toString()}`)
-    },
-    [router, searchParams]
-  )
-
-  // Handle search submit
-  const handleSearchSubmit = React.useCallback(
-    (e: React.FormEvent) => {
-      e.preventDefault()
-      updateParams({ q: localSearch, page: '1' })
-    },
-    [updateParams, localSearch]
-  )
 
   // Handle view toggle
   const handleViewChange = React.useCallback(
     (newView: string) => {
-      updateParams({ view: newView, page: '1' })
+      setParams({ view: newView, page: null })
     },
-    [updateParams]
+    [setParams]
   )
 
   // Handle sort
   const handleSort = React.useCallback(
-    (sort: { columnId: string; direction: 'asc' | 'desc' }) => {
-      updateParams({ sort: sort.columnId, dir: sort.direction })
+    (newSort: { columnId: string; direction: 'asc' | 'desc' }) => {
+      setSort(newSort)
     },
-    [updateParams]
+    [setSort]
   )
 
   // Handle pagination
   const handlePageChange = React.useCallback(
-    (page: number) => {
-      updateParams({ page: page.toString() })
+    (newPage: number) => {
+      setPage(newPage)
     },
-    [updateParams]
+    [setPage]
   )
 
   // Handle selection
@@ -286,16 +266,12 @@ export function OpenItemsTable({
       <CardContent className="space-y-4">
         {/* Search and actions */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <form onSubmit={handleSearchSubmit} className="relative sm:w-64">
-            <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-            <Input
-              type="text"
-              value={localSearch}
-              onChange={(e) => setLocalSearch(e.target.value)}
-              placeholder="Search SKU..."
-              className="pl-8"
-            />
-          </form>
+          <SearchInput
+            value={q}
+            onValueChange={(v) => setParam('q', v || null)}
+            placeholder="Search by SKU..."
+            className="h-10 w-64"
+          />
           {view === 'items' && selectedIds.length > 0 && (
             <Button
               variant="destructive"
