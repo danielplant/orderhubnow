@@ -48,10 +48,8 @@ export function CollectionSelector({
   // Handle radio selection
   const handleRadioChange = (newMode: CollectionFilterMode) => {
     onModeChange(newMode)
-    // Clear specific selections when switching away from specific mode
-    if (newMode !== 'specific') {
-      onSelectionChange([])
-    }
+    // Note: Don't call onSelectionChange here - the parent derives selectedIds from URL.
+    // When mode changes to non-specific, the URL update handles everything.
   }
 
   // Handle adding a collection to selection
@@ -191,7 +189,19 @@ function RadioOption({
   onChange: () => void
 }) {
   return (
-    <label className="flex items-center gap-2 cursor-pointer">
+    <div
+      role="radio"
+      aria-checked={checked}
+      tabIndex={0}
+      className="flex items-center gap-2 cursor-pointer"
+      onClick={onChange}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onChange()
+        }
+      }}
+    >
       <div
         className={cn(
           'w-4 h-4 rounded-full border-2 flex items-center justify-center transition-colors',
@@ -199,12 +209,11 @@ function RadioOption({
             ? 'border-primary bg-primary'
             : 'border-muted-foreground/40 hover:border-muted-foreground'
         )}
-        onClick={onChange}
       >
         {checked && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
       </div>
       <span className="text-sm">{label}</span>
-    </label>
+    </div>
   )
 }
 

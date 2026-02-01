@@ -1,8 +1,9 @@
 'use client'
 
 import * as React from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useRouter } from 'next/navigation'
 import { DataTable, type DataTableColumn, Button, SearchInput, FilterPill } from '@/components/ui'
+import { useTableSearch } from '@/lib/hooks'
 import { InlineEdit } from '@/components/ui/inline-edit'
 import { FilterChips, type FilterChip } from '@/components/admin/filter-chips'
 import type { InventoryListItem, InventorySortField, SortDirection, InventoryFacets } from '@/lib/data/queries/inventory'
@@ -49,56 +50,23 @@ export function InventoryTable({
   sortBy,
   sortDir = 'asc',
 }: InventoryTableProps) {
+  // Use shared table search hook
+  const { q, page, pageSize, setParam, setPage, setSort, getParam } = useTableSearch()
   const router = useRouter()
-  const searchParams = useSearchParams()
 
-  // Parse current filter state from URL
-  const status = (searchParams.get('status') || 'all') as (typeof TABS)[number]['value']
-  const q = searchParams.get('q') || ''
-  const collectionId = searchParams.get('collectionId') || ''
-  const color = searchParams.get('color') || ''
-  const fabric = searchParams.get('fabric') || ''
-  const size = searchParams.get('size') || ''
-  const page = Number(searchParams.get('page') || '1')
-  const pageSize = Number(searchParams.get('pageSize') || '50')
+  // Parse additional filter state from URL
+  const status = (getParam('status') || 'all') as (typeof TABS)[number]['value']
+  const collectionId = getParam('collectionId') || ''
+  const color = getParam('color') || ''
+  const fabric = getParam('fabric') || ''
+  const size = getParam('size') || ''
 
-  // URL param helpers
-  const setParam = React.useCallback(
-    (key: string, value: string | null) => {
-      const params = new URLSearchParams(searchParams.toString())
-      if (!value) {
-        params.delete(key)
-      } else {
-        params.set(key, value)
-      }
-      // Reset pagination on filter changes
-      if (key !== 'page') {
-        params.delete('page')
-      }
-      router.push(`?${params.toString()}`, { scroll: false })
-    },
-    [router, searchParams]
-  )
-
-  const setPageParam = React.useCallback(
-    (nextPage: number) => {
-      const params = new URLSearchParams(searchParams.toString())
-      params.set('page', String(Math.max(1, nextPage)))
-      router.push(`?${params.toString()}`, { scroll: false })
-    },
-    [router, searchParams]
-  )
-
-  // Handle sort change - update URL params
+  // Handle sort change with custom field name
   const handleSortChange = React.useCallback(
     (newSort: { columnId: string; direction: 'asc' | 'desc' }) => {
-      const params = new URLSearchParams(searchParams.toString())
-      params.set('sortBy', newSort.columnId)
-      params.set('sortDir', newSort.direction)
-      params.delete('page') // Reset pagination on sort change
-      router.push(`?${params.toString()}`, { scroll: false })
+      setSort(newSort)
     },
-    [router, searchParams]
+    [setSort]
   )
 
   // Clear all filters
@@ -373,7 +341,7 @@ export function InventoryTable({
         manualPagination
         page={page}
         totalCount={total}
-        onPageChange={setPageParam}
+        onPageChange={setPage}
         manualSorting
         sort={sortBy ? { columnId: sortBy, direction: sortDir } : null}
         onSortChange={handleSortChange}

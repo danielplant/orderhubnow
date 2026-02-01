@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useTransition } from 'react'
+import { useRouter } from 'next/navigation'
 import Image from 'next/image'
 import Link from 'next/link'
 import {
@@ -12,7 +13,9 @@ import {
   Input,
 } from '@/components/ui'
 import { Upload, Eye, EyeOff, Tag, Trash2 } from 'lucide-react'
+import { AffectedOrdersPreviewDialog } from './affected-orders-preview-dialog'
 import type { CollectionWithCount, CollectionType } from '@/lib/types/collection'
+import type { AffectedOrder } from '@/lib/types/planned-shipment'
 
 interface CollectionModalProps {
   open: boolean
@@ -29,6 +32,7 @@ export function CollectionModal({
   type,
   collection,
 }: CollectionModalProps) {
+  const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
 
@@ -43,7 +47,26 @@ export function CollectionModal({
   const [imagePreview, setImagePreview] = useState<string | null>(null)
   const [mappedValues, setMappedValues] = useState<string[]>([])
 
+  // Phase 8: Impact check state
+  const [showPreview, setShowPreview] = useState(false)
+  const [affectedData, setAffectedData] = useState<{
+    totalOrders: number
+    totalShipments: number
+    invalidCount: number
+    shopifyExcludedCount: number
+    previewOrders: AffectedOrder[]
+  } | null>(null)
+  const [redirectTo, setRedirectTo] = useState<string | null>(null)
+
   const isEditing = collection !== null
+
+  // Handle redirect after modal closes
+  useEffect(() => {
+    if (redirectTo) {
+      router.push(redirectTo)
+      setRedirectTo(null)
+    }
+  }, [redirectTo, router])
 
   // Reset form when modal opens/closes or collection changes
   useEffect(() => {
@@ -73,6 +96,10 @@ export function CollectionModal({
       }
       setImageFile(null)
       setError(null)
+      // Reset Phase 8 state
+      setShowPreview(false)
+      setAffectedData(null)
+      setRedirectTo(null)
     }
   }, [open, collection, type])
 
@@ -92,11 +119,56 @@ export function CollectionModal({
 
     setError(null)
 
+    // Phase 8: Check if this is a PreOrder edit with changed dates
+    if (isEditing && collectionType === 'PreOrder' && collection) {
+      const originalStart = collection.shipWindowStart?.split('T')[0] || ''
+      const originalEnd = collection.shipWindowEnd?.split('T')[0] || ''
+      const datesChanged = originalStart !== shipStart || originalEnd !== shipEnd
+
+      if (datesChanged && shipStart && shipEnd) {
+        // Fetch affected orders
+        startTransition(async () => {
+          try {
+            const res = await fetch(
+              `/api/collections/${collection.id}/affected-orders?` +
+                `newStart=${shipStart}&newEnd=${shipEnd}`
+            )
+            const data = await res.json()
+
+            // Only show preview if there are INVALID shipments
+            if (data.invalidCount > 0) {
+              setAffectedData({
+                totalOrders: data.totalOrders,
+                totalShipments: data.totalShipments,
+                invalidCount: data.invalidCount,
+                shopifyExcludedCount: data.shopifyExcludedCount,
+                previewOrders: data.affected.slice(0, 5),
+              })
+              setShowPreview(true)
+              return // Don't proceed with save yet
+            }
+
+            // All shipments still valid, save directly
+            await doSave()
+          } catch (err) {
+            setError('Failed to check affected orders')
+          }
+        })
+        return
+      }
+    }
+
+    // No date change or not PreOrder, save directly
+    await doSave()
+  }
+
+  // Extract save logic to reusable function
+  async function doSave() {
     startTransition(async () => {
       try {
         // Create or update collection
         const url = isEditing
-          ? `/api/collections/${collection.id}`
+          ? `/api/collections/${collection!.id}`
           : '/api/collections'
         const method = isEditing ? 'PATCH' : 'POST'
 
@@ -118,7 +190,7 @@ export function CollectionModal({
         }
 
         const data = await res.json()
-        const collectionId = isEditing ? collection.id : data.collection.id
+        const collectionId = isEditing ? collection!.id : data.collection.id
 
         // Upload image if changed
         if (imageFile) {
@@ -137,6 +209,14 @@ export function CollectionModal({
             const imgData = await imgRes.json().catch(() => ({}))
             throw new Error(imgData.error || 'Failed to upload image')
           }
+        }
+
+        // Phase 8: Redirect to affected orders page if preview was shown
+        if (affectedData && affectedData.invalidCount > 0) {
+          setRedirectTo(
+            `/admin/collections/${collectionId}/affected-orders?` +
+              `windowStart=${shipStart}&windowEnd=${shipEnd}`
+          )
         }
 
         onSave()
@@ -371,6 +451,25 @@ export function CollectionModal({
             </Button>
           </div>
         </div>
+
+        {/* Phase 8: Affected Orders Preview Dialog */}
+        {showPreview && affectedData && collection && (
+          <AffectedOrdersPreviewDialog
+            open={showPreview}
+            onClose={() => setShowPreview(false)}
+            onConfirm={doSave}
+            collectionName={name}
+            oldStart={collection.shipWindowStart?.split('T')[0] || null}
+            oldEnd={collection.shipWindowEnd?.split('T')[0] || null}
+            newStart={shipStart}
+            newEnd={shipEnd}
+            totalOrders={affectedData.totalOrders}
+            totalShipments={affectedData.totalShipments}
+            invalidCount={affectedData.invalidCount}
+            shopifyExcludedCount={affectedData.shopifyExcludedCount}
+            previewOrders={affectedData.previewOrders}
+          />
+        )}
       </DialogContent>
     </Dialog>
   )

@@ -35,7 +35,8 @@ export interface AdminSkuRow {
   skuId: string
   baseSku: string
   parsedSize: string
-  description: string
+  description: string // OrderEntryDescription or fallback
+  rawDescription: string // Raw Shopify Description field (for search transparency)
   color: string
   material: string // FabricContent
   categoryId: number | null

@@ -3,6 +3,7 @@
 import * as React from 'react'
 import Image from 'next/image'
 import { useRouter, useSearchParams } from 'next/navigation'
+import { useTableSearch, useColumnVisibility } from '@/lib/hooks'
 import {
   DataTable,
   type DataTableColumn,
@@ -16,6 +17,12 @@ import {
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   SearchInput,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
 } from '@/components/ui'
 import type { CurrencyMode } from '@/lib/types/export'
 import { BulkActionsBar } from '@/components/admin/bulk-actions-bar'
@@ -32,6 +39,37 @@ import {
 import { UploadProductsModal } from '@/components/admin/upload-products-modal'
 import { CollectionSelector, type CollectionFilterMode } from '@/components/admin/collection-selector'
 import { MoreHorizontal, Download, Upload, ChevronDown, FileSpreadsheet, FileText } from 'lucide-react'
+import { ColumnVisibilityToggle, type ColumnConfig } from '@/components/admin/column-visibility-toggle'
+import { ExportProgress } from '@/components/admin/export-progress'
+
+// ============================================================================
+// Column Visibility Constants
+// ============================================================================
+
+const COLUMN_LABELS: Record<string, string> = {
+  image: 'Image',
+  skuId: 'SKU',
+  color: 'Color',
+  description: 'Description',
+  rawDescription: 'Shopify Description',
+  material: 'Material',
+  quantity: 'Available',
+  onRoute: 'On Route',
+  units: 'Units',
+  packPrice: 'Pack Price',
+  unitPrice: 'Unit Price',
+  retailPrice: 'Retail Price',
+  collection: 'Collection',
+  status: 'Status',
+  actions: 'Actions',
+}
+
+const DEFAULT_VISIBLE_COLUMNS = [
+  'image', 'skuId', 'color', 'description', 'material',
+  'quantity', 'onRoute', 'collection', 'status', 'actions',
+]
+
+const REQUIRED_COLUMNS = ['skuId', 'actions']
 
 // ============================================================================
 // Image Cell with S3 → Shopify fallback
@@ -100,6 +138,12 @@ export function ProductsTable({
   const router = useRouter()
   const searchParams = useSearchParams()
 
+  // Use shared table search hook for standard params
+  const { q, page, pageSize, sort, dir, setParam, setPage, setSort, getParam } = useTableSearch()
+
+  // Default sort for products
+  const actualSort = sort || 'dateModified'
+
   const [selectedIds, setSelectedIds] = React.useState<string[]>([])
   const [isLoading, setIsLoading] = React.useState(false)
   const [showUploadModal, setShowUploadModal] = React.useState(false)
@@ -108,16 +152,30 @@ export function ProductsTable({
   const [selectedProduct, setSelectedProduct] = React.useState<any | null>(null)
   const [highlightedSku, setHighlightedSku] = React.useState<string | undefined>()
   const [exportCurrency, setExportCurrency] = React.useState<CurrencyMode>('BOTH')
+  const [exporting, setExporting] = React.useState(false)
+  const [exportJobId, setExportJobId] = React.useState<string | null>(null)
+  const [coverageError, setCoverageError] = React.useState<{
+    pixelSize: number
+    total: number
+    cached: number
+    missing: number
+    missingSkuIds: string[]
+    coveragePercent: number
+  } | null>(null)
 
-  // Parse current filter state from URL
-  const q = searchParams.get('q') || ''
-  const page = Number(searchParams.get('page') || '1')
-  const pageSize = Number(searchParams.get('pageSize') || '50')
-  const sort = searchParams.get('sort') || 'dateModified'
-  const dir = (searchParams.get('dir') || 'desc') as 'asc' | 'desc'
+  // Column visibility state (localStorage persisted, no flash)
+  const {
+    visibleColumns,
+    toggleColumn,
+    resetColumns,
+    isHydrated,
+  } = useColumnVisibility({
+    storageKey: 'products-table-columns',
+    defaultColumns: DEFAULT_VISIBLE_COLUMNS,
+  })
 
   // Parse collections param: 'all' | 'ats' | 'preorder' | '1,2,3'
-  const collectionsParam = searchParams.get('collections') || 'all'
+  const collectionsParam = getParam('collections') || 'all'
   const { collectionMode, selectedCollectionIds } = React.useMemo(() => {
     if (collectionsParam === 'all' || collectionsParam === 'ats' || collectionsParam === 'preorder') {
       return { collectionMode: collectionsParam as CollectionFilterMode, selectedCollectionIds: [] }
@@ -129,43 +187,6 @@ export function ProductsTable({
       selectedCollectionIds: ids
     }
   }, [collectionsParam])
-
-  // URL param helpers
-  const setParam = React.useCallback(
-    (key: string, value: string | null) => {
-      const params = new URLSearchParams(searchParams.toString())
-      if (!value) {
-        params.delete(key)
-      } else {
-        params.set(key, value)
-      }
-      // Reset pagination on filter changes
-      if (key !== 'page') {
-        params.delete('page')
-      }
-      router.push(`?${params.toString()}`, { scroll: false })
-    },
-    [router, searchParams]
-  )
-
-  const setPageParam = React.useCallback(
-    (nextPage: number) => {
-      const params = new URLSearchParams(searchParams.toString())
-      params.set('page', String(Math.max(1, nextPage)))
-      router.push(`?${params.toString()}`, { scroll: false })
-    },
-    [router, searchParams]
-  )
-
-  const setSortParam = React.useCallback(
-    (newSort: { columnId: string; direction: 'asc' | 'desc' }) => {
-      const params = new URLSearchParams(searchParams.toString())
-      params.set('sort', newSort.columnId)
-      params.set('dir', newSort.direction)
-      router.push(`?${params.toString()}`, { scroll: false })
-    },
-    [router, searchParams]
-  )
 
   // Collection filter handlers
   const handleCollectionModeChange = React.useCallback(
@@ -253,18 +274,91 @@ export function ProductsTable({
     [selectedIds, router]
   )
 
-  // Export using current filter (collections param already in URL)
-  const doExport = React.useCallback(() => {
-    const params = new URLSearchParams(searchParams.toString())
-    params.set('currency', exportCurrency)
-    window.location.href = `/api/products/export?${params.toString()}`
+  // Export using async job queue via new API
+  // Shows progress dialog and handles background processing
+  const doExport = React.useCallback(async () => {
+    setExporting(true)
+    setCoverageError(null)
+    try {
+      const collections = searchParams.get('collections') || 'all'
+
+      const response = await fetch('/api/admin/exports', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'xlsx',
+          collections,
+          currency: exportCurrency,
+          q: searchParams.get('q') || undefined,
+        }),
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        if (data.error === 'COVERAGE_REQUIRED') {
+          setCoverageError(data.coverage)
+          return
+        }
+        throw new Error(data.error || 'Export failed')
+      }
+
+      // For completed sync exports, download directly
+      if (data.status === 'completed' && data.downloadUrl) {
+        window.location.href = data.downloadUrl
+        return
+      }
+
+      // For async exports, show progress dialog
+      setExportJobId(data.jobId)
+    } catch (error) {
+      console.error('Export error:', error)
+    } finally {
+      setExporting(false)
+    }
   }, [searchParams, exportCurrency])
 
-  const doExportPdf = React.useCallback((orientation: 'landscape' | 'portrait') => {
-    const params = new URLSearchParams(searchParams.toString())
-    params.set('currency', exportCurrency)
-    params.set('orientation', orientation)
-    window.location.href = `/api/products/export-pdf?${params.toString()}`
+  const doExportPdf = React.useCallback(async (orientation: 'landscape' | 'portrait') => {
+    setExporting(true)
+    setCoverageError(null)
+    try {
+      const collections = searchParams.get('collections') || 'all'
+
+      const response = await fetch('/api/admin/exports', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'pdf',
+          collections,
+          currency: exportCurrency,
+          q: searchParams.get('q') || undefined,
+          orientation,
+        }),
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        if (data.error === 'COVERAGE_REQUIRED') {
+          setCoverageError(data.coverage)
+          return
+        }
+        throw new Error(data.error || 'Export failed')
+      }
+
+      // For completed sync exports, download directly
+      if (data.status === 'completed' && data.downloadUrl) {
+        window.location.href = data.downloadUrl
+        return
+      }
+
+      // For async exports, show progress dialog
+      setExportJobId(data.jobId)
+    } catch (error) {
+      console.error('Export error:', error)
+    } finally {
+      setExporting(false)
+    }
   }, [searchParams, exportCurrency])
 
   const handleSkuClick = React.useCallback(async (row: AdminSkuRow) => {
@@ -282,8 +376,30 @@ export function ProductsTable({
     }
   }, [])
 
-  // Table columns - Image | SKU | Color | Description | Material | Available | On Route | Wholesale Price | Retail Price
-  const columns = React.useMemo<Array<DataTableColumn<AdminSkuRow>>>(
+  // Column visibility config
+  const columnConfig = React.useMemo<ColumnConfig[]>(
+    () => Object.entries(COLUMN_LABELS).map(([id, label]) => ({
+      id,
+      label,
+      visible: visibleColumns.includes(id),
+      required: REQUIRED_COLUMNS.includes(id),
+    })),
+    [visibleColumns]
+  )
+
+  const handleColumnVisibilityChange = React.useCallback(
+    (columnId: string, visible: boolean) => {
+      toggleColumn(columnId, visible)
+    },
+    [toggleColumn]
+  )
+
+  const handleResetColumns = React.useCallback(() => {
+    resetColumns()
+  }, [resetColumns])
+
+  // Table columns - all available columns
+  const allColumns = React.useMemo<Array<DataTableColumn<AdminSkuRow>>>(
     () => [
       {
         id: 'image',
@@ -317,6 +433,15 @@ export function ProductsTable({
         id: 'description',
         header: 'Description',
         cell: (r) => <span className="text-sm">{r.description}</span>,
+      },
+      {
+        id: 'rawDescription',
+        header: 'Shopify Description',
+        cell: (r) => (
+          <span className="text-sm text-muted-foreground truncate max-w-[200px] block">
+            {r.rawDescription || '—'}
+          </span>
+        ),
       },
       {
         id: 'material',
@@ -438,6 +563,12 @@ export function ProductsTable({
     [handleDelete, handleTogglePreOrder, handleSkuClick, readOnly]
   )
 
+  // Filter columns by visibility
+  const columns = React.useMemo(
+    () => allColumns.filter((col) => visibleColumns.includes(col.id)),
+    [allColumns, visibleColumns]
+  )
+
   // Bulk actions
   const bulkActions = React.useMemo(
     () =>
@@ -481,11 +612,17 @@ export function ProductsTable({
           <SearchInput
             value={q}
             onValueChange={(v) => setParam('q', v || null)}
-            placeholder="Search SKU, description..."
+            placeholder="Search SKU, description, Shopify description..."
             className="h-10 w-full max-w-md"
           />
 
           <div className="ml-auto flex gap-2">
+            <ColumnVisibilityToggle
+              columns={columnConfig}
+              onChange={handleColumnVisibilityChange}
+              onReset={handleResetColumns}
+              isHydrated={isHydrated}
+            />
             {!readOnly && (
               <Button variant="outline" size="sm" onClick={() => setShowUploadModal(true)}>
                 <Upload className="h-4 w-4 mr-2" />
@@ -494,9 +631,9 @@ export function ProductsTable({
             )}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm">
+                <Button variant="outline" size="sm" disabled={exporting}>
                   <Download className="h-4 w-4 mr-2" />
-                  Export
+                  {exporting ? 'Exporting...' : 'Export'}
                   <ChevronDown className="h-4 w-4 ml-2" />
                 </Button>
               </DropdownMenuTrigger>
@@ -512,15 +649,15 @@ export function ProductsTable({
                 </DropdownMenuRadioGroup>
                 <DropdownMenuSeparator />
                 <DropdownMenuLabel>Download Format</DropdownMenuLabel>
-                <DropdownMenuItem onClick={() => doExport()}>
+                <DropdownMenuItem onClick={() => doExport()} disabled={exporting}>
                   <FileSpreadsheet className="h-4 w-4 mr-2" />
                   Excel (XLSX)
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => doExportPdf('landscape')}>
+                <DropdownMenuItem onClick={() => doExportPdf('landscape')} disabled={exporting}>
                   <FileText className="h-4 w-4 mr-2" />
                   PDF - Landscape
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => doExportPdf('portrait')}>
+                <DropdownMenuItem onClick={() => doExportPdf('portrait')} disabled={exporting}>
                   <FileText className="h-4 w-4 mr-2" />
                   PDF - Portrait
                 </DropdownMenuItem>
@@ -556,11 +693,11 @@ export function ProductsTable({
         manualPagination
         page={page}
         totalCount={total}
-        onPageChange={setPageParam}
+        onPageChange={setPage}
         // Manual/server-side sorting
         manualSorting
-        sort={{ columnId: sort, direction: dir }}
-        onSortChange={setSortParam}
+        sort={{ columnId: actualSort, direction: dir }}
+        onSortChange={setSort}
       />
 
       {/* Upload Modal - only render when not readOnly */}
@@ -578,6 +715,95 @@ export function ProductsTable({
         product={selectedProduct}
         highlightedSku={highlightedSku}
       />
+
+      {/* Coverage Error Modal */}
+      <Dialog open={coverageError !== null} onOpenChange={(open) => !open && setCoverageError(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-amber-600">Export Blocked: Missing Thumbnails</DialogTitle>
+            <DialogDescription>
+              Some product images are not cached in S3. Generate missing thumbnails before exporting.
+            </DialogDescription>
+          </DialogHeader>
+          {coverageError && (
+            <div className="space-y-4 py-4">
+              <div className="grid grid-cols-3 gap-4 text-center">
+                <div>
+                  <div className="text-2xl font-bold text-amber-600">{coverageError.missing}</div>
+                  <div className="text-xs text-muted-foreground">Missing</div>
+                </div>
+                <div>
+                  <div className="text-2xl font-bold">{coverageError.cached}</div>
+                  <div className="text-xs text-muted-foreground">Cached</div>
+                </div>
+                <div>
+                  <div className="text-2xl font-bold">{coverageError.coveragePercent}%</div>
+                  <div className="text-xs text-muted-foreground">Coverage</div>
+                </div>
+              </div>
+              <div className="rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-800 p-3">
+                <p className="text-sm text-amber-700 dark:text-amber-300">
+                  {coverageError.missing} of {coverageError.total} product images need to be generated
+                  at {coverageError.pixelSize}px before exports can proceed.
+                </p>
+              </div>
+              {coverageError.missingSkuIds.length > 0 && (
+                <div className="text-xs text-muted-foreground">
+                  <span className="font-medium">Missing SKUs:</span>{' '}
+                  {coverageError.missingSkuIds.slice(0, 5).join(', ')}
+                  {coverageError.missing > 5 && (
+                    <span> and {coverageError.missing - 5} more...</span>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            <Button variant="outline" onClick={() => setCoverageError(null)}>
+              Close
+            </Button>
+            {!readOnly ? (
+              <Button
+                onClick={() => {
+                  setCoverageError(null)
+                  window.location.href = '/admin/dev/shopify/images#thumbnail-generation'
+                }}
+                className="bg-amber-600 hover:bg-amber-700 text-white"
+              >
+                Generate Missing Thumbnails
+              </Button>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                Contact your admin to generate missing thumbnails.
+              </p>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Export Progress Modal */}
+      <Dialog open={exportJobId !== null} onOpenChange={(open) => !open && setExportJobId(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Generating Export</DialogTitle>
+            <DialogDescription>
+              Your export is being processed. This may take a moment for large catalogs.
+            </DialogDescription>
+          </DialogHeader>
+          {exportJobId && (
+            <ExportProgress
+              jobId={exportJobId}
+              onComplete={() => {
+                // Download will happen via the download button in the progress component
+              }}
+              onError={(error) => {
+                console.error('Export failed:', error)
+              }}
+              onClose={() => setExportJobId(null)}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

@@ -1,7 +1,8 @@
 'use client'
 
 import * as React from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useRouter } from 'next/navigation'
+import { useTableSearch } from '@/lib/hooks'
 import {
   DataTable,
   type DataTableColumn,
@@ -62,16 +63,14 @@ export function CustomersTable({
   sortBy,
   sortDir = 'asc',
 }: CustomersTableProps) {
+  // Use shared table search hook
+  const { q, page, pageSize, setParam, setPage, setSort, getParam } = useTableSearch()
   const router = useRouter()
-  const searchParams = useSearchParams()
 
-  // URL params
-  const q = searchParams.get('q') || ''
-  const country = searchParams.get('country') || ''
-  const state = searchParams.get('state') || ''
-  const repFilter = searchParams.get('repFilter') || ''
-  const page = Number(searchParams.get('page') || '1')
-  const pageSize = Number(searchParams.get('pageSize') || '50')
+  // Additional URL params
+  const country = getParam('country') || ''
+  const state = getParam('state') || ''
+  const repFilter = getParam('repFilter') || ''
 
   // Modal state
   const [modalMode, setModalMode] = React.useState<ModalMode>(null)
@@ -126,37 +125,12 @@ export function CustomersTable({
     return map
   }, [reps])
 
-  // URL helpers
-  const setParam = React.useCallback(
-    (key: string, value: string | null) => {
-      const params = new URLSearchParams(searchParams.toString())
-      if (!value) params.delete(key)
-      else params.set(key, value)
-      if (key !== 'page') params.delete('page')
-      router.push(`?${params.toString()}`, { scroll: false })
-    },
-    [router, searchParams]
-  )
-
-  const setPageParam = React.useCallback(
-    (nextPage: number) => {
-      const params = new URLSearchParams(searchParams.toString())
-      params.set('page', String(Math.max(1, nextPage)))
-      router.push(`?${params.toString()}`, { scroll: false })
-    },
-    [router, searchParams]
-  )
-
-  // Handle sort change - update URL params
+  // Handle sort change
   const handleSortChange = React.useCallback(
     (newSort: { columnId: string; direction: 'asc' | 'desc' }) => {
-      const params = new URLSearchParams(searchParams.toString())
-      params.set('sortBy', newSort.columnId)
-      params.set('sortDir', newSort.direction)
-      params.delete('page') // Reset pagination on sort change
-      router.push(`?${params.toString()}`, { scroll: false })
+      setSort(newSort)
     },
-    [router, searchParams]
+    [setSort]
   )
 
   // Clear all filters
@@ -517,7 +491,7 @@ export function CustomersTable({
         manualPagination
         page={page}
         totalCount={total}
-        onPageChange={setPageParam}
+        onPageChange={setPage}
         manualSorting
         sort={sortBy ? { columnId: sortBy, direction: sortDir } : null}
         onSortChange={handleSortChange}

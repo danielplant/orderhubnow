@@ -4,10 +4,12 @@ import { auth } from '@/lib/auth/providers'
 import { prisma } from '@/lib/prisma'
 import { formatCurrency } from '@/lib/utils'
 import { formatDateTime } from '@/lib/utils/format'
-import { Card, CardContent, CardHeader, CardTitle, Button, StatusBadge } from '@/components/ui'
+import { Card, CardContent, CardHeader, CardTitle, Button, StatusBadge, ShipmentTimeline } from '@/components/ui'
 import type { OrderStatus } from '@/lib/types/order'
 import { getShipmentsForOrder, getOrderItemsWithFulfillment } from '@/lib/data/actions/shipments'
+import { getPlannedShipmentsForOrder } from '@/lib/data/queries/orders'
 import { LineItemsSection, ShipmentHistory, PDFSettingsCard, ShopifyStatusCard } from '@/components/admin/order-detail-client'
+import { PlannedShipmentsSection } from '@/components/admin/order-detail/planned-shipments-section'
 import { ActivityLogPanel } from '@/components/admin/activity-log-panel'
 import { OrderEmailPanel } from '@/components/admin/order-email-panel'
 import { getOrderActivityLog, getOrderEmailLogs } from '@/lib/audit/activity-logger'
@@ -91,7 +93,7 @@ export default async function AdminOrderDetailsPage(props: { params: Promise<{ i
   const repEmail = rep?.Email1 || rep?.Email2 || undefined
   const repName = rep?.Name || undefined
 
-  const [itemsWithFulfillment, comments, shipments, activityLogs, emailLogs] = await Promise.all([
+  const [itemsWithFulfillment, comments, shipments, activityLogs, emailLogs, plannedShipments] = await Promise.all([
     getOrderItemsWithFulfillment(id),
     prisma.customerOrdersComments.findMany({
       where: { OrderID: BigInt(orderId) },
@@ -106,7 +108,11 @@ export default async function AdminOrderDetailsPage(props: { params: Promise<{ i
     getShipmentsForOrder(id),
     getOrderActivityLog(id),
     getOrderEmailLogs(id),
+    getPlannedShipmentsForOrder(id),
   ])
+
+  // Determine if planned shipment dates can be edited
+  const canEditShipmentDates = status === 'Pending' && !order.IsTransferredToShopify
 
   // Transform items for client component
   // Use Shopify SKU (clean) when available, fallback to legacy SKU
@@ -196,13 +202,34 @@ export default async function AdminOrderDetailsPage(props: { params: Promise<{ i
             </div>
             <div className="flex justify-between gap-4">
               <span className="text-muted-foreground">Ship Window</span>
-              <span className="font-medium">
-                {order.ShipStartDate && order.ShipEndDate
-                  ? `${order.ShipStartDate.toISOString().slice(0, 10)} – ${order.ShipEndDate
-                      .toISOString()
-                      .slice(0, 10)}`
-                  : '—'}
-              </span>
+              {plannedShipments.length > 1 ? (
+                <ShipmentTimeline
+                  shipments={plannedShipments.map((ps) => ({
+                    id: ps.id,
+                    collectionName: ps.collectionName,
+                    plannedShipStart: ps.plannedShipStart,
+                    plannedShipEnd: ps.plannedShipEnd,
+                    status: ps.status,
+                    itemCount: ps.items.length,
+                    // Add items for expanded view
+                    items: ps.items.map((item) => ({
+                      sku: item.sku,
+                      description: item.description,
+                      quantity: item.quantity,
+                    })),
+                  }))}
+                  variant="compact"
+                  showStatus
+                />
+              ) : (
+                <span className="font-medium">
+                  {order.ShipStartDate && order.ShipEndDate
+                    ? `${order.ShipStartDate.toISOString().slice(0, 10)} – ${order.ShipEndDate
+                        .toISOString()
+                        .slice(0, 10)}`
+                    : '—'}
+                </span>
+              )}
             </div>
             <div className="flex justify-between gap-4">
               <span className="text-muted-foreground">Order Date</span>
@@ -257,6 +284,16 @@ export default async function AdminOrderDetailsPage(props: { params: Promise<{ i
           />
         )}
 
+        {/* Planned Shipments - shows grouped items with editable dates */}
+        {plannedShipments.length > 0 && (
+          <PlannedShipmentsSection
+            orderId={id}
+            shipments={plannedShipments}
+            currency={currency}
+            editable={canEditShipmentDates}
+          />
+        )}
+
         <Card className="lg:col-span-2">
           <CardHeader>
             <CardTitle>Line Items</CardTitle>
@@ -276,10 +313,10 @@ export default async function AdminOrderDetailsPage(props: { params: Promise<{ i
           </CardContent>
         </Card>
 
-        {/* Shipment History */}
+        {/* Fulfillment History (actual shipments, not planned) */}
         <Card className="lg:col-span-2">
           <CardHeader>
-            <CardTitle>Shipments</CardTitle>
+            <CardTitle>Fulfillment History</CardTitle>
           </CardHeader>
           <CardContent>
             <ShipmentHistory
@@ -292,6 +329,14 @@ export default async function AdminOrderDetailsPage(props: { params: Promise<{ i
               customerEmail={order.CustomerEmail || undefined}
               repEmail={repEmail}
               repName={repName}
+              plannedShipments={plannedShipments.map((ps) => ({
+                id: ps.id,
+                collectionName: ps.collectionName,
+                plannedShipStart: ps.plannedShipStart,
+                plannedShipEnd: ps.plannedShipEnd,
+                status: ps.status,
+                itemIds: ps.itemIds,
+              }))}
             />
           </CardContent>
         </Card>

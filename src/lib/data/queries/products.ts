@@ -124,11 +124,12 @@ export async function getProducts(
   const where: any = {}
 
   // Search across multiple fields
+  // Note: SQL Server collation is case-insensitive by default, so no 'mode' needed
   if (input.q) {
     where.OR = [
-      { SkuID: { contains: input.q, mode: 'insensitive' } },
-      { Description: { contains: input.q, mode: 'insensitive' } },
-      { OrderEntryDescription: { contains: input.q, mode: 'insensitive' } },
+      { SkuID: { contains: input.q } },
+      { Description: { contains: input.q } },
+      { OrderEntryDescription: { contains: input.q } },
     ]
   }
 
@@ -206,6 +207,7 @@ export async function getProducts(
         baseSku,
         parsedSize: size,
         description,
+        rawDescription: r.Description ?? '', // Raw Shopify description for search transparency
         color: resolveColor(r.SkuColor, skuId, description),
         material: r.FabricContent ?? '',
         categoryId: r.CollectionID ?? null,

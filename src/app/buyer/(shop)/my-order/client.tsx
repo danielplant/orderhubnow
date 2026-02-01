@@ -6,16 +6,26 @@ import { toast } from 'sonner'
 import { useOrder } from '@/lib/contexts/order-context'
 import { useCurrency } from '@/lib/contexts/currency-context'
 import { OrderForm } from '@/components/buyer/order-form'
-import { DraftToolbar } from '@/components/buyer/draft-toolbar'
-import { DraftRecoveryBanner } from '@/components/buyer/draft-recovery-banner'
+import { SessionBackupToolbar } from '@/components/buyer/draft-toolbar'
+import { SessionRecoveryBanner } from '@/components/buyer/draft-recovery-banner'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { ShipmentTimeline } from '@/components/ui/shipment-timeline'
 import { CurrencyToggle } from '@/components/buyer/currency-toggle'
 import { formatCurrency } from '@/lib/utils'
 import { updateOrderCurrency } from '@/lib/data/actions/orders'
 import { Trash2 } from 'lucide-react'
 import type { OrderForEditing } from '@/lib/data/queries/orders'
+import type { CartPlannedShipment } from '@/lib/types/planned-shipment'
+import {
+  getATSDefaultDates,
+  validateShipDates,
+  getOverlapWindow,
+  getMultiCollectionOverlap,
+  getMinimumAllowedDates,
+  type CollectionWindow,
+} from '@/lib/validation/ship-window'
 
 interface SkuData {
   skuVariantId: number
@@ -64,9 +74,23 @@ export function MyOrderClient({
     setEditOrderCurrency,
     isEditMode: contextIsEditMode,
     isValidatingEditState,
+    shipmentDateOverrides,
+    updateShipmentDates,
+    // Phase 5: Edit mode shipments
+    editModeShipments,
+    isEditModeWithShipments,
+    // PR-3b: Shipment groupings (combine/split)
+    shipmentGroups,
+    combineShipments,
+    splitShipment,
   } = useOrder()
   const { currency, setCurrency } = useCurrency()
   const hasLoadedOrderRef = useRef(false)
+
+  // Resolve rep name from repContext.repId using the reps array
+  const repName = repContext?.repId
+    ? reps.find((r) => r.id === repContext.repId)?.name ?? `Rep #${repContext.repId}`
+    : null
 
   // Load draft from URL param if present (only for non-edit mode)
   useEffect(() => {
@@ -180,27 +204,350 @@ export function MyOrderClient({
     return items
   }, [orders, skuMap, effectiveCurrency])
 
-  // Detect if order will be split by Collection (for UI warning)
-  // CollectionID is the grouping key (what users see on pre-order pages)
-  const shipWindowGroups = useMemo(() => {
-    const groups = new Map<string, typeof cartItems>()
-    for (const item of cartItems) {
-      // Group by collectionId, else default
-      const key = item.collectionId
-        ? `collection-${item.collectionId}`
-        : 'default'
-      if (!groups.has(key)) groups.set(key, [])
-      groups.get(key)!.push(item)
+  // Compute planned shipments from cart items + date overrides
+  // Phase 5: In edit mode, reconcile loaded shipments with current cart items
+  const plannedShipments = useMemo((): CartPlannedShipment[] => {
+    if (cartItems.length === 0) return []
+
+    const atsDefaults = getATSDefaultDates()
+    const shipments: CartPlannedShipment[] = []
+
+    // Phase 5: Edit mode with loaded shipments - reconcile with cart
+    if (isEditModeWithShipments && editModeShipments.size > 0) {
+      const processedSkus = new Set<string>()
+
+      // Find existing ATS shipment for date inheritance
+      let existingATSShipment: { plannedShipStart: string; plannedShipEnd: string } | null = null
+      for (const [, shipment] of editModeShipments) {
+        if (shipment.collectionId === null) {
+          existingATSShipment = {
+            plannedShipStart: shipment.plannedShipStart,
+            plannedShipEnd: shipment.plannedShipEnd,
+          }
+          break
+        }
+      }
+
+      // 1. Process existing shipments from edit mode
+      for (const [shipmentId, shipment] of editModeShipments) {
+        // Find items still in cart that belong to this shipment
+        const shipmentItems = cartItems.filter((item) =>
+          shipment.itemSkus.includes(item.sku)
+        )
+
+        if (shipmentItems.length > 0) {
+          // Use date overrides if user changed dates, otherwise use loaded dates
+          const override = shipmentDateOverrides.get(shipmentId)
+
+          // For combined shipments, reconstruct date constraints from items' collections
+          // (combined shipments have CollectionID = null, so shipWindowStart/End are null)
+          let minAllowedStart = shipment.shipWindowStart
+          let minAllowedEnd = shipment.shipWindowEnd
+
+          if (shipment.isCombined && !minAllowedStart && !minAllowedEnd) {
+            // Get unique collection windows from the items in this shipment
+            const collectionWindows = new Map<number, { start: string | null; end: string | null }>()
+            for (const item of shipmentItems) {
+              if (item.collectionId !== null && !collectionWindows.has(item.collectionId)) {
+                collectionWindows.set(item.collectionId, {
+                  start: item.shipWindowStart,
+                  end: item.shipWindowEnd,
+                })
+              }
+            }
+
+            // Compute minimum allowed dates (most restrictive = latest dates)
+            const starts = [...collectionWindows.values()]
+              .map(w => w.start)
+              .filter((d): d is string => d !== null)
+            const ends = [...collectionWindows.values()]
+              .map(w => w.end)
+              .filter((d): d is string => d !== null)
+
+            if (starts.length > 0) {
+              minAllowedStart = starts.reduce((a, b) => (a > b ? a : b))
+            }
+            if (ends.length > 0) {
+              minAllowedEnd = ends.reduce((a, b) => (a > b ? a : b))
+            }
+          }
+
+          shipments.push({
+            id: shipmentId,
+            collectionId: shipment.collectionId,
+            collectionName: shipment.collectionName,
+            itemIds: shipmentItems.map((i) => i.sku),
+            plannedShipStart: override?.start ?? shipment.plannedShipStart,
+            plannedShipEnd: override?.end ?? shipment.plannedShipEnd,
+            minAllowedStart,
+            minAllowedEnd,
+            // Propagate combined shipment tracking for Split button
+            isCombined: shipment.isCombined,
+            originalShipmentIds: shipment.originalShipmentIds ?? undefined,
+          })
+          shipmentItems.forEach((item) => processedSkus.add(item.sku))
+        }
+        // If no items remain, shipment will be deleted on save
+      }
+
+      // 2. Find items not in any loaded shipment (new items added during edit)
+      const newItems = cartItems.filter((item) => !processedSkus.has(item.sku))
+
+      if (newItems.length > 0) {
+        // Group new items by collectionId
+        const groups = new Map<number | null, typeof cartItems>()
+        for (const item of newItems) {
+          const key = item.collectionId ?? null
+          if (!groups.has(key)) groups.set(key, [])
+          groups.get(key)!.push(item)
+        }
+
+        // 3. Create new shipments for new collections
+        groups.forEach((items, collectionId) => {
+          const first = items[0]
+          const shipmentId = `new-${collectionId ?? 'ats'}`
+
+          // Check for user overrides on new shipments
+          const override = shipmentDateOverrides.get(shipmentId)
+
+          // Phase 5: ATS date preservation - inherit from existing ATS shipment
+          let defaultStart: string
+          let defaultEnd: string
+
+          if (collectionId === null && existingATSShipment) {
+            // Inherit dates from existing ATS shipment
+            defaultStart = existingATSShipment.plannedShipStart
+            defaultEnd = existingATSShipment.plannedShipEnd
+          } else {
+            // Use collection defaults or ATS defaults
+            defaultStart = first.shipWindowStart ?? atsDefaults.start
+            defaultEnd = first.shipWindowEnd ?? atsDefaults.end
+          }
+
+          shipments.push({
+            id: shipmentId,
+            collectionId,
+            collectionName: first.collectionName ?? null,
+            itemIds: items.map((i) => i.sku),
+            plannedShipStart: override?.start ?? defaultStart,
+            plannedShipEnd: override?.end ?? defaultEnd,
+            minAllowedStart: first.shipWindowStart,
+            minAllowedEnd: first.shipWindowEnd,
+          })
+        })
+      }
+    } else {
+      // New order mode: compute from cart items (existing logic)
+      const groups = new Map<number | null, typeof cartItems>()
+      for (const item of cartItems) {
+        const key = item.collectionId ?? null
+        if (!groups.has(key)) groups.set(key, [])
+        groups.get(key)!.push(item)
+      }
+
+      groups.forEach((items, collectionId) => {
+        const first = items[0]
+        const shipmentId =
+          collectionId !== null ? `shipment-${collectionId}` : 'shipment-default'
+
+        // Check for user overrides
+        const override = shipmentDateOverrides.get(shipmentId)
+
+        // Default dates: collection window or ATS defaults
+        const defaultStart = first.shipWindowStart ?? atsDefaults.start
+        const defaultEnd = first.shipWindowEnd ?? atsDefaults.end
+
+        shipments.push({
+          id: shipmentId,
+          collectionId,
+          collectionName: first.collectionName ?? null,
+          itemIds: items.map((i) => i.sku),
+          plannedShipStart: override?.start ?? defaultStart,
+          plannedShipEnd: override?.end ?? defaultEnd,
+          minAllowedStart: first.shipWindowStart,
+          minAllowedEnd: first.shipWindowEnd,
+        })
+      })
     }
-    return groups
-  }, [cartItems])
 
-  const willSplitOrder = shipWindowGroups.size > 1
+    // PR-3b: Apply manual shipment groupings (combine)
+    let finalShipments = shipments
 
-  // Detect items missing CollectionID - these block checkout
+    if (shipmentGroups.size > 0) {
+      // Build set of all shipment IDs that are part of a group
+      const groupedIds = new Set<string>()
+      for (const [, originalIds] of shipmentGroups) {
+        originalIds.forEach((id) => groupedIds.add(id))
+      }
+
+      // Filter out individual shipments that are part of a group
+      const ungroupedShipments = shipments.filter((s) => !groupedIds.has(s.id))
+
+      // Create combined shipments for each group
+      const combinedShipments: CartPlannedShipment[] = []
+      for (const [combinedId, originalIds] of shipmentGroups) {
+        const shipmentsToMerge = shipments.filter((s) => originalIds.includes(s.id))
+        if (shipmentsToMerge.length === 0) continue
+
+        // Merge all items from grouped shipments
+        const mergedItems = shipmentsToMerge.flatMap((s) => s.itemIds)
+        
+        // Get all collection windows
+        const collectionWindows: CollectionWindow[] = shipmentsToMerge
+          .filter((s) => s.minAllowedStart && s.minAllowedEnd)
+          .map((s) => ({
+            id: s.collectionId ?? 0,
+            name: s.collectionName ?? '',
+            shipWindowStart: s.minAllowedStart,
+            shipWindowEnd: s.minAllowedEnd,
+          }))
+        
+        // Calculate MINIMUM allowed dates (most restrictive = latest dates)
+        // This ensures combined shipment can't have dates earlier than ANY collection's window
+        const minimumDates = getMinimumAllowedDates(collectionWindows)
+        
+        // For default dates, use overlap if valid, otherwise use minimum allowed dates
+        const overlapResult = getMultiCollectionOverlap(collectionWindows)
+        
+        // Check for user date overrides on the combined shipment
+        const override = shipmentDateOverrides.get(combinedId)
+        
+        // Default dates: use overlap if valid, fallback to minimum allowed dates
+        const defaultStart = overlapResult?.start ?? minimumDates.minStart ?? shipmentsToMerge[0].plannedShipStart
+        const defaultEnd = overlapResult?.end ?? minimumDates.minEnd ?? shipmentsToMerge[0].plannedShipEnd
+
+        combinedShipments.push({
+          id: combinedId,
+          collectionId: null, // Combined shipments have null collectionId
+          collectionName: shipmentsToMerge.map((s) => s.collectionName).filter(Boolean).join(' + '),
+          itemIds: mergedItems,
+          plannedShipStart: override?.start ?? defaultStart,
+          plannedShipEnd: override?.end ?? defaultEnd,
+          // Use MINIMUM allowed dates (most restrictive) for constraints
+          minAllowedStart: minimumDates.minStart ?? null,
+          minAllowedEnd: minimumDates.minEnd ?? null,
+          isCombined: true,
+          originalShipmentIds: originalIds,
+        })
+      }
+
+      finalShipments = [...ungroupedShipments, ...combinedShipments]
+    }
+
+    // PR-3b: Compute canCombineWith for each ungrouped shipment
+    const shipmentsWithCombineInfo = finalShipments.map((shipment) => {
+      // Don't compute for already combined shipments
+      if (shipment.isCombined) return shipment
+
+      const canCombineWith: string[] = []
+      for (const other of finalShipments) {
+        if (other.id === shipment.id) continue
+        if (other.isCombined) continue // Can't combine with already combined
+
+        // Check if windows overlap
+        if (shipment.minAllowedStart && shipment.minAllowedEnd &&
+            other.minAllowedStart && other.minAllowedEnd) {
+          const overlap = getOverlapWindow(
+            {
+              id: shipment.collectionId ?? 0,
+              name: shipment.collectionName ?? '',
+              shipWindowStart: shipment.minAllowedStart,
+              shipWindowEnd: shipment.minAllowedEnd,
+            },
+            {
+              id: other.collectionId ?? 0,
+              name: other.collectionName ?? '',
+              shipWindowStart: other.minAllowedStart,
+              shipWindowEnd: other.minAllowedEnd,
+            }
+          )
+          if (overlap) {
+            canCombineWith.push(other.id)
+          }
+        }
+      }
+
+      return { ...shipment, canCombineWith }
+    })
+
+    // Sort by ship start date
+    return shipmentsWithCombineInfo.sort((a, b) =>
+      a.plannedShipStart.localeCompare(b.plannedShipStart)
+    )
+  }, [cartItems, shipmentDateOverrides, isEditModeWithShipments, editModeShipments, shipmentGroups])
+
+  const hasMultipleShipments = plannedShipments.length > 1
+
+  // Validate all shipments for submit blocking
+  // PR-3b: For combined shipments, validate against all items' collection windows
+  const shipmentValidationErrors = useMemo(() => {
+    const errors = new Map<string, { start?: string; end?: string }>()
+
+    for (const shipment of plannedShipments) {
+      let collections: CollectionWindow[] = []
+
+      if (shipment.isCombined) {
+        // PR-3b: Get all unique collection windows from items in this combined shipment
+        const shipmentItems = cartItems.filter((item) =>
+          shipment.itemIds.includes(item.sku)
+        )
+        const uniqueCollections = new Map<number, CollectionWindow>()
+        for (const item of shipmentItems) {
+          if (item.collectionId && item.shipWindowStart && item.shipWindowEnd) {
+            if (!uniqueCollections.has(item.collectionId)) {
+              uniqueCollections.set(item.collectionId, {
+                id: item.collectionId,
+                name: item.collectionName ?? 'Collection',
+                shipWindowStart: item.shipWindowStart,
+                shipWindowEnd: item.shipWindowEnd,
+              })
+            }
+          }
+        }
+        collections = Array.from(uniqueCollections.values())
+      } else {
+        // Single collection shipment - use existing logic
+        collections = shipment.minAllowedStart || shipment.minAllowedEnd
+          ? [
+              {
+                id: shipment.collectionId ?? 0,
+                name: shipment.collectionName ?? 'Collection',
+                shipWindowStart: shipment.minAllowedStart,
+                shipWindowEnd: shipment.minAllowedEnd,
+              },
+            ]
+          : []
+      }
+
+      const result = validateShipDates(
+        shipment.plannedShipStart,
+        shipment.plannedShipEnd,
+        collections
+      )
+
+      if (!result.valid) {
+        const startError = result.errors.find((e) => e.field === 'start')
+        const endError = result.errors.find((e) => e.field === 'end')
+        if (startError || endError) {
+          errors.set(shipment.id, {
+            start: startError?.message,
+            end: endError?.message,
+          })
+        }
+      }
+    }
+
+    return errors
+  }, [plannedShipments, cartItems])
+
+  const hasShipmentValidationErrors = shipmentValidationErrors.size > 0
+
+  // Detect items missing CollectionID - only block in Pre-Order mode
+  // ATS items legitimately have null collectionId (they use default dates)
   const itemsMissingCollection = useMemo(() => {
+    if (!isPreOrder) return [] // ATS items don't require collectionId
     return cartItems.filter(item => item.collectionId === null)
-  }, [cartItems])
+  }, [cartItems, isPreOrder])
 
   // Calculate totals
   const orderTotal = cartItems.reduce(
@@ -238,9 +585,6 @@ export function MyOrderClient({
   // Don't redirect while processing stale edit state
   useEffect(() => {
     if (!isEditMode && totalItems === 0 && !shouldShowEditError) {
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/a5fde547-ac60-4379-a83d-f48710b84ace',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'buyer-my-order-client.tsx:redirect',message:'Redirecting due to empty cart',data:{totalItems,isEditMode,shouldShowEditError},timestamp:Date.now(),sessionId:'debug-session',runId:'pre-fix',hypothesisId:'H5'})}).catch(()=>{});
-      // #endregion
       router.replace(`/buyer/select-journey${navigationQuery}`)
     }
   }, [totalItems, router, isEditMode, navigationQuery, shouldShowEditError])
@@ -284,14 +628,15 @@ export function MyOrderClient({
   return (
     <div className="container mx-auto py-8 px-4">
         {/* Draft recovery banner - only show when not in edit mode */}
-        {!isEditMode && <DraftRecoveryBanner className="mb-4" />}
+        {/* Session recovery banner - only show when not in edit mode */}
+        {!isEditMode && <SessionRecoveryBanner className="mb-4" />}
 
         <h1 className="text-2xl font-bold mb-4">
           {isEditMode ? `Edit Order ${existingOrder?.orderNumber}` : 'Review Your Order'}
         </h1>
 
-      {/* Draft toolbar - only show when not in edit mode */}
-      {!isEditMode && <DraftToolbar className="mb-6" />}
+      {/* Session backup toolbar - only show when not in edit mode */}
+      {!isEditMode && <SessionBackupToolbar className="mb-6" />}
 
       <div className="grid lg:grid-cols-3 gap-8">
         {/* Order Summary - Right side on desktop */}
@@ -364,10 +709,31 @@ export function MyOrderClient({
                 </div>
               </div>
 
-              {/* Split order warning - only shown when items have different ship windows */}
-              {willSplitOrder && !isEditMode && (
-                <div className="p-3 bg-amber-50 border border-amber-200 rounded-md text-sm text-amber-800">
-                  <strong>Note:</strong> Your order will be split into {shipWindowGroups.size} separate orders based on delivery window.
+              {/* Multiple shipments info - only shown when items have different ship windows */}
+              {hasMultipleShipments && (
+                <div className="space-y-3">
+                  <div className="p-3 bg-blue-50 border border-blue-200 rounded-md text-sm text-blue-800">
+                    <strong>Multiple Shipments:</strong> Your order includes {plannedShipments.length} shipments with different delivery windows.
+                  </div>
+                  <ShipmentTimeline
+                    shipments={plannedShipments.map((s) => ({
+                      id: s.id,
+                      collectionName: s.collectionName,
+                      plannedShipStart: s.plannedShipStart,
+                      plannedShipEnd: s.plannedShipEnd,
+                      itemCount: s.itemIds.length,
+                      // Add items for expanded view
+                      items: s.itemIds.map((sku) => {
+                        const item = cartItems.find((ci) => ci.sku === sku)
+                        return {
+                          sku,
+                          description: item?.description,
+                          quantity: item?.quantity ?? 1,
+                        }
+                      }),
+                    }))}
+                    variant="full"
+                  />
                 </div>
               )}
 
@@ -408,7 +774,15 @@ export function MyOrderClient({
             existingOrder={existingOrder}
             returnTo={returnTo}
             repContext={repContext}
+            repName={repName}
             itemsMissingCollection={itemsMissingCollection}
+            plannedShipments={plannedShipments}
+            onShipmentDatesChange={updateShipmentDates}
+            shipmentValidationErrors={shipmentValidationErrors}
+            hasShipmentValidationErrors={hasShipmentValidationErrors}
+            // PR-3b: Combine/split handlers
+            onCombineShipments={combineShipments}
+            onSplitShipment={splitShipment}
           />
         </div>
       </div>

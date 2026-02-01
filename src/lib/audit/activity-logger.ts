@@ -30,6 +30,7 @@ export type ActivityAction =
   | 'item_edited'
   | 'item_added'
   | 'item_removed'
+  | 'item_moved'
   // Document actions
   | 'document_generated'
   | 'email_sent'
@@ -37,6 +38,11 @@ export type ActivityAction =
   // Customer actions
   | 'customer_created'
   | 'customer_updated'
+  // Phase 8: Collection date change actions
+  | 'collection_window_changed'
+  | 'shipment_dates_changed'
+  // Override actions
+  | 'shipment_dates_override'
 
 export interface LogActivityParams {
   entityType: EntityType
@@ -231,11 +237,15 @@ function formatDescription(params: LogActivityParams): string {
     item_edited: 'Item edited',
     item_added: 'Item added',
     item_removed: 'Item removed',
+    item_moved: 'Item moved between shipments',
     document_generated: 'Document generated',
     email_sent: 'Email sent',
     email_preferences_set: 'Email preferences set',
     customer_created: 'Customer created',
     customer_updated: 'Customer updated',
+    collection_window_changed: 'Collection window changed',
+    shipment_dates_changed: 'Shipment dates changed',
+    shipment_dates_override: 'Shipment dates override',
   }
 
   return actionLabels[params.action] || params.action
@@ -314,6 +324,65 @@ export async function logItemCancelled(params: {
       sku: params.sku,
       quantity: params.quantity,
       reason: params.reason,
+    },
+    performedBy: params.performedBy,
+    orderNumber: params.orderNumber,
+    orderId: params.orderId,
+  })
+}
+
+/**
+ * Log an item move between planned shipments
+ */
+export async function logItemMoved(params: {
+  itemId: string
+  orderId: string
+  orderNumber: string
+  sku: string
+  fromShipmentId: string
+  toShipmentId: string
+  wasOverride: boolean
+  performedBy: string
+}): Promise<void> {
+  await logActivity({
+    entityType: 'item',
+    entityId: params.itemId,
+    action: 'item_moved',
+    description: `Moved ${params.sku} from shipment ${params.fromShipmentId} to ${params.toShipmentId}${params.wasOverride ? ' (override)' : ''}`,
+    newValues: {
+      sku: params.sku,
+      fromShipmentId: params.fromShipmentId,
+      toShipmentId: params.toShipmentId,
+      wasOverride: params.wasOverride,
+    },
+    performedBy: params.performedBy,
+    orderNumber: params.orderNumber,
+    orderId: params.orderId,
+  })
+}
+
+/**
+ * Log shipment dates override - when rep overrides invalid ship dates
+ */
+export async function logShipmentDatesOverride(params: {
+  orderId: string
+  orderNumber: string
+  shipmentId: string
+  collectionName: string | null
+  plannedStart: string
+  plannedEnd: string
+  performedBy: string
+}): Promise<void> {
+  await logActivity({
+    entityType: 'order',
+    entityId: params.orderId,
+    action: 'shipment_dates_override',
+    description: `Overrode ship dates for ${params.collectionName ?? 'shipment'}: ${params.plannedStart} to ${params.plannedEnd}`,
+    newValues: {
+      shipmentId: params.shipmentId,
+      collectionName: params.collectionName,
+      plannedStart: params.plannedStart,
+      plannedEnd: params.plannedEnd,
     },
     performedBy: params.performedBy,
     orderNumber: params.orderNumber,
@@ -480,5 +549,74 @@ export async function getOrderEmailLogs(orderId: string): Promise<OrderEmailLogE
       timestamp: log.DateAdded,
       performedBy: log.PerformedBy,
     }
+  })
+}
+
+// ============================================================================
+// Phase 8: Collection Date Change Logging
+// ============================================================================
+
+/**
+ * Log when a collection's ship window is changed.
+ */
+export async function logCollectionWindowChanged(params: {
+  collectionId: string
+  collectionName: string
+  oldStart: string | null
+  oldEnd: string | null
+  newStart: string | null
+  newEnd: string | null
+  affectedShipmentCount: number
+  performedBy: string
+}): Promise<void> {
+  await logActivity({
+    entityType: 'order', // Using 'order' as closest match
+    entityId: params.collectionId,
+    action: 'collection_window_changed',
+    description: `Changed ${params.collectionName} window from ${params.oldStart ?? 'unset'}-${params.oldEnd ?? 'unset'} to ${params.newStart ?? 'unset'}-${params.newEnd ?? 'unset'}. ${params.affectedShipmentCount} shipments affected.`,
+    oldValues: {
+      shipWindowStart: params.oldStart,
+      shipWindowEnd: params.oldEnd,
+    },
+    newValues: {
+      shipWindowStart: params.newStart,
+      shipWindowEnd: params.newEnd,
+      affectedShipmentCount: params.affectedShipmentCount,
+    },
+    performedBy: params.performedBy,
+  })
+}
+
+/**
+ * Log when shipment dates are changed by admin (e.g., due to collection window change).
+ */
+export async function logShipmentDatesChangedByAdmin(params: {
+  shipmentId: string
+  orderId: string
+  orderNumber: string
+  reason: string
+  oldStart: string
+  oldEnd: string
+  newStart: string
+  newEnd: string
+  performedBy: string
+}): Promise<void> {
+  await logActivity({
+    entityType: 'shipment',
+    entityId: params.shipmentId,
+    action: 'shipment_dates_changed',
+    description: `Dates changed from ${params.oldStart}-${params.oldEnd} to ${params.newStart}-${params.newEnd}. Reason: ${params.reason}`,
+    oldValues: {
+      plannedShipStart: params.oldStart,
+      plannedShipEnd: params.oldEnd,
+    },
+    newValues: {
+      plannedShipStart: params.newStart,
+      plannedShipEnd: params.newEnd,
+      reason: params.reason,
+    },
+    performedBy: params.performedBy,
+    orderId: params.orderId,
+    orderNumber: params.orderNumber,
   })
 }

@@ -78,9 +78,20 @@ interface CompanySettings {
   website?: string | null
 }
 
+// Phase 9: Type for planned shipments in PDFs
+interface PlannedShipmentForPdf {
+  id: string
+  collectionName: string | null
+  plannedShipStart: Date
+  plannedShipEnd: Date
+  items: LineItem[]
+  subtotal: number
+}
+
 interface OrderConfirmationInput {
   order: OrderData
   items: LineItem[]
+  plannedShipments?: PlannedShipmentForPdf[]
   company?: CompanySettings
 }
 
@@ -143,11 +154,93 @@ function getStyleFromSku(sku: string): string {
 }
 
 // ============================================================================
+// Phase 9: Grouped Shipment Rendering
+// ============================================================================
+
+function generateGroupedSummaryHtml(
+  shipments: PlannedShipmentForPdf[],
+  currency: 'USD' | 'CAD'
+): string {
+  return shipments
+    .map((shipment, index) => {
+      const shipmentHeader = `
+        <div class="shipment-header" style="
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 8px 12px;
+          background-color: #f8fafc;
+          border: 1px solid #e2e8f0;
+          border-bottom: none;
+          border-radius: 6px 6px 0 0;
+          ${index > 0 ? 'margin-top: 24px;' : ''}
+        ">
+          <span style="font-weight: 600; color: #1e293b; font-size: 13px;">
+            ${shipment.collectionName || 'Available to Ship'}
+          </span>
+          <span style="font-size: 11px; color: #64748b;">
+            Ships: ${formatShipWindow(shipment.plannedShipStart, shipment.plannedShipEnd)}
+          </span>
+        </div>
+      `
+
+      const itemsTable = `
+        <table class="summary-table" style="width: 100%; border-collapse: collapse; border: 1px solid #e2e8f0; border-top: none;">
+          <thead>
+            <tr style="background-color: #f8fafc;">
+              <th style="padding: 8px; text-align: left; font-size: 11px; font-weight: 600; color: #64748b; border-bottom: 1px solid #e2e8f0;">SKU</th>
+              <th style="padding: 8px; text-align: left; font-size: 11px; font-weight: 600; color: #64748b; border-bottom: 1px solid #e2e8f0;">Description</th>
+              <th style="padding: 8px; text-align: center; font-size: 11px; font-weight: 600; color: #64748b; border-bottom: 1px solid #e2e8f0;">Qty</th>
+              <th style="padding: 8px; text-align: right; font-size: 11px; font-weight: 600; color: #64748b; border-bottom: 1px solid #e2e8f0;">Price</th>
+              <th style="padding: 8px; text-align: right; font-size: 11px; font-weight: 600; color: #64748b; border-bottom: 1px solid #e2e8f0;">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${shipment.items.map((item) => `
+              <tr>
+                <td style="padding: 8px; font-size: 11px; border-bottom: 1px solid #f1f5f9;">${item.sku}</td>
+                <td style="padding: 8px; font-size: 11px; border-bottom: 1px solid #f1f5f9;">${item.description || '-'}</td>
+                <td style="padding: 8px; font-size: 11px; text-align: center; border-bottom: 1px solid #f1f5f9;">${item.quantity}</td>
+                <td style="padding: 8px; font-size: 11px; text-align: right; border-bottom: 1px solid #f1f5f9;">${formatCurrency(item.price, currency)}</td>
+                <td style="padding: 8px; font-size: 11px; text-align: right; font-weight: 500; border-bottom: 1px solid #f1f5f9;">${formatCurrency(item.lineTotal, currency)}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `
+
+      const subtotalRow = `
+        <div style="
+          display: flex;
+          justify-content: flex-end;
+          padding: 8px 12px;
+          background-color: #f1f5f9;
+          border: 1px solid #e2e8f0;
+          border-top: none;
+          font-size: 12px;
+          font-weight: 500;
+        ">
+          Shipment Subtotal: ${formatCurrency(shipment.subtotal, currency)}
+        </div>
+      `
+
+      return shipmentHeader + itemsTable + subtotalRow
+    })
+    .join('')
+}
+
+// ============================================================================
 // Template Generator
 // ============================================================================
 
 export function generateOrderConfirmationHtml(input: OrderConfirmationInput): string {
-  const { order, items, company } = input
+  const { order, items, plannedShipments, company } = input
+
+  // Phase 9: Decide rendering mode - grouped if 2+ shipments
+  const useShipmentGrouping = plannedShipments && plannedShipments.length > 1
+  const shipWindowDisplay = useShipmentGrouping
+    ? `${plannedShipments.length} Planned Shipments`
+    : formatShipWindow(order.shipStartDate, order.shipEndDate)
 
   // Company branding (with fallbacks for backward compatibility)
   const companyName = company?.companyName || 'OrderHub'
@@ -308,7 +401,7 @@ export function generateOrderConfirmationHtml(input: OrderConfirmationInput): st
           </div>
           <div class="meta-item">
             <span class="meta-label">Ship Window:</span>
-            <span class="meta-value">${formatShipWindow(order.shipStartDate, order.shipEndDate)}</span>
+            <span class="meta-value">${shipWindowDisplay}</span>
           </div>
         </div>
         <!-- Column 3: aligns with Bill To -->
@@ -350,6 +443,7 @@ export function generateOrderConfirmationHtml(input: OrderConfirmationInput): st
       <!-- Order Summary Table -->
       <div class="section">
         <div class="section-header">Order Summary</div>
+        ${useShipmentGrouping ? generateGroupedSummaryHtml(plannedShipments, order.currency) : `
         <table class="summary-table">
           <thead>
             <tr>
@@ -369,6 +463,7 @@ export function generateOrderConfirmationHtml(input: OrderConfirmationInput): st
             ${summaryRows}
           </tbody>
         </table>
+        `}
 
         <!-- Totals -->
         <div class="totals-container">
@@ -419,7 +514,7 @@ export function generateOrderConfirmationHtml(input: OrderConfirmationInput): st
       <!-- Footer -->
       <footer class="summary-footer">
         <div class="footer-left">
-          <span>Delivery Window: ${formatShipWindow(order.shipStartDate, order.shipEndDate)}</span>
+          <span>Delivery Window: ${shipWindowDisplay}</span>
         </div>
         <div class="footer-right">
           <span>Submitted via OrderHub ✓</span>

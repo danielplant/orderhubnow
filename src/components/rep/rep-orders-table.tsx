@@ -2,13 +2,14 @@
 
 import * as React from 'react'
 import Link from 'next/link'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useTableSearch } from '@/lib/hooks'
 import {
   Button,
   DataTable,
   type DataTableColumn,
   StatusBadge,
   SearchInput,
+  ShipmentTimeline,
 } from '@/components/ui'
 import {
   Select,
@@ -19,7 +20,7 @@ import {
 } from '@/components/ui/select'
 import type { OrderStatus } from '@/lib/types/order'
 import type { RepOrderRow, RepOrdersListResult } from '@/lib/data/queries/orders'
-import { FileDown, FileEdit } from 'lucide-react'
+import { FileDown, FileEdit, Copy, Check, Share2 } from 'lucide-react'
 
 // ============================================================================
 // Types
@@ -40,6 +41,7 @@ interface RepOrdersTableProps {
 
 const ORDER_STATUS_OPTIONS: Array<{ label: string; value: 'All' | OrderStatus }> = [
   { label: 'Any', value: 'All' },
+  { label: 'Draft', value: 'Draft' },
   { label: 'Pending', value: 'Pending' },
   { label: 'Processing', value: 'Processing' },
   { label: 'Partially Shipped', value: 'Partially Shipped' },
@@ -51,6 +53,8 @@ const ORDER_STATUS_OPTIONS: Array<{ label: string; value: 'All' | OrderStatus }>
 // Map OrderStatus to StatusBadge status prop
 function getStatusBadgeStatus(status: OrderStatus) {
   switch (status) {
+    case 'Draft':
+      return 'draft'
     case 'Cancelled':
       return 'cancelled'
     case 'Invoiced':
@@ -79,34 +83,23 @@ export function RepOrdersTable({
   repName,
   isReadOnly = false,
 }: RepOrdersTableProps) {
-  const router = useRouter()
-  const searchParams = useSearchParams()
+  // Use shared table search hook
+  const { q, page, pageSize, sort, dir, setParam, setPage, setSort, getParam } = useTableSearch()
 
-  // Parse current filter state from URL
-  const status = (searchParams.get('status') || 'All') as 'All' | OrderStatus
-  const q = searchParams.get('q') || ''
-  const page = Number(searchParams.get('page') || '1')
-  const pageSize = Number(searchParams.get('pageSize') || '50')
-  const sort = searchParams.get('sort') || 'orderDate'
-  const dir = (searchParams.get('dir') || 'desc') as 'asc' | 'desc'
+  // Additional URL params - default sort for orders is orderDate
+  const actualSort = sort || 'orderDate'
+  const status = (getParam('status') || 'All') as 'All' | OrderStatus
 
-  // URL param helpers
-  const setParam = React.useCallback(
-    (key: string, value: string | null) => {
-      const params = new URLSearchParams(searchParams.toString())
-      if (!value || value === 'All') {
-        params.delete(key)
-      } else {
-        params.set(key, value)
-      }
-      // Reset pagination on filter changes
-      if (key !== 'page') {
-        params.delete('page')
-      }
-      router.push(`?${params.toString()}`, { scroll: false })
-    },
-    [router, searchParams]
-  )
+  // Build search params for export URL
+  const exportParams = React.useMemo(() => {
+    const params = new URLSearchParams()
+    if (q) params.set('q', q)
+    if (status !== 'All') params.set('status', status)
+    if (sort) params.set('sort', sort)
+    if (dir) params.set('dir', dir)
+    params.set('repId', repId)
+    return params.toString()
+  }, [q, status, sort, dir, repId])
 
   const handleStatusChange = React.useCallback(
     (value: string) => {
@@ -117,27 +110,66 @@ export function RepOrdersTable({
 
   const handlePageChange = React.useCallback(
     (newPage: number) => {
-      const params = new URLSearchParams(searchParams.toString())
-      params.set('page', String(Math.max(1, newPage)))
-      router.push(`?${params.toString()}`, { scroll: false })
+      setPage(newPage)
     },
-    [router, searchParams]
+    [setPage]
   )
 
   const handleSortChange = React.useCallback(
     (newSort: { columnId: string; direction: 'asc' | 'desc' }) => {
-      const params = new URLSearchParams(searchParams.toString())
-      params.set('sort', newSort.columnId)
-      params.set('dir', newSort.direction)
-      router.push(`?${params.toString()}`, { scroll: false })
+      setSort(newSort)
     },
-    [router, searchParams]
+    [setSort]
   )
+
+  // State for copy link feedback
+  const [copiedOrderNumber, setCopiedOrderNumber] = React.useState<string | null>(null)
+
+  // Copy draft link to clipboard
+  const copyDraftLink = React.useCallback(async (orderNumber: string) => {
+    const url = `${window.location.origin}/draft/${orderNumber}`
+    try {
+      await navigator.clipboard.writeText(url)
+      setCopiedOrderNumber(orderNumber)
+      setTimeout(() => setCopiedOrderNumber(null), 2000)
+    } catch (err) {
+      console.error('Failed to copy draft link:', err)
+    }
+  }, [])
+
+  // State for copied submitted order feedback
+  const [copiedSubmittedOrder, setCopiedSubmittedOrder] = React.useState<string | null>(null)
+
+  // Copy submitted order PDF link to clipboard
+  const copyOrderPdfLink = React.useCallback(async (orderId: string | number) => {
+    const url = `${window.location.origin}/api/orders/${orderId}/pdf`
+    try {
+      await navigator.clipboard.writeText(url)
+      setCopiedSubmittedOrder(String(orderId))
+      setTimeout(() => setCopiedSubmittedOrder(null), 2000)
+    } catch (err) {
+      console.error('Failed to copy order link:', err)
+    }
+  }, [])
 
   // Define table columns
   const buildEditHref = React.useCallback(
     (orderId: string) => {
       const params = new URLSearchParams({ editOrder: orderId, returnTo: '/rep/orders', repId })
+      if (repName) params.set('repName', repName)
+      return `/buyer/my-order?${params.toString()}`
+    },
+    [repId, repName]
+  )
+
+  // Build URL for resuming a draft order
+  const buildDraftHref = React.useCallback(
+    (orderNumber: string) => {
+      const params = new URLSearchParams({
+        draft: orderNumber,
+        repId,
+        returnTo: '/rep/orders',
+      })
       if (repName) params.set('repName', repName)
       return `/buyer/my-order?${params.toString()}`
     },
@@ -150,13 +182,29 @@ export function RepOrdersTable({
         id: 'orderNumber',
         header: 'Order Number',
         cell: (order) => (
-          <Link
-            href={`/api/orders/${order.id}/pdf`}
-            className="text-primary hover:underline font-medium"
-            target="_blank"
-          >
-            {order.orderNumber}
-          </Link>
+          <div className="flex items-center gap-1.5">
+            <Link
+              href={`/api/orders/${order.id}/pdf`}
+              className="text-primary hover:underline font-medium"
+              target="_blank"
+            >
+              {order.orderNumber}
+            </Link>
+            {/* Phase 5: Show shipment timeline for multi-shipment orders
+                NOTE: Using synthetic shipments for compact view. See orders-table.tsx for details. */}
+            {order.plannedShipmentCount > 1 && (
+              <ShipmentTimeline
+                shipments={Array.from({ length: order.plannedShipmentCount }, (_, i) => ({
+                  id: `shipment-${i}`,
+                  collectionName: null,
+                  plannedShipStart: order.firstShipmentDate ?? order.shipStartDate ?? '',
+                  plannedShipEnd: order.firstShipmentDate ?? order.shipStartDate ?? '',
+                }))}
+                variant="compact"
+                className="ml-1"
+              />
+            )}
+          </div>
         ),
       },
       {
@@ -174,16 +222,76 @@ export function RepOrdersTable({
       {
         id: 'action',
         header: 'Action',
-        cell: (order) =>
-          !isReadOnly && order.status === 'Pending' && !order.inShopify ? (
-            <Link
-              href={buildEditHref(String(order.id))}
-              className="text-primary hover:underline inline-flex items-center gap-1"
-            >
-              <FileEdit className="size-4" />
-              Edit Items
-            </Link>
-          ) : null,
+        cell: (order) => {
+          // Draft actions: Resume + Copy Link
+          if (order.status === 'Draft') {
+            return (
+              <div className="flex items-center gap-2">
+                <Link
+                  href={buildDraftHref(order.orderNumber)}
+                  className="text-primary hover:underline inline-flex items-center gap-1"
+                >
+                  <FileEdit className="size-4" />
+                  Resume
+                </Link>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2 gap-1"
+                  onClick={() => copyDraftLink(order.orderNumber)}
+                >
+                  {copiedOrderNumber === order.orderNumber ? (
+                    <>
+                      <Check className="size-3.5 text-green-600" />
+                      <span className="text-green-600">Copied</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="size-3.5" />
+                      <span>Copy Link</span>
+                    </>
+                  )}
+                </Button>
+              </div>
+            )
+          }
+          
+          // Submitted order actions
+          return (
+            <div className="flex items-center gap-2">
+              {/* Edit Items - only for Pending orders not in Shopify */}
+              {!isReadOnly && order.status === 'Pending' && !order.inShopify && (
+                <Link
+                  href={buildEditHref(String(order.id))}
+                  className="text-primary hover:underline inline-flex items-center gap-1"
+                >
+                  <FileEdit className="size-4" />
+                  Edit
+                </Link>
+              )}
+              
+              {/* Share PDF Link - for all submitted orders */}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 gap-1"
+                onClick={() => copyOrderPdfLink(order.id)}
+              >
+                {copiedSubmittedOrder === String(order.id) ? (
+                  <>
+                    <Check className="size-3.5 text-green-600" />
+                    <span className="text-green-600">Copied</span>
+                  </>
+                ) : (
+                  <>
+                    <Share2 className="size-3.5" />
+                    <span>Share</span>
+                  </>
+                )}
+              </Button>
+            </div>
+          )
+        },
       },
       {
         id: 'salesRep',
@@ -227,7 +335,7 @@ export function RepOrdersTable({
         ),
       },
     ],
-    [buildEditHref, isReadOnly]
+    [buildEditHref, buildDraftHref, copyDraftLink, copiedOrderNumber, copyOrderPdfLink, copiedSubmittedOrder, isReadOnly]
   )
 
   return (
@@ -235,7 +343,7 @@ export function RepOrdersTable({
       {/* Filters */}
       <div className="flex flex-wrap gap-4 items-center">
         <SearchInput
-          placeholder="Search by store name..."
+          placeholder="Search order #, store name..."
           value={q}
           onValueChange={(v) => setParam('q', v || null)}
           className="max-w-xs"
@@ -256,7 +364,7 @@ export function RepOrdersTable({
 
         {!isReadOnly && orders.length > 0 && (
           <Button variant="outline" asChild className="ml-auto gap-2">
-            <a href={`/api/rep/orders/export?${searchParams.toString()}`}>
+            <a href={`/api/rep/orders/export?${exportParams}`}>
               <FileDown className="size-4" />
               Export to Excel
             </a>
@@ -281,7 +389,7 @@ export function RepOrdersTable({
           totalCount={total}
           onPageChange={handlePageChange}
           manualSorting
-          sort={{ columnId: sort, direction: dir }}
+          sort={{ columnId: actualSort, direction: dir }}
           onSortChange={handleSortChange}
         />
       )}

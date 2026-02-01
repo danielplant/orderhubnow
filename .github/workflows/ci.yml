@@ -18,15 +18,20 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
-      - run: npm ci
+      - name: Clean install
+        run: npm ci
 
-      - run: npx prisma generate
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Clean stale build artifacts
+        run: rm -rf .next
 
       - name: Type check
         run: npm run type-check
 
-      - name: Lint
-        run: npm run lint
+      - name: Lint (strict)
+        run: npm run lint -- --max-warnings=0
 
       - name: Build
         run: npm run build
