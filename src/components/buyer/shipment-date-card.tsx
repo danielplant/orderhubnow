@@ -19,6 +19,14 @@ import type { CollectionWindow } from '@/lib/validation/ship-window'
 import type { CartPlannedShipment } from '@/lib/types/planned-shipment'
 import type { Currency } from '@/lib/types'
 
+function formatShortDate(isoDate: string): string {
+  const date = new Date(isoDate)
+  const month = date.toLocaleDateString('en-US', { month: 'short' })
+  const day = date.getDate()
+  const year = String(date.getFullYear()).slice(-2)
+  return `${month} ${day} '${year}`
+}
+
 interface CartItem {
   sku: string
   description?: string
@@ -234,7 +242,7 @@ export function ShipmentDateCard({
             />
             {shipment.minAllowedStart && (
               <p className="text-xs text-muted-foreground">
-                Earliest: {shipment.minAllowedStart}
+                Earliest: {formatShortDate(shipment.minAllowedStart)}
               </p>
             )}
             {displayErrors.start && (
@@ -254,7 +262,7 @@ export function ShipmentDateCard({
             />
             {shipment.minAllowedEnd && (
               <p className="text-xs text-muted-foreground">
-                Earliest: {shipment.minAllowedEnd}
+                Earliest: {formatShortDate(shipment.minAllowedEnd)}
               </p>
             )}
             {displayErrors.end && (

@@ -40,6 +40,14 @@ import { SaveDraftModal, type DraftCustomerInfo } from './save-draft-modal'
 import { ShipmentDateCard } from './shipment-date-card'
 import type { CartPlannedShipment } from '@/lib/types/planned-shipment'
 
+function formatShortDate(isoDate: string): string {
+  const date = new Date(isoDate)
+  const month = date.toLocaleDateString('en-US', { month: 'short' })
+  const day = date.getDate()
+  const year = String(date.getFullYear()).slice(-2)
+  return `${month} ${day} '${year}`
+}
+
 interface OrderFormProps {
   currency: Currency
   reps: Array<{ id: string; name: string; code: string }>
@@ -1050,7 +1058,7 @@ export function OrderForm({
                 />
                 {plannedShipments[0]?.minAllowedStart && (
                   <p className="text-xs text-muted-foreground">
-                    Earliest: {plannedShipments[0].minAllowedStart}
+                    Earliest: {formatShortDate(plannedShipments[0].minAllowedStart)}
                   </p>
                 )}
                 {errors.shipStartDate && (
@@ -1068,7 +1076,7 @@ export function OrderForm({
                 />
                 {plannedShipments[0]?.minAllowedEnd && (
                   <p className="text-xs text-muted-foreground">
-                    Earliest: {plannedShipments[0].minAllowedEnd}
+                    Earliest: {formatShortDate(plannedShipments[0].minAllowedEnd)}
                   </p>
                 )}
                 {errors.shipEndDate && (

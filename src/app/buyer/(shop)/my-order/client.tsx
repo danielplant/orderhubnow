@@ -239,6 +239,39 @@ export function MyOrderClient({
           // Use date overrides if user changed dates, otherwise use loaded dates
           const override = shipmentDateOverrides.get(shipmentId)
 
+          // For combined shipments, reconstruct date constraints from items' collections
+          // (combined shipments have CollectionID = null, so shipWindowStart/End are null)
+          let minAllowedStart = shipment.shipWindowStart
+          let minAllowedEnd = shipment.shipWindowEnd
+
+          if (shipment.isCombined && !minAllowedStart && !minAllowedEnd) {
+            // Get unique collection windows from the items in this shipment
+            const collectionWindows = new Map<number, { start: string | null; end: string | null }>()
+            for (const item of shipmentItems) {
+              if (item.collectionId !== null && !collectionWindows.has(item.collectionId)) {
+                collectionWindows.set(item.collectionId, {
+                  start: item.shipWindowStart,
+                  end: item.shipWindowEnd,
+                })
+              }
+            }
+
+            // Compute minimum allowed dates (most restrictive = latest dates)
+            const starts = [...collectionWindows.values()]
+              .map(w => w.start)
+              .filter((d): d is string => d !== null)
+            const ends = [...collectionWindows.values()]
+              .map(w => w.end)
+              .filter((d): d is string => d !== null)
+
+            if (starts.length > 0) {
+              minAllowedStart = starts.reduce((a, b) => (a > b ? a : b))
+            }
+            if (ends.length > 0) {
+              minAllowedEnd = ends.reduce((a, b) => (a > b ? a : b))
+            }
+          }
+
           shipments.push({
             id: shipmentId,
             collectionId: shipment.collectionId,
@@ -246,9 +279,11 @@ export function MyOrderClient({
             itemIds: shipmentItems.map((i) => i.sku),
             plannedShipStart: override?.start ?? shipment.plannedShipStart,
             plannedShipEnd: override?.end ?? shipment.plannedShipEnd,
-            // Issue 4 fix: Use collection windows from loaded shipment data
-            minAllowedStart: shipment.shipWindowStart,
-            minAllowedEnd: shipment.shipWindowEnd,
+            minAllowedStart,
+            minAllowedEnd,
+            // Propagate combined shipment tracking for Split button
+            isCombined: shipment.isCombined,
+            originalShipmentIds: shipment.originalShipmentIds ?? undefined,
           })
           shipmentItems.forEach((item) => processedSkus.add(item.sku))
         }
