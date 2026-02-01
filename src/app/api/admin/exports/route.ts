@@ -62,7 +62,7 @@ export async function POST(request: NextRequest) {
     const job = await prisma.exportJob.create({
       data: {
         type,
-        triggeredBy: session.user.id,
+        triggeredBy: String(session.user.id),
         triggeredByRole: session.user.role,
         filters: JSON.stringify({ collections, currency, q, orientation }),
         status: 'pending',
@@ -214,7 +214,7 @@ export async function GET(request: NextRequest) {
 
     // Admins see all jobs, reps see only their own
     const where =
-      session.user.role === 'admin' ? {} : { triggeredBy: session.user.id }
+      session.user.role === 'admin' ? {} : { triggeredBy: String(session.user.id) }
 
     const jobs = await prisma.exportJob.findMany({
       where,
