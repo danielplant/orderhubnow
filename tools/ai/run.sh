@@ -419,7 +419,14 @@ cmd_dispatch() {
 
   local allowed
   allowed=$(allowed_agents)
-  if ! echo " $allowed " | grep -qw " ${agent} "; then
+  local ok="no"
+  for a in ${allowed}; do
+    if [ "${a}" = "${agent}" ]; then
+      ok="yes"
+      break
+    fi
+  done
+  if [ "${ok}" != "yes" ]; then
     echo "ERROR: Unknown agent '${agent}'." >&2
     echo "Allowed agents: ${allowed}" >&2
     exit 1
