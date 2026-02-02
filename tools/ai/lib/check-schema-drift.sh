@@ -30,7 +30,7 @@ PY
 SCHEMA_FILE=$(cfg_get migration.schema_file)
 
 # Prefer prisma/migrations if present; otherwise fall back to first configured dir that exists.
-MIGRATION_DIRS=$(cfg_get migration.migration_dirs | py -c 'import ast,sys; print(" ".join(ast.literal_eval(sys.stdin.read())))')
+MIGRATION_DIRS=$(cfg_get migration.migration_dirs | python3 -c 'import ast,sys; print(" ".join(ast.literal_eval(sys.stdin.read())))')
 MIGR_DIR=""
 for d in $MIGRATION_DIRS; do
   if [ -d "${ROOT_DIR}/${d}" ]; then
