@@ -15,6 +15,8 @@ import { prisma } from '@/lib/prisma'
 import type { Product, ProductVariant } from '@/lib/types/inventory'
 import { sortBySize, loadSizeOrderConfig, loadSizeAliasConfig } from '@/lib/utils/size-sort'
 import { resolveColor, getBaseSku } from '@/lib/utils'
+import { getAvailabilitySettings, getIncomingMapForSkus } from '@/lib/data/queries/availability-settings'
+import { computeAvailabilityDisplay, getAvailabilityScenario } from '@/lib/availability/compute'
 
 // ============================================================================
 // Types
@@ -146,6 +148,9 @@ export async function getPreOrderProductsWithVariants(
     return []
   }
 
+  const availabilitySettings = await getAvailabilitySettings()
+  const incomingMap = await getIncomingMapForSkus(skus.map((sku) => sku.SkuID))
+
   // Group SKUs by base SKU + image URL to split cards when images differ
   // This handles cases where Kids and Ladies variants share the same SKU prefix
   // but have different product images
@@ -186,15 +191,34 @@ export async function getPreOrderProductsWithVariants(
     }
 
     // Build variants - extract clean size from variant title (removes color suffix)
-    const variants: ProductVariant[] = variantSkus.map((sku) => ({
-      size: sku.Size || '',
-      sku: sku.SkuID,
-      available: sku.Quantity ?? 0,
-      onRoute: sku.OnRoute ?? 0,
-      priceCad: parsePriceFromString(sku.PriceCAD),
-      priceUsd: parsePriceFromString(sku.PriceUSD),
-      status: 'preorder' as const,
-    }))
+    const variants: ProductVariant[] = variantSkus.map((sku) => {
+      const incomingEntry = incomingMap.get(sku.SkuID)
+      const incoming = incomingEntry?.incoming ?? null
+      const committed = incomingEntry?.committed ?? null
+      const scenario = getAvailabilityScenario('PreOrder', incoming)
+      const displayResult = computeAvailabilityDisplay(
+        scenario,
+        'buyer_preorder',
+        {
+          quantity: sku.Quantity ?? 0,
+          onRoute: sku.OnRoute ?? 0,
+          incoming,
+          committed,
+        },
+        availabilitySettings
+      )
+
+      return {
+        size: sku.Size || '',
+        sku: sku.SkuID,
+        available: sku.Quantity ?? 0,
+        onRoute: sku.OnRoute ?? 0,
+        availableDisplay: displayResult.display,
+        priceCad: parsePriceFromString(sku.PriceCAD),
+        priceUsd: parsePriceFromString(sku.PriceUSD),
+        status: 'preorder' as const,
+      }
+    })
 
     // Use groupKey as ID to ensure uniqueness when baseSku has multiple image variants
     const title = firstSku.OrderEntryDescription || firstSku.Description || baseSku

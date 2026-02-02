@@ -41,9 +41,14 @@ export interface AdminSkuRow {
   material: string // FabricContent
   categoryId: number | null
   categoryName: string | null
+  collectionType?: 'ATS' | 'PreOrder' | null
   showInPreOrder: boolean | null
   quantity: number // Available
   onRoute: number
+  availableDisplay: string
+  availableSortValue: number | null
+  availableSortRank: number
+  availabilityScenario: 'ats' | 'preorder_incoming' | 'preorder_no_incoming'
   // Wholesale price (CAD/USD)
   priceCadRaw: string | null
   priceUsdRaw: string | null

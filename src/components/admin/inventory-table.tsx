@@ -11,6 +11,8 @@ import { updateInventoryQuantity, updateInventoryOnRoute } from '@/lib/data/acti
 import { cn } from '@/lib/utils'
 import { formatDate } from '@/lib/utils/format'
 import { AlertTriangle } from 'lucide-react'
+import type { AvailabilitySettingsRecord } from '@/lib/types/availability-settings'
+import { AVAILABILITY_LEGEND_TEXT } from '@/lib/availability/settings'
 
 // ============================================================================
 // Types
@@ -24,6 +26,7 @@ export interface InventoryTableProps {
   facets: InventoryFacets
   sortBy?: InventorySortField
   sortDir?: SortDirection
+  availabilitySettings?: AvailabilitySettingsRecord
 }
 
 // ============================================================================
@@ -49,10 +52,37 @@ export function InventoryTable({
   facets,
   sortBy,
   sortDir = 'asc',
+  availabilitySettings,
 }: InventoryTableProps) {
   // Use shared table search hook
   const { q, page, pageSize, setParam, setPage, setSort, getParam } = useTableSearch()
   const router = useRouter()
+
+  const onRouteEnabled = availabilitySettings?.showOnRouteInventory ?? true
+  const onRouteLabel = availabilitySettings?.onRouteLabelInventory ?? 'On Route'
+
+  const availableLabel = React.useMemo(() => {
+    if (!availabilitySettings) return 'Available'
+    const types = initialItems
+      .map((item) => item.collectionType)
+      .filter(Boolean) as Array<'ATS' | 'PreOrder'>
+    const uniqueTypes = new Set(types)
+    if (uniqueTypes.size === 1) {
+      const onlyType = Array.from(uniqueTypes)[0]
+      if (onlyType === 'PreOrder') {
+        return availabilitySettings.matrix.preorder_incoming.admin_inventory.label
+      }
+      if (onlyType === 'ATS') {
+        return availabilitySettings.matrix.ats.admin_inventory.label
+      }
+    }
+    return availabilitySettings.matrix.ats.admin_inventory.label
+  }, [availabilitySettings, initialItems])
+
+  const tabs = React.useMemo(
+    () => (onRouteEnabled ? TABS : TABS.filter((t) => t.value !== 'onroute')),
+    [onRouteEnabled]
+  )
 
   // Parse additional filter state from URL
   const status = (getParam('status') || 'all') as (typeof TABS)[number]['value']
@@ -128,7 +158,8 @@ export function InventoryTable({
 
   // Table columns - IDs match sort field names for sortable columns
   const columns = React.useMemo<Array<DataTableColumn<InventoryListItem>>>(
-    () => [
+    () => {
+      const cols: Array<DataTableColumn<InventoryListItem>> = [
       {
         id: 'sku', // Matches InventorySortField
         header: 'SKU',
@@ -155,13 +186,21 @@ export function InventoryTable({
       },
       {
         id: 'qty', // Matches InventorySortField
-        header: 'Qty',
+        header: (
+          <div className="flex items-center gap-1">
+            <span>{availableLabel}</span>
+            <span className="text-xs text-muted-foreground" title={AVAILABILITY_LEGEND_TEXT}>ⓘ</span>
+          </div>
+        ),
         sortable: true,
         cell: (r) => (
           <div className="flex items-center gap-2">
             <InlineEdit
               value={r.quantity}
+              displayValue={r.availableDisplay}
               type="number"
+              disabled={r.availabilityScenario !== 'ats'}
+              placeholder=""
               onSave={async (v) => {
                 const n = Number(v)
                 if (!Number.isFinite(n) || n < 0) throw new Error('Invalid quantity')
@@ -170,30 +209,34 @@ export function InventoryTable({
                 router.refresh()
               }}
             />
-            {r.isLowStock && (
+            {r.availabilityScenario === 'ats' && r.isLowStock && (
               <AlertTriangle className="h-4 w-4 text-warning" aria-label="Low stock" />
             )}
           </div>
         ),
       },
-      {
-        id: 'onRoute',
-        header: 'On Route',
-        sortable: true,
-        cell: (r) => (
-          <InlineEdit
-            value={r.onRoute}
-            type="number"
-            onSave={async (v) => {
-              const n = Number(v)
-              if (!Number.isFinite(n) || n < 0) throw new Error('Invalid on-route')
-              const result = await updateInventoryOnRoute({ skuId: r.skuId, onRoute: n })
-              if (!result.success) throw new Error(result.error)
-              router.refresh()
-            }}
-          />
-        ),
-      },
+      ...(onRouteEnabled
+        ? [
+            {
+              id: 'onRoute',
+              header: onRouteLabel,
+              sortable: true,
+              cell: (r: InventoryListItem) => (
+                <InlineEdit
+                  value={r.onRoute}
+                  type="number"
+                  onSave={async (v) => {
+                    const n = Number(v)
+                    if (!Number.isFinite(n) || n < 0) throw new Error('Invalid on-route')
+                    const result = await updateInventoryOnRoute({ skuId: r.skuId, onRoute: n })
+                    if (!result.success) throw new Error(result.error)
+                    router.refresh()
+                  }}
+                />
+              ),
+            },
+          ]
+        : []),
       {
         id: 'effectiveQuantity',
         header: 'Effective',
@@ -248,8 +291,11 @@ export function InventoryTable({
           </span>
         ),
       },
-    ],
-    [router]
+      ]
+
+      return cols
+    },
+    [router, availableLabel, onRouteEnabled, onRouteLabel]
   )
 
   return (
@@ -258,7 +304,7 @@ export function InventoryTable({
       <div className="rounded-md border border-border bg-background">
         {/* Status Tabs */}
         <div className="flex gap-6 overflow-x-auto border-b border-border px-4">
-          {TABS.map((t) => {
+          {tabs.map((t) => {
             const active = status === t.value
             const count = statusCounts[t.value]
             return (

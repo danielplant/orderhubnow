@@ -1,6 +1,8 @@
 import { prisma } from '@/lib/prisma'
 import { parsePrice, getBaseSku, resolveColor } from '@/lib/utils'
 import { sortBySize, loadSizeOrderConfig, loadSizeAliasConfig } from '@/lib/utils/size-sort'
+import { getAvailabilitySettings, getIncomingMapForSkus } from '@/lib/data/queries/availability-settings'
+import { computeAvailabilityDisplay, getAvailabilityScenario } from '@/lib/availability/compute'
 import type { Product, ProductVariant } from '@/lib/types'
 
 /**
@@ -22,6 +24,9 @@ export async function getSkusByCategory(categoryId: number): Promise<Product[]> 
       { SkuID: 'asc' }
     ]
   })
+
+  const availabilitySettings = await getAvailabilitySettings()
+  const incomingMap = await getIncomingMapForSkus(skus.map((sku) => sku.SkuID))
 
   // Group SKUs by BaseSku + ImageURL to split cards when images differ
   // This handles cases where Kids and Ladies variants share the same SKU prefix
@@ -55,14 +60,33 @@ export async function getSkusByCategory(categoryId: number): Promise<Product[]> 
 
     // Map variants and sort by size using Limeapple's specific size sequence
     const variants: ProductVariant[] = sortBySize(
-      skuGroup.map(sku => ({
-        size: sku.size,
-        sku: sku.SkuID,
-        available: sku.Quantity ?? 0,
-        onRoute: sku.OnRoute ?? 0,
-        priceCad: parsePrice(sku.PriceCAD),
-        priceUsd: parsePrice(sku.PriceUSD),
-      }))
+      skuGroup.map(sku => {
+        const incomingEntry = incomingMap.get(sku.SkuID)
+        const incoming = incomingEntry?.incoming ?? null
+        const committed = incomingEntry?.committed ?? null
+        const scenario = getAvailabilityScenario('ATS', incoming)
+        const displayResult = computeAvailabilityDisplay(
+          scenario,
+          'buyer_products',
+          {
+            quantity: sku.Quantity ?? 0,
+            onRoute: sku.OnRoute ?? 0,
+            incoming,
+            committed,
+          },
+          availabilitySettings
+        )
+
+        return {
+          size: sku.size,
+          sku: sku.SkuID,
+          available: sku.Quantity ?? 0,
+          onRoute: sku.OnRoute ?? 0,
+          availableDisplay: displayResult.display,
+          priceCad: parsePrice(sku.PriceCAD),
+          priceUsd: parsePrice(sku.PriceUSD),
+        }
+      })
     )
 
     // Use groupKey as ID to ensure uniqueness when baseSku has multiple image variants

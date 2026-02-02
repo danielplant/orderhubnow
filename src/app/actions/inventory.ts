@@ -9,6 +9,7 @@ export type {
 } from "@/lib/types";
 
 import type { Product, ProductVariant, DashboardMetrics } from "@/lib/types";
+import { buildVariant } from "@/lib/types/build-variant";
 import { sortBySize, loadSizeOrderConfig, loadSizeAliasConfig } from "@/lib/utils/size-sort";
 import { getBaseSku } from "@/lib/utils";
 
@@ -506,14 +507,14 @@ export async function getProductsByCategory(category: string): Promise<Product[]
       if (seenSkus.has(variant.sku)) return; // Skip duplicates
       seenSkus.add(variant.sku);
 
-      variants.push({
+      variants.push(buildVariant({
         size: variant.title || "OS",
         sku: variant.sku,
         available: Math.max(0, variant.inventoryQuantity),
         onRoute: 0,
         priceCad,
         priceUsd,
-      });
+      }));
     });
 
     // Get popularity rank for this SKU
@@ -840,14 +841,14 @@ export async function getPreOrderProductsByCategory(category: string): Promise<P
       seenSkus.add(variant.sku);
 
       // onRoute set to 0 for now - future SQL sync will provide this data
-      variants.push({
+      variants.push(buildVariant({
         size: variant.title || "OS",
         sku: variant.sku,
         available: Math.max(0, variant.inventoryQuantity),
         onRoute: 0,
         priceCad,
         priceUsd,
-      });
+      }));
     });
 
     products.push({

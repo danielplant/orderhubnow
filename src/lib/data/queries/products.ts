@@ -5,6 +5,12 @@
 
 import { prisma } from '@/lib/prisma'
 import { parsePrice, getBaseSku, resolveColor } from '@/lib/utils'
+import {
+  getAvailabilitySettings,
+  getIncomingMapForSkus,
+} from '@/lib/data/queries/availability-settings'
+import { getAvailabilityScenario, computeAvailabilityDisplay } from '@/lib/availability/compute'
+import type { AvailabilityView, AvailabilitySettingsRecord } from '@/lib/types/availability-settings'
 import type {
   ProductsListInput,
   ProductsListResult,
@@ -116,9 +122,12 @@ function buildOrderBy(sort: ProductsSortColumn, dir: SortDirection) {
  * Get paginated, filtered, sorted products (SKUs) for admin list view.
  */
 export async function getProducts(
-  searchParams: Record<string, string | string[] | undefined>
+  searchParams: Record<string, string | string[] | undefined>,
+  options?: { view?: AvailabilityView; settings?: AvailabilitySettingsRecord }
 ): Promise<ProductsListResult> {
   const input = parseProductsListInput(searchParams)
+  const view = options?.view ?? 'admin_products'
+  const availabilitySettings = options?.settings ?? await getAvailabilitySettings()
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const where: any = {}
@@ -155,13 +164,15 @@ export async function getProducts(
       break
   }
 
+  const manualAvailableSort = input.sort === 'quantity'
+
   const [total, rows] = await Promise.all([
     prisma.sku.count({ where }),
     prisma.sku.findMany({
       where,
-      orderBy: buildOrderBy(input.sort, input.dir),
-      skip: (input.page - 1) * input.pageSize,
-      take: input.pageSize,
+      orderBy: manualAvailableSort ? { SkuID: 'asc' } : buildOrderBy(input.sort, input.dir),
+      skip: manualAvailableSort ? undefined : (input.page - 1) * input.pageSize,
+      take: manualAvailableSort ? undefined : input.pageSize,
       select: {
         ID: true,
         SkuID: true,
@@ -185,51 +196,97 @@ export async function getProducts(
         CollectionID: true,
         Size: true,
         Collection: {
-          select: { name: true },
+          select: { name: true, type: true },
         },
       },
     }),
   ])
 
+  const incomingMap = await getIncomingMapForSkus(rows.map((row) => row.SkuID))
+
+  const mappedRows = rows.map((r) => {
+    const skuId = r.SkuID
+    const qty = r.Quantity ?? 0
+    const baseSku = getBaseSku(skuId, r.Size)
+    const size = r.Size || ''
+    const description = (r.OrderEntryDescription ?? r.Description ?? skuId) as string
+    const incomingEntry = incomingMap.get(skuId)
+    const incoming = incomingEntry?.incoming ?? null
+    const committed = incomingEntry?.committed ?? null
+    const scenario = getAvailabilityScenario(r.Collection?.type ?? null, incoming)
+    const displayResult = computeAvailabilityDisplay(
+      scenario,
+      view,
+      {
+        quantity: qty,
+        onRoute: r.OnRoute ?? 0,
+        incoming,
+        committed,
+      },
+      availabilitySettings
+    )
+
+    return {
+      id: String(r.ID),
+      skuId,
+      baseSku,
+      parsedSize: size,
+      description,
+      rawDescription: r.Description ?? '', // Raw Shopify description for search transparency
+      color: resolveColor(r.SkuColor, skuId, description),
+      material: r.FabricContent ?? '',
+      categoryId: r.CollectionID ?? null,
+      categoryName: r.Collection?.name ?? null,
+      collectionType: (r.Collection?.type as 'ATS' | 'PreOrder' | undefined) ?? null,
+      showInPreOrder: r.ShowInPreOrder ?? null,
+      quantity: qty,
+      onRoute: r.OnRoute ?? 0,
+      availableDisplay: displayResult.display,
+      availableSortValue: displayResult.numericValue,
+      availableSortRank: displayResult.isBlank ? 1 : 0,
+      availabilityScenario: scenario,
+      priceCadRaw: r.PriceCAD,
+      priceUsdRaw: r.PriceUSD,
+      priceCad: parsePrice(r.PriceCAD),
+      priceUsd: parsePrice(r.PriceUSD),
+      msrpCadRaw: r.MSRPCAD,
+      msrpUsdRaw: r.MSRPUSD,
+      msrpCad: parsePrice(r.MSRPCAD),
+      msrpUsd: parsePrice(r.MSRPUSD),
+      unitsPerSku: r.UnitsPerSku ?? 1,
+      unitPriceCad: r.UnitPriceCAD ? Number(r.UnitPriceCAD) : null,
+      unitPriceUsd: r.UnitPriceUSD ? Number(r.UnitPriceUSD) : null,
+      imageUrl: r.ShopifyImageURL ?? null,
+      thumbnailPath: r.ThumbnailPath ?? null,
+    }
+  })
+
+  const finalRows = manualAvailableSort
+    ? mappedRows
+        .sort((a, b) => {
+          if (a.availableSortRank !== b.availableSortRank) {
+            return a.availableSortRank - b.availableSortRank
+          }
+          const aVal = a.availableSortValue
+          const bVal = b.availableSortValue
+          if (aVal == null && bVal == null) {
+            return a.skuId.localeCompare(b.skuId)
+          }
+          if (aVal == null) return 1
+          if (bVal == null) return -1
+          if (aVal !== bVal) {
+            return input.dir === 'asc' ? aVal - bVal : bVal - aVal
+          }
+          return a.skuId.localeCompare(b.skuId)
+        })
+        .slice((input.page - 1) * input.pageSize, input.page * input.pageSize)
+    : mappedRows
+
   return {
     total,
     // Tab counts no longer needed - keep empty for backward compatibility
     tabCounts: { all: total, ats: 0, preorder: 0 },
-    rows: rows.map((r) => {
-      const skuId = r.SkuID
-      const qty = r.Quantity ?? 0
-      const baseSku = getBaseSku(skuId, r.Size)
-      const size = r.Size || ''
-      const description = (r.OrderEntryDescription ?? r.Description ?? skuId) as string
-      return {
-        id: String(r.ID),
-        skuId,
-        baseSku,
-        parsedSize: size,
-        description,
-        rawDescription: r.Description ?? '', // Raw Shopify description for search transparency
-        color: resolveColor(r.SkuColor, skuId, description),
-        material: r.FabricContent ?? '',
-        categoryId: r.CollectionID ?? null,
-        categoryName: r.Collection?.name ?? null,
-        showInPreOrder: r.ShowInPreOrder ?? null,
-        quantity: qty,
-        onRoute: r.OnRoute ?? 0,
-        priceCadRaw: r.PriceCAD,
-        priceUsdRaw: r.PriceUSD,
-        priceCad: parsePrice(r.PriceCAD),
-        priceUsd: parsePrice(r.PriceUSD),
-        msrpCadRaw: r.MSRPCAD,
-        msrpUsdRaw: r.MSRPUSD,
-        msrpCad: parsePrice(r.MSRPCAD),
-        msrpUsd: parsePrice(r.MSRPUSD),
-        unitsPerSku: r.UnitsPerSku ?? 1,
-        unitPriceCad: r.UnitPriceCAD ? Number(r.UnitPriceCAD) : null,
-        unitPriceUsd: r.UnitPriceUSD ? Number(r.UnitPriceUSD) : null,
-        imageUrl: r.ShopifyImageURL ?? null,
-        thumbnailPath: r.ThumbnailPath ?? null,
-      }
-    }),
+    rows: finalRows,
   }
 }
 

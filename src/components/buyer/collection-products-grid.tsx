@@ -8,9 +8,14 @@ import type { Product } from "@/lib/types/inventory"
 interface CollectionProductsGridProps {
   products: Product[]
   isPreOrder?: boolean
+  availableLabel?: string
 }
 
-export function CollectionProductsGrid({ products, isPreOrder = false }: CollectionProductsGridProps) {
+export function CollectionProductsGrid({
+  products,
+  isPreOrder = false,
+  availableLabel,
+}: CollectionProductsGridProps) {
   const [filteredProducts, setFilteredProducts] = useState<Product[]>(products)
 
   const handleFilteredChange = useCallback((filtered: Product[]) => {
@@ -33,6 +38,7 @@ export function CollectionProductsGrid({ products, isPreOrder = false }: Collect
               key={product.id} 
               product={product} 
               isPreOrder={isPreOrder}
+              availableLabel={availableLabel}
             />
           ))}
         </div>

@@ -136,6 +136,7 @@ interface ProductOrderCardProps {
   product: Product;
   /** PreOrder mode: no qty caps, all lines marked as OnRoute */
   isPreOrder?: boolean;
+  availableLabel?: string;
 }
 
 /**
@@ -168,10 +169,15 @@ function getIsOnRoute(variant: ProductVariant, isPreOrder: boolean): boolean {
   return false;
 }
 
-export function ProductOrderCard({ product, isPreOrder = false }: ProductOrderCardProps) {
+export function ProductOrderCard({
+  product,
+  isPreOrder = false,
+  availableLabel,
+}: ProductOrderCardProps) {
   const { orders, setQuantity, getProductTotal } = useOrder();
   const { announce } = useAnnouncement();
   const { currency } = useCurrency();
+  const availabilityLabel = availableLabel ?? "Available";
 
   const productOrders = useMemo(
     () => orders[product.id] || {},
@@ -204,7 +210,7 @@ export function ProductOrderCard({ product, isPreOrder = false }: ProductOrderCa
       const committedQty = Math.min(requestedQty, maxOrderable);
 
       if (requestedQty > maxOrderable) {
-        setQtyError("Order quantity cannot be greater than Available quantity.");
+        setQtyError(`Order quantity cannot be greater than ${availabilityLabel} quantity.`);
         window.setTimeout(() => setQtyError(null), 3000);
       }
 
@@ -348,32 +354,19 @@ export function ProductOrderCard({ product, isPreOrder = false }: ProductOrderCa
               ))}
 
               <div className="bg-muted px-2 py-2 text-xs font-semibold border-b border-border">
-                Available
+                {availabilityLabel}
               </div>
               {orderableVariants.map((variant) => (
                 <div
                   key={`avail-${variant.sku}`}
                   className="px-2 py-2 text-xs text-center tabular-nums border-b border-border"
                 >
-                  {isPreOrder ? (variant.available > 0 ? variant.available : '') : variant.available}
+                  {variant.availableDisplay ??
+                    (isPreOrder
+                      ? (variant.available > 0 ? String(variant.available) : "")
+                      : String(variant.available))}
                 </div>
               ))}
-
-              {isPreOrder && (
-                <>
-                  <div className="bg-muted px-2 py-2 text-xs font-semibold border-b border-border">
-                    On Route
-                  </div>
-                  {orderableVariants.map((variant) => (
-                    <div
-                      key={`route-${variant.sku}`}
-                      className="px-2 py-2 text-xs text-center tabular-nums border-b border-border"
-                    >
-                      {variant.onRoute > 0 ? variant.onRoute : ""}
-                    </div>
-                  ))}
-                </>
-              )}
 
               <div className="bg-muted px-2 py-1.5 text-xs font-semibold">Order</div>
               {orderableVariants.map((variant) => {

@@ -1,6 +1,7 @@
 import { CollectionProductsGrid } from "@/components/buyer/collection-products-grid";
 import { Breadcrumb, Divider } from "@/components/ui";
 import { getSkusByCollection, getCollectionName } from "@/lib/data/queries/collections";
+import { getAvailabilitySettings } from "@/lib/data/queries/availability-settings";
 import { buildRepQueryStringFromObject } from "@/lib/utils/rep-context";
 
 interface PageProps {
@@ -18,12 +19,14 @@ export default async function CollectionPage({ params, searchParams }: PageProps
   const repQuery = buildRepQueryStringFromObject(queryParams);
 
   // Fetch collection name and products in parallel
-  const [collectionName, products] = await Promise.all([
+  const [collectionName, products, availabilitySettings] = await Promise.all([
     getCollectionName(collectionId),
-    getSkusByCollection(collectionId)
+    getSkusByCollection(collectionId),
+    getAvailabilitySettings(),
   ]);
 
   const displayName = collectionName ?? `Collection ${collectionId}`;
+  const availableLabel = availabilitySettings.matrix.ats.buyer_products.label;
 
   return (
     <div className="bg-background text-foreground">
@@ -45,7 +48,7 @@ export default async function CollectionPage({ params, searchParams }: PageProps
 
         {/* Filter Bar + Products Grid */}
         {products.length > 0 ? (
-          <CollectionProductsGrid products={products} />
+          <CollectionProductsGrid products={products} availableLabel={availableLabel} />
         ) : (
           <div className="text-center py-16">
             <p className="text-muted-foreground">No products available in this collection.</p>
