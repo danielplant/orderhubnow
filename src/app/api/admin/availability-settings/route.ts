@@ -27,7 +27,7 @@ export async function PUT(request: NextRequest) {
 
   try {
     const body = (await request.json()) as AvailabilitySettingsRecord
-    const result = await updateAvailabilitySettings(body, session.user.id)
+    const result = await updateAvailabilitySettings(body, session.user.email ?? String(session.user.id))
 
     if (!result.success) {
       return NextResponse.json({ error: result.error ?? 'Failed to update' }, { status: 400 })
