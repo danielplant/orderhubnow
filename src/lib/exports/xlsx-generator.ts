@@ -23,8 +23,12 @@ import {
   EXPORT_STYLING,
 } from '@/lib/config/export-config'
 import { type ExportPolicy } from '@/lib/data/queries/export-policy'
+import { getAvailabilitySettings, getIncomingMapForSkus } from '@/lib/data/queries/availability-settings'
+import { computeAvailabilityDisplay, getAvailabilityScenario } from '@/lib/availability/compute'
+import { AVAILABILITY_LEGEND_TEXT } from '@/lib/availability/settings'
 import { fetchThumbnailForExport } from './thumbnail-fetcher'
 import type { CurrencyMode } from '@/lib/types/export'
+import type { AvailabilityDisplayResult, AvailabilitySettingsRecord } from '@/lib/types/availability-settings'
 
 // ============================================================================
 // Types
@@ -82,6 +86,39 @@ function formatPrice(priceCAD: number, priceUSD: number, mode: CurrencyMode): st
       }
       return ''
   }
+}
+
+function resolveAvailableLabel(
+  settings: AvailabilitySettingsRecord,
+  collectionsRaw: string,
+  collectionTypes: Array<string | null | undefined>
+): string {
+  if (collectionsRaw === 'preorder') {
+    return settings.matrix.preorder_incoming.xlsx.label
+  }
+  if (collectionsRaw === 'ats') {
+    return settings.matrix.ats.xlsx.label
+  }
+  const types = collectionTypes.filter(Boolean) as string[]
+  const unique = new Set(types)
+  if (unique.size === 1) {
+    const onlyType = Array.from(unique)[0]
+    if (onlyType === 'PreOrder') {
+      return settings.matrix.preorder_incoming.xlsx.label
+    }
+    if (onlyType === 'ATS') {
+      return settings.matrix.ats.xlsx.label
+    }
+  }
+  return settings.matrix.ats.xlsx.label
+}
+
+function toExportCellValue(result: AvailabilityDisplayResult): string | number {
+  if (result.display === '') return ''
+  if (result.numericValue != null && result.display === String(result.numericValue)) {
+    return result.numericValue
+  }
+  return result.display
 }
 
 /**
@@ -159,7 +196,7 @@ export async function generateXlsxExport(
     }
   }
 
-  const isAtsExport = collectionsRaw === 'ats'
+  const availabilitySettings = await getAvailabilitySettings()
 
   // -------------------------------------------------------------------------
   // Step 2: Fetch SKUs
@@ -187,9 +224,18 @@ export async function generateXlsxExport(
       ThumbnailPath: true,
       CollectionID: true,
       Size: true,
-      Collection: { select: { name: true } },
+      Collection: { select: { name: true, type: true } },
     },
   })
+
+  const incomingMap = await getIncomingMapForSkus(rawSkus.map((sku) => sku.SkuID))
+  const showOnRoute = availabilitySettings.showOnRouteXlsx
+  const onRouteLabel = availabilitySettings.onRouteLabelXlsx
+  const availableLabel = resolveAvailableLabel(
+    availabilitySettings,
+    collectionsRaw,
+    rawSkus.map((sku) => sku.Collection?.type)
+  )
 
   // -------------------------------------------------------------------------
   // Step 3: Group and sort SKUs
@@ -244,10 +290,19 @@ export async function generateXlsxExport(
 
   const sheet = workbook.addWorksheet('Products')
 
-  // Filter columns - exclude 'onRoute' for ATS exports
-  const exportColumns = isAtsExport
-    ? EXPORT_COLUMNS.filter((col) => col.key !== 'onRoute')
-    : EXPORT_COLUMNS
+  const baseColumns = EXPORT_COLUMNS.map((col) => {
+    if (col.key === 'available') {
+      return { ...col, header: availableLabel }
+    }
+    if (col.key === 'onRoute') {
+      return { ...col, header: onRouteLabel }
+    }
+    return col
+  })
+
+  const exportColumns = showOnRoute
+    ? baseColumns
+    : baseColumns.filter((col) => col.key !== 'onRoute')
 
   const numericColumnKeys = new Set(['available', 'onRoute', 'units', 'orderQty'])
 
@@ -301,6 +356,22 @@ export async function generateXlsxExport(
     const color = resolveColor(sku.SkuColor, sku.SkuID, description)
 
     // Build row data
+    const incomingEntry = incomingMap.get(sku.SkuID)
+    const incoming = incomingEntry?.incoming ?? null
+    const committed = incomingEntry?.committed ?? null
+    const scenario = getAvailabilityScenario(sku.Collection?.type ?? null, incoming)
+    const availableResult = computeAvailabilityDisplay(
+      scenario,
+      'xlsx',
+      {
+        quantity: sku.Quantity ?? 0,
+        onRoute: sku.OnRoute ?? 0,
+        incoming,
+        committed,
+      },
+      availabilitySettings
+    )
+
     const rowData: Record<string, string | number> = {
       image: '',
       baseSku: sku.isFirstInGroup ? sku.baseSku : '',
@@ -309,7 +380,7 @@ export async function generateXlsxExport(
       color: sku.isFirstInGroup ? color : '',
       material: sku.isFirstInGroup ? (sku.FabricContent ?? '') : '',
       size: sku.size,
-      available: sku.Quantity ?? 0,
+      available: toExportCellValue(availableResult),
       collection: sku.isFirstInGroup ? (sku.Collection?.name ?? '') : '',
       status: sku.isFirstInGroup ? (sku.ShowInPreOrder ? 'Pre-Order' : 'ATS') : '',
       units: sku.isFirstInGroup ? unitsPerSku : '',
@@ -318,7 +389,7 @@ export async function generateXlsxExport(
       orderQty: '',
     }
 
-    if (!isAtsExport) {
+    if (showOnRoute) {
       rowData.onRoute = sku.OnRoute ?? 0
     }
 
@@ -426,6 +497,15 @@ export async function generateXlsxExport(
         }
       }
     }
+  }
+
+  // Legend / footnote row
+  const legendRow = sheet.addRow([AVAILABILITY_LEGEND_TEXT])
+  legendRow.font = { name: 'Arial', size: 9, italic: true, color: { argb: 'FF6B7280' } }
+  legendRow.alignment = { vertical: 'middle' }
+  legendRow.height = 18
+  if (exportColumns.length > 1) {
+    sheet.mergeCells(legendRow.number, 1, legendRow.number, exportColumns.length)
   }
 
   // -------------------------------------------------------------------------

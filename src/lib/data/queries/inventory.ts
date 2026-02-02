@@ -1,6 +1,8 @@
 import { prisma } from '@/lib/prisma'
 import type { DashboardMetrics, CategoryMetric } from '@/lib/types'
 import { getEffectiveQuantity } from '@/lib/utils'
+import { getAvailabilitySettings, getIncomingMapForSkus } from '@/lib/data/queries/availability-settings'
+import { computeAvailabilityDisplay, getAvailabilityScenario } from '@/lib/availability/compute'
 
 // ============================================================================
 // Types for Inventory List
@@ -35,6 +37,11 @@ export interface InventoryListItem {
   description: string | null
   quantity: number
   onRoute: number
+  availableDisplay: string
+  availableSortValue: number | null
+  availableSortRank: number
+  availabilityScenario: 'ats' | 'preorder_incoming' | 'preorder_no_incoming'
+  collectionType?: 'ATS' | 'PreOrder' | null
   effectiveQuantity: number
   prepackMultiplier: number // 1 for singles, 2+ for prepacks
   unitPriceCad: number | null
@@ -136,11 +143,13 @@ async function getLowStockThreshold(): Promise<number> {
 export async function getInventoryList(
   filters: InventoryListFilters,
   page: number,
-  pageSize: number
+  pageSize: number,
+  options?: { settings?: import('@/lib/types/availability-settings').AvailabilitySettingsRecord }
 ): Promise<InventoryListResult> {
   const status = filters.status ?? 'all'
   const q = (filters.search ?? '').trim()
   const lowThreshold = await getLowStockThreshold()
+  const availabilitySettings = options?.settings ?? await getAvailabilitySettings()
 
   // Build base where clause for search and dropdown filters
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -189,13 +198,14 @@ export async function getInventoryList(
   // Build dynamic orderBy based on sort params
   const sortField = INVENTORY_SORT_FIELDS[filters.sortBy ?? 'sku']
   const sortDir = filters.sortDir ?? 'asc'
+  const manualAvailableSort = (filters.sortBy ?? 'sku') === 'qty'
 
   const [rows, total] = await Promise.all([
     prisma.sku.findMany({
       where,
-      orderBy: { [sortField]: sortDir },
-      skip: (Math.max(1, page) - 1) * pageSize,
-      take: pageSize,
+      orderBy: manualAvailableSort ? { SkuID: 'asc' } : { [sortField]: sortDir },
+      skip: manualAvailableSort ? undefined : (Math.max(1, page) - 1) * pageSize,
+      take: manualAvailableSort ? undefined : pageSize,
       select: {
         ID: true,
         SkuID: true,
@@ -210,12 +220,14 @@ export async function getInventoryList(
         SkuColor: true,
         FabricContent: true,
         Collection: {
-          select: { name: true },
+          select: { name: true, type: true },
         },
       },
     }),
     prisma.sku.count({ where }),
   ])
+
+  const incomingMap = await getIncomingMapForSkus(rows.map((row) => row.SkuID))
 
   const items: InventoryListItem[] = rows.map((r) => {
     const qty = r.Quantity ?? 0
@@ -226,12 +238,33 @@ export async function getInventoryList(
     // Use database field if available, otherwise fall back to SKU parsing
     const prepackMultiplier = r.UnitsPerSku ?? 1
 
+    const incomingEntry = incomingMap.get(r.SkuID)
+    const incoming = incomingEntry?.incoming ?? null
+    const committed = incomingEntry?.committed ?? null
+    const scenario = getAvailabilityScenario(r.Collection?.type ?? null, incoming)
+    const displayResult = computeAvailabilityDisplay(
+      scenario,
+      'admin_inventory',
+      {
+        quantity: qty,
+        onRoute,
+        incoming,
+        committed,
+      },
+      availabilitySettings
+    )
+
     return {
       id: String(r.ID), // Unique database ID for React keys
       skuId: r.SkuID,
       description: r.Description ?? null,
       quantity: qty,
       onRoute,
+      availableDisplay: displayResult.display,
+      availableSortValue: displayResult.numericValue,
+      availableSortRank: displayResult.isBlank ? 1 : 0,
+      availabilityScenario: scenario,
+      collectionType: (r.Collection?.type as 'ATS' | 'PreOrder' | undefined) ?? null,
       effectiveQuantity: effective,
       prepackMultiplier,
       unitPriceCad: r.UnitPriceCAD ? Number(r.UnitPriceCAD) : null,
@@ -246,6 +279,25 @@ export async function getInventoryList(
       size: r.Size ?? null,
     }
   })
+
+  const finalItems = manualAvailableSort
+    ? items
+        .sort((a, b) => {
+          if (a.availableSortRank !== b.availableSortRank) {
+            return a.availableSortRank - b.availableSortRank
+          }
+          const aVal = a.availableSortValue
+          const bVal = b.availableSortValue
+          if (aVal == null && bVal == null) return a.skuId.localeCompare(b.skuId)
+          if (aVal == null) return 1
+          if (bVal == null) return -1
+          if (aVal !== bVal) {
+            return sortDir === 'asc' ? aVal - bVal : bVal - aVal
+          }
+          return a.skuId.localeCompare(b.skuId)
+        })
+        .slice((Math.max(1, page) - 1) * pageSize, Math.max(1, page) * pageSize)
+    : items
 
   // Get status counts (with same search filter but different status filters)
   const [allCount, lowCount, outCount, onRouteCount] = await Promise.all([
@@ -271,7 +323,7 @@ export async function getInventoryList(
   ])
 
   return {
-    items,
+    items: finalItems,
     total,
     statusCounts: { all: allCount, low: lowCount, out: outCount, onroute: onRouteCount },
     lowThreshold,

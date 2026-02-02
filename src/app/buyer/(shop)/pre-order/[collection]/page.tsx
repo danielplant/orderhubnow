@@ -6,6 +6,7 @@ import {
   getPreOrderCollectionById,
   getPreOrderProductsByCollection,
 } from "@/lib/data/queries/collections";
+import { getAvailabilitySettings } from "@/lib/data/queries/availability-settings";
 import { buildRepQueryStringFromObject } from "@/lib/utils/rep-context";
 
 interface Props {
@@ -48,9 +49,10 @@ export default async function PreOrderCollectionPage({ params, searchParams }: P
   const repQuery = buildRepQueryStringFromObject(queryParams);
 
   // Fetch collection and products in parallel
-  const [collection, products] = await Promise.all([
+  const [collection, products, availabilitySettings] = await Promise.all([
     getPreOrderCollectionById(collectionId),
     getPreOrderProductsByCollection(collectionId),
+    getAvailabilitySettings(),
   ]);
 
   // Validate collection exists and is a pre-order collection
@@ -62,6 +64,7 @@ export default async function PreOrderCollectionPage({ params, searchParams }: P
     collection.onRouteStartDate,
     collection.onRouteEndDate
   );
+  const availableLabel = availabilitySettings.matrix.preorder_incoming.buyer_preorder.label;
 
   return (
     <div className="bg-background text-foreground">
@@ -94,7 +97,11 @@ export default async function PreOrderCollectionPage({ params, searchParams }: P
 
         {/* Filter Bar + Product Grid */}
         {products.length > 0 ? (
-          <CollectionProductsGrid products={products} isPreOrder />
+          <CollectionProductsGrid
+            products={products}
+            isPreOrder
+            availableLabel={availableLabel}
+          />
         ) : (
           <div className="text-center py-16">
             <p className="text-muted-foreground">

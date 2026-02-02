@@ -67,3 +67,6 @@ prisma/migrations/manual/
 # AI run artifacts (local-only)
 .ai/runs/
 .ai/current-run
+
+# Trash folder (recoverable deleted files)
+.trash/

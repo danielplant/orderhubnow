@@ -30,6 +30,8 @@ import { ProductDetailModal } from '@/components/admin/product-detail-modal'
 import { cn } from '@/lib/utils'
 import { useImageConfig } from '@/lib/contexts'
 import type { AdminSkuRow, CategoryForFilter } from '@/lib/types'
+import type { AvailabilitySettingsRecord, AvailabilityView } from '@/lib/types/availability-settings'
+import { AVAILABILITY_LEGEND_TEXT } from '@/lib/availability/settings'
 import {
   deleteSku,
   bulkDeleteSkus,
@@ -46,7 +48,7 @@ import { ExportProgress } from '@/components/admin/export-progress'
 // Column Visibility Constants
 // ============================================================================
 
-const COLUMN_LABELS: Record<string, string> = {
+const BASE_COLUMN_LABELS: Record<string, string> = {
   image: 'Image',
   skuId: 'SKU',
   color: 'Color',
@@ -64,7 +66,7 @@ const COLUMN_LABELS: Record<string, string> = {
   actions: 'Actions',
 }
 
-const DEFAULT_VISIBLE_COLUMNS = [
+const BASE_VISIBLE_COLUMNS = [
   'image', 'skuId', 'color', 'description', 'material',
   'quantity', 'onRoute', 'collection', 'status', 'actions',
 ]
@@ -123,6 +125,8 @@ interface ProductsTableProps {
   total: number
   categories: CategoryForFilter[]
   readOnly?: boolean
+  availabilitySettings?: AvailabilitySettingsRecord
+  availabilityView?: AvailabilityView
 }
 
 // ============================================================================
@@ -134,6 +138,8 @@ export function ProductsTable({
   total,
   categories,
   readOnly = false,
+  availabilitySettings,
+  availabilityView = 'admin_products',
 }: ProductsTableProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -163,18 +169,10 @@ export function ProductsTable({
     coveragePercent: number
   } | null>(null)
 
-  // Column visibility state (localStorage persisted, no flash)
-  const {
-    visibleColumns,
-    toggleColumn,
-    resetColumns,
-    isHydrated,
-  } = useColumnVisibility({
-    storageKey: 'products-table-columns',
-    defaultColumns: DEFAULT_VISIBLE_COLUMNS,
-  })
+  const onRouteEnabled = availabilitySettings?.showOnRouteProducts ?? true
 
   // Parse collections param: 'all' | 'ats' | 'preorder' | '1,2,3'
+  // NOTE: Must be declared BEFORE availableLabel which depends on it
   const collectionsParam = getParam('collections') || 'all'
   const { collectionMode, selectedCollectionIds } = React.useMemo(() => {
     if (collectionsParam === 'all' || collectionsParam === 'ats' || collectionsParam === 'preorder') {
@@ -187,6 +185,44 @@ export function ProductsTable({
       selectedCollectionIds: ids
     }
   }, [collectionsParam])
+
+  const availableLabel = React.useMemo(() => {
+    if (!availabilitySettings) return 'Available'
+    if (collectionMode === 'ats') return availabilitySettings.matrix.ats[availabilityView].label
+    if (collectionMode === 'preorder') return availabilitySettings.matrix.preorder_incoming[availabilityView].label
+
+    if (collectionMode === 'specific' && selectedCollectionIds.length > 0) {
+      const types = selectedCollectionIds
+        .map((id) => categories.find((c) => c.id === id)?.type)
+        .filter(Boolean) as Array<'ATS' | 'PreOrder'>
+      if (types.length > 0 && types.every((t) => t === 'ATS')) {
+        return availabilitySettings.matrix.ats[availabilityView].label
+      }
+      if (types.length > 0 && types.every((t) => t === 'PreOrder')) {
+        return availabilitySettings.matrix.preorder_incoming[availabilityView].label
+      }
+    }
+
+    return availabilitySettings.matrix.ats[availabilityView].label
+  }, [availabilitySettings, collectionMode, selectedCollectionIds, categories, availabilityView])
+
+  const onRouteLabel = availabilitySettings?.onRouteLabelProducts ?? 'On Route'
+
+  const defaultColumns = React.useMemo(() => {
+    const base = [...BASE_VISIBLE_COLUMNS]
+    return onRouteEnabled ? base : base.filter((id) => id !== 'onRoute')
+  }, [onRouteEnabled])
+
+  // Column visibility state (localStorage persisted, no flash)
+  const {
+    visibleColumns,
+    toggleColumn,
+    resetColumns,
+    isHydrated,
+  } = useColumnVisibility({
+    storageKey: 'products-table-columns',
+    defaultColumns,
+  })
 
   // Collection filter handlers
   const handleCollectionModeChange = React.useCallback(
@@ -377,14 +413,26 @@ export function ProductsTable({
   }, [])
 
   // Column visibility config
+  const columnLabels = React.useMemo(
+    () => ({
+      ...BASE_COLUMN_LABELS,
+      quantity: availableLabel,
+      onRoute: onRouteLabel,
+    }),
+    [availableLabel, onRouteLabel]
+  )
+
   const columnConfig = React.useMemo<ColumnConfig[]>(
-    () => Object.entries(COLUMN_LABELS).map(([id, label]) => ({
-      id,
-      label,
-      visible: visibleColumns.includes(id),
-      required: REQUIRED_COLUMNS.includes(id),
-    })),
-    [visibleColumns]
+    () =>
+      Object.entries(columnLabels)
+        .filter(([id]) => id !== 'onRoute' || onRouteEnabled)
+        .map(([id, label]) => ({
+          id,
+          label,
+          visible: visibleColumns.includes(id),
+          required: REQUIRED_COLUMNS.includes(id),
+        })),
+    [visibleColumns, columnLabels, onRouteEnabled]
   )
 
   const handleColumnVisibilityChange = React.useCallback(
@@ -450,14 +498,19 @@ export function ProductsTable({
       },
       {
         id: 'quantity',
-        header: 'Available',
+        header: (
+          <div className="flex items-center gap-1">
+            <span>{availableLabel}</span>
+            <span className="text-xs text-muted-foreground" title={AVAILABILITY_LEGEND_TEXT}>ⓘ</span>
+          </div>
+        ),
         cell: (r) => (
-          <span className="text-right tabular-nums font-medium">{r.quantity}</span>
+          <span className="text-right tabular-nums font-medium">{r.availableDisplay}</span>
         ),
       },
       {
         id: 'onRoute',
-        header: 'On Route',
+        header: onRouteLabel,
         cell: (r) => (
           <span className={cn('text-right tabular-nums', r.onRoute > 0 ? 'text-blue-600 font-medium' : 'text-muted-foreground')}>
             {r.onRoute}
@@ -560,13 +613,17 @@ export function ProductsTable({
         ),
       }] : []),
     ],
-    [handleDelete, handleTogglePreOrder, handleSkuClick, readOnly]
+    [handleDelete, handleTogglePreOrder, handleSkuClick, readOnly, availableLabel, onRouteLabel]
   )
 
   // Filter columns by visibility
   const columns = React.useMemo(
-    () => allColumns.filter((col) => visibleColumns.includes(col.id)),
-    [allColumns, visibleColumns]
+    () =>
+      allColumns.filter((col) => {
+        if (col.id === 'onRoute' && !onRouteEnabled) return false
+        return visibleColumns.includes(col.id)
+      }),
+    [allColumns, visibleColumns, onRouteEnabled]
   )
 
   // Bulk actions

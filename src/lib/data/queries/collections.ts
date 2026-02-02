@@ -1,6 +1,8 @@
 import { prisma } from '@/lib/prisma'
 import { parsePrice, getBaseSku } from '@/lib/utils'
 import { sortBySize, loadSizeOrderConfig, loadSizeAliasConfig } from '@/lib/utils/size-sort'
+import { getAvailabilitySettings, getIncomingMapForSkus } from '@/lib/data/queries/availability-settings'
+import { computeAvailabilityDisplay, getAvailabilityScenario } from '@/lib/availability/compute'
 import type { Product, ProductVariant } from '@/lib/types'
 import type {
   Collection,
@@ -449,6 +451,9 @@ export async function getSkusByCollection(collectionId: number): Promise<Product
     ],
   })
 
+  const availabilitySettings = await getAvailabilitySettings()
+  const incomingMap = await getIncomingMapForSkus(skus.map((sku) => sku.SkuID))
+
   // Group SKUs by ShopifyProductId (stable product-level key)
   const grouped = new Map<string, Array<typeof skus[0] & { baseSku: string; size: string }>>()
 
@@ -477,14 +482,33 @@ export async function getSkusByCollection(collectionId: number): Promise<Product
     const baseSku = first.baseSku
 
     const variants: ProductVariant[] = sortBySize(
-      skuGroup.map((sku) => ({
-        size: sku.size,
-        sku: sku.SkuID,
-        available: sku.Quantity ?? 0,
-        onRoute: sku.OnRoute ?? 0,
-        priceCad: parsePrice(sku.PriceCAD),
-        priceUsd: parsePrice(sku.PriceUSD),
-      }))
+      skuGroup.map((sku) => {
+        const incomingEntry = incomingMap.get(sku.SkuID)
+        const incoming = incomingEntry?.incoming ?? null
+        const committed = incomingEntry?.committed ?? null
+        const scenario = getAvailabilityScenario('ATS', incoming)
+        const displayResult = computeAvailabilityDisplay(
+          scenario,
+          'buyer_products',
+          {
+            quantity: sku.Quantity ?? 0,
+            onRoute: sku.OnRoute ?? 0,
+            incoming,
+            committed,
+          },
+          availabilitySettings
+        )
+
+        return {
+          size: sku.size,
+          sku: sku.SkuID,
+          available: sku.Quantity ?? 0,
+          onRoute: sku.OnRoute ?? 0,
+          availableDisplay: displayResult.display,
+          priceCad: parsePrice(sku.PriceCAD),
+          priceUsd: parsePrice(sku.PriceUSD),
+        }
+      })
     )
 
     const title = first.OrderEntryDescription ?? first.Description ?? baseSku
@@ -529,6 +553,9 @@ export async function getPreOrderProductsByCollection(collectionId: number): Pro
     ],
   })
 
+  const availabilitySettings = await getAvailabilitySettings()
+  const incomingMap = await getIncomingMapForSkus(skus.map((sku) => sku.SkuID))
+
   // Group SKUs by ShopifyProductId (stable product-level key)
   const grouped = new Map<string, Array<typeof skus[0] & { baseSku: string; size: string }>>()
 
@@ -557,14 +584,33 @@ export async function getPreOrderProductsByCollection(collectionId: number): Pro
     const baseSku = first.baseSku
 
     const variants: ProductVariant[] = sortBySize(
-      skuGroup.map((sku) => ({
-        size: sku.size,
-        sku: sku.SkuID,
-        available: sku.Quantity ?? 0,
-        onRoute: sku.OnRoute ?? 0,
-        priceCad: parsePrice(sku.PriceCAD),
-        priceUsd: parsePrice(sku.PriceUSD),
-      }))
+      skuGroup.map((sku) => {
+        const incomingEntry = incomingMap.get(sku.SkuID)
+        const incoming = incomingEntry?.incoming ?? null
+        const committed = incomingEntry?.committed ?? null
+        const scenario = getAvailabilityScenario('PreOrder', incoming)
+        const displayResult = computeAvailabilityDisplay(
+          scenario,
+          'buyer_preorder',
+          {
+            quantity: sku.Quantity ?? 0,
+            onRoute: sku.OnRoute ?? 0,
+            incoming,
+            committed,
+          },
+          availabilitySettings
+        )
+
+        return {
+          size: sku.size,
+          sku: sku.SkuID,
+          available: sku.Quantity ?? 0,
+          onRoute: sku.OnRoute ?? 0,
+          availableDisplay: displayResult.display,
+          priceCad: parsePrice(sku.PriceCAD),
+          priceUsd: parsePrice(sku.PriceUSD),
+        }
+      })
     )
 
     const title = first.OrderEntryDescription ?? first.Description ?? baseSku
