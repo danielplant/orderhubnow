@@ -7,9 +7,44 @@ on:
     branches: [main]
 
 jobs:
+  schema_drift:
+    name: schema_drift
+    runs-on: [self-hosted, Linux, X64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Validate required secrets
+        env:
+          SHADOW_DATABASE_URL: ${{ secrets.SHADOW_DATABASE_URL }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          missing=()
+          [ -z "$SHADOW_DATABASE_URL" ] && missing+=("SHADOW_DATABASE_URL")
+          [ -z "$DATABASE_URL" ] && missing+=("DATABASE_URL")
+          if [ ${#missing[@]} -ne 0 ]; then
+            echo "Missing required secrets: ${missing[*]}"
+            exit 1
+          fi
+          echo "Secrets OK"
+
+      - name: Clean install
+        run: npm ci
+
+      - name: Schema drift check (strict)
+        run: bash tools/ai/lib/check-schema-drift.sh
+        env:
+          SHADOW_DATABASE_URL: ${{ secrets.SHADOW_DATABASE_URL }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
   validate:
     name: validate
     runs-on: ubuntu-latest
+    needs: [schema_drift]
     steps:
       - uses: actions/checkout@v4
 
@@ -37,11 +72,6 @@ jobs:
 
       - name: Generate Prisma client
         run: npx prisma generate
-
-      - name: Schema drift check (strict)
-        run: bash tools/ai/lib/check-schema-drift.sh
-        env:
-          SHADOW_DATABASE_URL: ${{ secrets.SHADOW_DATABASE_URL }}
 
       - name: Clean stale build artifacts
         run: rm -rf .next
