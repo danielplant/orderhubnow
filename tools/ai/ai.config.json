@@ -1,0 +1,36 @@
+{
+  "project": "orderhubnow",
+  "default_base_branch": "main",
+  "feature_branch_prefix": "feature/",
+  "agent_branch_suffixes": [
+    "ui",
+    "db",
+    "infra",
+    "api"
+  ],
+  "run_dir": ".ai/runs",
+  "current_run_pointer": ".ai/current-run",
+  "commands": {
+    "type_check": "npm run type-check",
+    "lint": "npm run lint",
+    "build": "npm run build",
+    "schema_drift": "bash tools/ai/lib/check-schema-drift.sh",
+    "apply_migration": "npm run apply-migration",
+    "clear_next_cache": "rm -rf .next"
+  },
+  "migration": {
+    "schema_file": "prisma/schema.prisma",
+    "migration_dirs": [
+      "prisma/migrations",
+      "sql-migrations"
+    ]
+  },
+  "merge": {
+    "method": "merge",
+    "no_ff": true
+  },
+  "pr": {
+    "target": "main",
+    "recommended_merge": "squash"
+  }
+}
