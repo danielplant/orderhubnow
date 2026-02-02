@@ -49,40 +49,64 @@ if ! command -v npx >/dev/null 2>&1; then
   exit 1
 fi
 
-SHADOW_URL="${SHADOW_DATABASE_URL:-${PRISMA_MIGRATE_SHADOW_DATABASE_URL:-}}"
-if [ -n "${SHADOW_URL}" ] && [ -n "${DATABASE_URL:-}" ] && [ "${SHADOW_URL}" = "${DATABASE_URL}" ]; then
-  echo "ERROR: SHADOW_DATABASE_URL must NOT equal DATABASE_URL." >&2
-  echo "Provide a separate, empty shadow database for migration diff checks." >&2
-  exit 1
-fi
+run_diff() {
+  set +e
+  npx "${DIFF_ARGS[@]}"
+  rc=$?
+  set -e
 
-args=(prisma migrate diff --from-migrations "${MIGR_DIR}" --to-schema-datamodel "${SCHEMA_FILE}" --exit-code)
-if [ -n "${SHADOW_URL}" ]; then
-  args+=(--shadow-database-url "${SHADOW_URL}")
-fi
-
-set +e
-npx "${args[@]}"
-rc=$?
-set -e
-
-if [ "${rc}" -eq 0 ]; then
-  echo "✅ Schema drift check: OK (migrations match schema)"
-  exit 0
-fi
-
-if [ "${rc}" -eq 2 ]; then
-  echo "❌ Schema drift detected (migrations do not match schema). SQL diff:"
-  args2=(prisma migrate diff --from-migrations "${MIGR_DIR}" --to-schema-datamodel "${SCHEMA_FILE}" --script)
-  if [ -n "${SHADOW_URL}" ]; then
-    args2+=(--shadow-database-url "${SHADOW_URL}")
+  if [ "${rc}" -eq 0 ]; then
+    echo "✅ Schema drift check: OK (migrations match schema)"
+    exit 0
   fi
-  npx "${args2[@]}" || true
-  exit 2
-fi
 
-echo "ERROR: Schema drift check failed to run (exit code ${rc})." >&2
-echo "Hints:" >&2
-echo "- If using --from-migrations, you may need a shadow database: set SHADOW_DATABASE_URL." >&2
-echo "- Ensure prisma/schema.prisma is valid and prisma CLI is installed." >&2
-exit "${rc}"
+  if [ "${rc}" -eq 2 ]; then
+    echo "❌ Schema drift detected (migrations do not match schema). SQL diff:"
+    npx "${SCRIPT_ARGS[@]}" || true
+    exit 2
+  fi
+
+  echo "ERROR: Schema drift check failed to run (exit code ${rc})." >&2
+  echo "Hints:" >&2
+  echo "- Ensure prisma/schema.prisma is valid and prisma CLI is installed." >&2
+  exit "${rc}"
+}
+
+MIGR_LOCK="${ROOT_DIR}/${MIGR_DIR}/migration_lock.toml"
+
+if [ -f "${MIGR_LOCK}" ]; then
+  SHADOW_URL="${SHADOW_DATABASE_URL:-${PRISMA_MIGRATE_SHADOW_DATABASE_URL:-}}"
+  if [ -n "${SHADOW_URL}" ] && [ -n "${DATABASE_URL:-}" ] && [ "${SHADOW_URL}" = "${DATABASE_URL}" ]; then
+    echo "ERROR: SHADOW_DATABASE_URL must NOT equal DATABASE_URL." >&2
+    echo "Provide a separate, empty shadow database for migration diff checks." >&2
+    exit 1
+  fi
+
+  DIFF_ARGS=(prisma migrate diff --from-migrations "${MIGR_DIR}" --to-schema-datamodel "${SCHEMA_FILE}" --exit-code)
+  SCRIPT_ARGS=(prisma migrate diff --from-migrations "${MIGR_DIR}" --to-schema-datamodel "${SCHEMA_FILE}" --script)
+  if [ -n "${SHADOW_URL}" ]; then
+    DIFF_ARGS+=(--shadow-database-url "${SHADOW_URL}")
+    SCRIPT_ARGS+=(--shadow-database-url "${SHADOW_URL}")
+  fi
+
+  run_diff
+else
+  echo "WARN: migration_lock.toml not found in ${MIGR_DIR}; falling back to schema-vs-DB diff."
+
+  DB_URL="${DATABASE_URL:-${SHADOW_DATABASE_URL:-${PRISMA_MIGRATE_SHADOW_DATABASE_URL:-}}}"
+  if [ -z "${DB_URL}" ]; then
+    echo "ERROR: DATABASE_URL (or SHADOW_DATABASE_URL) is required for drift checks when migrations are not managed by Prisma." >&2
+    exit 1
+  fi
+
+  TMP_SCHEMA="$(mktemp)"
+  trap 'rm -f "${TMP_SCHEMA}"' EXIT
+  cp "${SCHEMA_FILE}" "${TMP_SCHEMA}"
+
+  DATABASE_URL="${DB_URL}" npx prisma db pull --schema="${TMP_SCHEMA}" >/dev/null
+
+  DIFF_ARGS=(prisma migrate diff --from-schema-datamodel "${TMP_SCHEMA}" --to-schema-datamodel "${SCHEMA_FILE}" --exit-code)
+  SCRIPT_ARGS=(prisma migrate diff --from-schema-datamodel "${TMP_SCHEMA}" --to-schema-datamodel "${SCHEMA_FILE}" --script)
+
+  run_diff
+fi
