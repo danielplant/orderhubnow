@@ -8,7 +8,7 @@ on:
 jobs:
   deploy_staging:
     name: Deploy (staging)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     environment: staging
     steps:
       - uses: actions/checkout@v4
@@ -84,7 +84,7 @@ jobs:
 
   deploy_production:
     name: Deploy (production)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     needs: [deploy_staging]
     if: ${{ always() && (needs.deploy_staging.result == 'success' || needs.deploy_staging.result == 'skipped') }}
     environment: production
