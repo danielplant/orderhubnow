@@ -39,6 +39,52 @@ print(cur)
 PY
 }
 
+cfg_get_optional() {
+  local key=$1
+  py <<PY
+import json
+from pathlib import Path
+cfg=json.loads(Path("${CONFIG_FILE}").read_text())
+parts="${key}".split(".")
+cur=cfg
+for p in parts:
+    if isinstance(cur, dict) and p in cur:
+        cur=cur[p]
+    else:
+        cur=None
+        break
+print("" if cur is None else cur)
+PY
+}
+
+cfg_bool() {
+  local key=$1
+  local val
+  val=$(cfg_get_optional "$key")
+  case "$val" in
+    true|True|1) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+is_worktree_checkout() {
+  [ -f "${ROOT_DIR}/.git" ]
+}
+
+worktree_root() {
+  local root
+  root=$(cfg_get_optional worktree_root)
+  if [ -z "$root" ]; then
+    echo "../worktrees"
+  else
+    echo "$root"
+  fi
+}
+
+worktree_copy_env_enabled() {
+  cfg_bool worktree_copy_env
+}
+
 slugify() {
   local text=$1
   py "$text" <<'PY'
@@ -228,13 +274,176 @@ baseline_ref_for_meta() {
   fi
 }
 
+write_spec_file() {
+  local spec_path=$1
+  local slug=$2
+  local description=$3
+  local ac_input=$4
+  local notes_input=$5
+
+  py "$spec_path" "$slug" "$description" "$ac_input" "$notes_input" <<'PY'
+import sys
+from pathlib import Path
+
+spec_path, slug, description, ac_input, notes_input = sys.argv[1:]
+ac_items=[s.strip() for s in ac_input.split(",") if s.strip()]
+if not ac_items:
+  ac_lines=["- (fill in)"]
+else:
+  ac_lines=[f"- {s}" for s in ac_items]
+
+notes_lines=[]
+if notes_input.strip():
+  notes_lines.append(f"- {notes_input.strip()}")
+notes_lines.append("- This run is local-only. Do not commit anything under .ai/runs/.")
+
+content = f"""# Feature spec
+
+## Title
+{slug}
+
+## Description
+{description}
+
+## Acceptance criteria
+{chr(10).join(ac_lines)}
+
+## Notes
+{chr(10).join(notes_lines)}
+"""
+Path(spec_path).write_text(content)
+PY
+}
+
+init_run_artifacts() {
+  local run_id=$1
+  local description=$2
+  local slug=$3
+  local base_branch=$4
+  local base_commit=$5
+  local feature_branch=$6
+  local ac_input=$7
+  local notes_input=$8
+
+  local rdir="${ROOT_DIR}/$(run_dir)/${run_id}"
+  mkdir -p "$rdir"/{tasks,logs,migrations,pr,snapshots}
+
+  local meta_path="$rdir/meta.json"
+  py "$run_id" "$description" "$slug" "$base_branch" "$base_commit" "$feature_branch" "$meta_path" <<'PY'
+import json, sys
+from pathlib import Path
+
+run_id=sys.argv[1]
+description=sys.argv[2]
+slug=sys.argv[3]
+base_branch=sys.argv[4]
+base_commit=sys.argv[5]
+feature_branch=sys.argv[6]
+meta_path=sys.argv[7]
+
+meta={
+  "run_id": run_id,
+  "created_at_utc": __import__("datetime").datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+  "description": description,
+  "feature_slug": slug,
+  "base_branch": base_branch,
+  "base_commit": base_commit,
+  "feature_branch": feature_branch,
+  "agent_branches": {}
+}
+Path(meta_path).write_text(json.dumps(meta, indent=2)+"\n")
+PY
+
+  write_spec_file "$rdir/spec.md" "$slug" "$description" "$ac_input" "$notes_input"
+
+  cat > "$rdir/plan.md" <<'MD'
+# Plan
+
+(Generate using tools/ai/prompts/10_plan.md)
+
+- Milestones:
+  - ...
+
+- Tasks (agent branches):
+  - ui
+  - db
+  - api
+  - infra
+
+- Tests:
+  - ...
+MD
+
+  write_current_run_id "$run_id"
+
+  echo ""
+  echo "✅ Started run: $run_id"
+  echo "   branch: $(current_branch)"
+  echo "   run folder: $rdir"
+}
+
+maybe_prompt_dispatch() {
+  if [ ! -t 0 ]; then
+    return 0
+  fi
+  local allowed
+  allowed=$(allowed_agents)
+  read -r -p "Dispatch agents now? (comma-separated: ${allowed}, blank to skip): " agents
+  if [ -z "${agents// /}" ]; then
+    return 0
+  fi
+  IFS=',' read -r -a parts <<< "$agents"
+  for raw in "${parts[@]}"; do
+    local agent
+    agent=$(echo "$raw" | tr -d '[:space:]')
+    if [ -n "$agent" ]; then
+      cmd_dispatch "$agent"
+    fi
+  done
+}
+
 cmd_start() {
+  local mode="normal"
+  local use_worktree="auto"
+
+  while [[ "${1:-}" == --* ]]; do
+    case "$1" in
+      --worktree) use_worktree="yes"; shift ;;
+      --no-worktree) use_worktree="no"; shift ;;
+      --in-place) mode="inplace"; shift ;;
+      *) break ;;
+    esac
+  done
+
   local description=${1:-}
   if [ -z "$description" ]; then
-    echo "Usage: tools/ai/run.sh start \"feature description\"" >&2
+    echo "Usage: tools/ai/run.sh start [--worktree|--no-worktree] \"feature description\"" >&2
     exit 1
   fi
 
+  if [ "$mode" = "inplace" ]; then
+    cmd_start_inplace "$description"
+    return
+  fi
+
+  if [ "$use_worktree" = "auto" ] && cfg_bool default_worktree; then
+    if is_worktree_checkout; then
+      use_worktree="no"
+    else
+      use_worktree="yes"
+    fi
+  fi
+
+  if [ "$use_worktree" = "yes" ]; then
+    cmd_start_worktree "$description"
+    return
+  fi
+
+  cmd_start_normal "$description"
+}
+
+cmd_start_normal() {
+  local description=$1
   git_require_repo
   ensure_ai_gitignored
   ensure_clean_worktree
@@ -267,80 +476,119 @@ cmd_start() {
     base_commit=$(git rev-parse "$base_branch")
   fi
 
+  local ac_input="" notes_input=""
+  if [ -t 0 ]; then
+    read -r -p "Acceptance criteria (comma-separated, optional): " ac_input
+    read -r -p "Notes/constraints (optional): " notes_input
+  fi
+
   local run_id
   run_id=$(utc_run_id "$slug")
+  init_run_artifacts "$run_id" "$description" "$slug" "$base_branch" "$base_commit" "$feature_branch" "$ac_input" "$notes_input"
 
-  local rdir="${ROOT_DIR}/$(run_dir)/${run_id}"
-  mkdir -p "$rdir"/{tasks,logs,migrations,pr,snapshots}
-
-  local meta_path="$rdir/meta.json"
-  py "$run_id" "$description" "$slug" "$base_branch" "$base_commit" "$feature_branch" "$meta_path" <<'PY'
-import json, sys
-from pathlib import Path
-
-run_id=sys.argv[1]
-description=sys.argv[2]
-slug=sys.argv[3]
-base_branch=sys.argv[4]
-base_commit=sys.argv[5]
-feature_branch=sys.argv[6]
-meta_path=sys.argv[7]
-
-meta={
-  "run_id": run_id,
-  "created_at_utc": __import__("datetime").datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
-  "description": description,
-  "feature_slug": slug,
-  "base_branch": base_branch,
-  "base_commit": base_commit,
-  "feature_branch": feature_branch,
-  "agent_branches": {}
-}
-Path(meta_path).write_text(json.dumps(meta, indent=2)+"\n")
-PY
-
-  cat > "$rdir/spec.md" <<MD
-# Feature spec
-
-## Title
-${slug}
-
-## Description
-${description}
-
-## Acceptance criteria
-- (fill in)
-
-## Notes
-- This run is local-only. Do not commit anything under .ai/runs/.
-MD
-
-  cat > "$rdir/plan.md" <<'MD'
-# Plan
-
-(Generate using tools/ai/prompts/10_plan.md)
-
-- Milestones:
-  - ...
-
-- Tasks (agent branches):
-  - ui
-  - db
-  - api
-  - infra
-
-- Tests:
-  - ...
-MD
-
-  write_current_run_id "$run_id"
-
-  echo ""
-  echo "✅ Started run: $run_id"
-  echo "   branch: $(current_branch)"
-  echo "   run folder: $rdir"
   echo ""
   echo "Next: tools/ai/run.sh dispatch ui|db|infra|api"
+  maybe_prompt_dispatch
+}
+
+cmd_start_inplace() {
+  local description=$1
+  git_require_repo
+  ensure_ai_gitignored
+  ensure_clean_worktree
+  fetch_origin
+
+  local base_branch
+  base_branch=$(cfg_get default_base_branch)
+  local feature_branch
+  feature_branch=$(current_branch)
+
+  local base_commit
+  if git show-ref --verify --quiet "refs/remotes/origin/${base_branch}"; then
+    base_commit=$(git merge-base HEAD "origin/${base_branch}")
+  else
+    base_commit=$(git rev-parse "$base_branch")
+  fi
+
+  local slug
+  slug=$(slugify "$description")
+
+  local ac_input="" notes_input=""
+  if [ -t 0 ]; then
+    read -r -p "Acceptance criteria (comma-separated, optional): " ac_input
+    read -r -p "Notes/constraints (optional): " notes_input
+  fi
+
+  local run_id
+  run_id=$(utc_run_id "$slug")
+  init_run_artifacts "$run_id" "$description" "$slug" "$base_branch" "$base_commit" "$feature_branch" "$ac_input" "$notes_input"
+
+  echo ""
+  echo "Next: tools/ai/run.sh dispatch ui|db|infra|api"
+  maybe_prompt_dispatch
+}
+
+cmd_start_worktree() {
+  local description=$1
+  git_require_repo
+  ensure_ai_gitignored
+
+  if ! git diff --quiet || ! git diff --cached --quiet; then
+    echo "⚠️  Current worktree has uncommitted changes. Creating new worktree anyway." >&2
+  fi
+
+  local base_branch
+  base_branch=$(cfg_get default_base_branch)
+  fetch_origin
+
+  local slug
+  slug=$(slugify "$description")
+  local feature_branch_prefix
+  feature_branch_prefix=$(cfg_get feature_branch_prefix)
+  local feature_branch="${feature_branch_prefix}${slug}"
+
+  local root
+  root=$(worktree_root)
+  local abs_root
+  abs_root=$(py "$root" <<'PY'
+from pathlib import Path
+import sys
+print(Path(sys.argv[1]).resolve())
+PY
+)
+  mkdir -p "$abs_root"
+
+  if git worktree list --porcelain | grep -q "branch refs/heads/${feature_branch}$"; then
+    echo "ERROR: A worktree already exists for branch ${feature_branch}." >&2
+    exit 1
+  fi
+
+  local target="${abs_root}/${slug}"
+  local i=1
+  while [ -e "$target" ]; do
+    target="${abs_root}/${slug}-${i}"
+    i=$((i+1))
+  done
+
+  echo "Creating worktree at: ${target}"
+  if git show-ref --verify --quiet "refs/heads/${feature_branch}"; then
+    git worktree add "$target" "$feature_branch"
+  else
+    git worktree add -b "$feature_branch" "$target" "origin/${base_branch}"
+  fi
+
+  if worktree_copy_env_enabled; then
+    if [ -f "${ROOT_DIR}/.env" ] && [ ! -f "${target}/.env" ]; then
+      cp "${ROOT_DIR}/.env" "${target}/.env"
+      echo "Copied .env to worktree."
+    fi
+  fi
+
+  echo "Initializing run in worktree..."
+  (cd "$target" && tools/ai/run.sh start --in-place "$description")
+  echo ""
+  echo "Open this folder in Cursor/Claude/Codex:"
+  echo "  $target"
 }
 
 cmd_status() {
@@ -490,6 +738,28 @@ PY
   local log_path="$rdir/logs/agent-${agent}.log"
   touch "$log_path"
 
+  if [ -t 0 ]; then
+    read -r -p "Task scope (optional): " scope_input
+    read -r -p "Files likely touched (comma-separated, optional): " files_input
+    read -r -p "Notes/constraints (optional): " notes_input
+    if [ -n "${scope_input}${files_input}${notes_input}" ]; then
+      py "$task_path" "$scope_input" "$files_input" "$notes_input" <<'PY'
+import json, sys
+from pathlib import Path
+path, scope, files, notes = sys.argv[1:]
+obj=json.loads(Path(path).read_text())
+if scope.strip():
+  obj["scope"]=scope.strip()
+if files.strip():
+  items=[f.strip() for f in files.split(",") if f.strip()]
+  obj["filesLikelyTouched"]=items
+if notes.strip():
+  obj["notes"]=notes.strip()
+Path(path).write_text(json.dumps(obj, indent=2)+"\n")
+PY
+    fi
+  fi
+
   py "$meta" "$agent" "$agent_branch" <<'PY'
 import json, sys
 from pathlib import Path
@@ -594,6 +864,125 @@ maybe_run_migration_gate() {
   fi
 }
 
+qa_file_for_run() {
+  local run_id=$1
+  echo "${ROOT_DIR}/$(run_dir)/${run_id}/qa/confirmed.md"
+}
+
+write_qa_file() {
+  local run_id=$1
+  local mode=$2
+  local tunnel_used=$3
+  local status=$4
+  local command=$5
+  local notes=$6
+
+  local rdir="${ROOT_DIR}/$(run_dir)/${run_id}"
+  local qa_dir="$rdir/qa"
+  mkdir -p "$qa_dir"
+  local qa_file
+  qa_file=$(qa_file_for_run "$run_id")
+
+  cat > "$qa_file" <<TXT
+# QA Confirmation
+timestamp: $(date -u +"%Y-%m-%dT%H:%MZ")
+run_id: ${run_id}
+branch: $(current_branch)
+mode: ${mode}
+db_tunnel: ${tunnel_used}
+command: ${command}
+status: ${status}
+notes: ${notes}
+TXT
+}
+
+cmd_test() {
+  local run_id
+  run_id=$(require_run)
+  verify_branch_matches_run "$run_id"
+
+  if [ ! -t 0 ]; then
+    echo "ERROR: test requires an interactive terminal." >&2
+    exit 1
+  fi
+
+  local tunnel_cmd
+  tunnel_cmd=$(cfg_get commands.db_tunnel)
+  local tunnel_used="no"
+  if [ -n "${tunnel_cmd:-}" ] && [ "${tunnel_cmd}" != "null" ]; then
+    read -r -p "Open production DB tunnel now? (yes/no): " ans
+    if [[ "${ans:-no}" =~ ^[Yy][Ee][Ss]$ ]]; then
+      echo "Run in a separate terminal:"
+      echo "  ${tunnel_cmd}"
+      read -r -p "Press Enter once the tunnel is open..." _
+      tunnel_used="yes"
+    fi
+  fi
+
+  echo "Choose test mode:"
+  echo "  1) dev      (npm run dev)"
+  echo "  2) prod-like (rm -rf .next && npx prisma generate && npm run build && npm start)"
+  echo "  3) skip (requires reason)"
+  read -r -p "Selection [1/2/3]: " choice
+
+  local mode command
+  case "$choice" in
+    1) mode="dev"; command=$(cfg_get commands.test_dev) ;;
+    2) mode="prod-like"; command=$(cfg_get commands.test_prod) ;;
+    3) mode="skip"; command="(skipped)" ;;
+    *) echo "Invalid selection." >&2; exit 1 ;;
+  esac
+
+  if [ "$mode" = "skip" ]; then
+    read -r -p "Reason for skipping QA: " reason
+    write_qa_file "$run_id" "$mode" "$tunnel_used" "skipped" "$command" "$reason"
+    echo "⚠️  QA skipped. Reason recorded."
+    return 0
+  fi
+
+  echo "Run the following in a separate terminal:"
+  echo "  ${command}"
+  read -r -p "Press Enter once tests are complete..." _
+  read -r -p "Did tests pass? (yes/no): " pass
+  read -r -p "Notes (what you tested): " notes
+
+  if [[ "${pass:-no}" =~ ^[Yy][Ee][Ss]$ ]]; then
+    write_qa_file "$run_id" "$mode" "$tunnel_used" "passed" "$command" "$notes"
+    echo "✅ QA recorded: $mode"
+    return 0
+  fi
+
+  write_qa_file "$run_id" "$mode" "$tunnel_used" "failed" "$command" "$notes"
+  echo "ERROR: QA failed. Fix issues before finalizing." >&2
+  exit 1
+}
+
+ensure_qa() {
+  local run_id=$1
+  local qa_file
+  qa_file=$(qa_file_for_run "$run_id")
+
+  if [ -f "$qa_file" ]; then
+    return 0
+  fi
+
+  if [ -t 0 ]; then
+    read -r -p "No QA confirmation found. Run tools/ai/run.sh test now? (yes/no): " ans
+    if [[ "${ans:-no}" =~ ^[Yy][Ee][Ss]$ ]]; then
+      cmd_test
+      return 0
+    fi
+
+    read -r -p "Skip QA? Provide reason: " reason
+    write_qa_file "$run_id" "skip" "no" "skipped" "(skipped)" "$reason"
+    echo "⚠️  QA skipped. Reason recorded."
+    return 0
+  fi
+
+  echo "ERROR: No QA confirmation file found. Run tools/ai/run.sh test." >&2
+  exit 1
+}
+
 cmd_implement() {
   local run_id
   run_id=$(require_run)
@@ -631,6 +1020,13 @@ cmd_implement() {
   local schema_file
   schema_file=$(cfg_get migration.schema_file)
   maybe_run_migration_gate "$base_ref" "$schema_file" "$rdir" "$checks_log"
+
+  if [ -t 0 ]; then
+    read -r -p "Run tools/ai/run.sh test now? (yes/no): " ans
+    if [[ "${ans:-no}" =~ ^[Yy][Ee][Ss]$ ]]; then
+      cmd_test
+    fi
+  fi
 
   echo "✅ implement complete"
 }
@@ -694,6 +1090,8 @@ cmd_finalize() {
     fi
   fi
 
+  ensure_qa "$run_id"
+
   echo "Pushing feature branch to origin: $feature_branch" | tee -a "$checks_log"
   push_branch_set_upstream "$feature_branch" | tee -a "$checks_log"
 
@@ -715,16 +1113,42 @@ cmd_finalize() {
   echo "3) Merge (squash). Deploy only from origin/main after CI on main."
 }
 
+cmd_worktree_list() {
+  git worktree list
+}
+
+cmd_worktree_add() {
+  local description=${1:-}
+  if [ -z "$description" ]; then
+    echo "Usage: tools/ai/run.sh worktree add \"feature description\"" >&2
+    exit 1
+  fi
+  cmd_start --worktree "$description"
+}
+
+cmd_worktree() {
+  local sub=${1:-}
+  shift || true
+  case "$sub" in
+    list) cmd_worktree_list ;;
+    add) cmd_worktree_add "$@" ;;
+    *) echo "Usage: tools/ai/run.sh worktree list|add \"feature description\"" >&2; exit 1 ;;
+  esac
+}
+
 usage() {
   cat <<'TXT'
 Usage: tools/ai/run.sh <command> [...]
 
 Commands:
-  start "<feature description>"   Create/switch feature branch and create .ai/runs/<runId>/ artifacts
+  start [--worktree|--no-worktree] "<feature description>"   Create feature branch/run (optionally in new worktree)
   status                          Show current branch, runId, and consistency checks
   dispatch ui|db|infra|api         Create agent branch off feature branch + task/log scaffolding
   implement                        Merge agent branches into feature branch, run checks, generate migration gate artifacts
+  test                             Interactive local test (dev/prod-like) + QA confirmation (records .ai/runs/<runId>/qa/confirmed.md)
   finalize                         Run strict checks, enforce migration commits, push feature branch, generate PR title/body
+  worktree list                    Show git worktrees
+  worktree add "<desc>"            Create a new worktree + start a run in it
 TXT
 }
 
@@ -736,7 +1160,9 @@ main() {
     status) cmd_status ;;
     dispatch) cmd_dispatch "$@" ;;
     implement) cmd_implement ;;
+    test) cmd_test ;;
     finalize) cmd_finalize ;;
+    worktree) cmd_worktree "$@" ;;
     ""|help|-h|--help) usage ;;
     *) echo "Unknown command: $cmd" >&2; usage; exit 1 ;;
   esac
