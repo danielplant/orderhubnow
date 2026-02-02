@@ -208,7 +208,7 @@ PY
 }
 
 allowed_agents() {
-  cfg_get agent_branch_suffixes | py -c 'import ast,sys; print(" ".join(ast.literal_eval(sys.stdin.read())))'
+  cfg_get agent_branch_suffixes | python3 -c 'import ast,sys; data=sys.stdin.read().strip(); print(" ".join(ast.literal_eval(data)) if data else "")'
 }
 
 # Baseline for diffs:
