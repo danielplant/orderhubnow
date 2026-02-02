@@ -9,7 +9,6 @@ jobs:
   deploy_staging:
     name: Deploy (staging)
     runs-on: ubuntu-latest
-    if: ${{ secrets.STAGING_DATABASE_URL != '' }}
     environment: staging
     steps:
       - uses: actions/checkout@v4
