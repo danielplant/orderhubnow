@@ -9,7 +9,6 @@ import {
   type DataTableColumn,
   StatusBadge,
   SearchInput,
-  ShipmentTimeline,
 } from '@/components/ui'
 import {
   Select,
@@ -190,20 +189,6 @@ export function RepOrdersTable({
             >
               {order.orderNumber}
             </Link>
-            {/* Phase 5: Show shipment timeline for multi-shipment orders
-                NOTE: Using synthetic shipments for compact view. See orders-table.tsx for details. */}
-            {order.plannedShipmentCount > 1 && (
-              <ShipmentTimeline
-                shipments={Array.from({ length: order.plannedShipmentCount }, (_, i) => ({
-                  id: `shipment-${i}`,
-                  collectionName: null,
-                  plannedShipStart: order.firstShipmentDate ?? order.shipStartDate ?? '',
-                  plannedShipEnd: order.firstShipmentDate ?? order.shipStartDate ?? '',
-                }))}
-                variant="compact"
-                className="ml-1"
-              />
-            )}
           </div>
         ),
       },

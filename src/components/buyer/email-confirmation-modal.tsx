@@ -12,15 +12,14 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Loader2, Mail, Plus, X, Package } from 'lucide-react'
+import { Loader2, Mail, Plus, X } from 'lucide-react'
 import type { EmailRecipientInfo } from '@/lib/types/email'
-import { formatCurrency } from '@/lib/utils'
 
 /**
- * Represents a shipment summary for the email confirmation modal.
- * An order may have multiple planned shipments grouped by Collection.
+ * Represents an order summary for the email confirmation modal.
+ * After split-order revert, each order corresponds to a collection group.
  */
-export interface ShipmentSummary {
+export interface OrderSummary {
   orderId: string
   orderNumber: string
   // Collection name - what users see on pre-order pages
@@ -33,7 +32,7 @@ export interface ShipmentSummary {
 interface EmailConfirmationModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  shipments: ShipmentSummary[]
+  orders: OrderSummary[]
   currency?: 'USD' | 'CAD'
   onConfirm: () => void
   onSkip: () => void
@@ -42,14 +41,14 @@ interface EmailConfirmationModalProps {
 export function EmailConfirmationModal({
   open,
   onOpenChange,
-  shipments,
+  orders,
   currency = 'USD',
   onConfirm,
   onSkip,
 }: EmailConfirmationModalProps) {
-  // Use first shipment for fetching recipients (all shipments share same customer/rep)
-  const primaryOrderId = shipments[0]?.orderId || ''
-  const shipmentCount = shipments.length
+  // Use first order for fetching recipients (all orders share same customer/rep)
+  const primaryOrderId = orders[0]?.orderId || ''
+  const orderCount = orders.length
   const [isLoading, setIsLoading] = useState(true)
   const [isSending, setIsSending] = useState(false)
   const [recipients, setRecipients] = useState<EmailRecipientInfo | null>(null)
@@ -126,13 +125,12 @@ export function EmailConfirmationModal({
         saveAsRepDefault,
       }
 
-      // De-duplicate by orderId - send once per unique order
-      // All shipments in multi-shipment orders have the same orderId
-      const uniqueOrderIds = [...new Set(shipments.map((s) => s.orderId))]
+      // Send once per unique order
+      const uniqueOrderIds = [...new Set(orders.map((o) => o.orderId))]
       const errors: string[] = []
 
       for (const orderId of uniqueOrderIds) {
-        const orderNumber = shipments.find((s) => s.orderId === orderId)?.orderNumber || orderId
+        const orderNumber = orders.find((o) => o.orderId === orderId)?.orderNumber || orderId
         try {
           const res = await fetch(`/api/orders/${orderId}/send-emails`, {
             method: 'POST',
@@ -150,7 +148,7 @@ export function EmailConfirmationModal({
         }
       }
 
-      if (errors.length > 0 && errors.length === shipments.length) {
+      if (errors.length > 0 && errors.length === orders.length) {
         // All failed
         throw new Error(`Failed to send emails: ${errors.join(', ')}`)
       }
@@ -167,25 +165,13 @@ export function EmailConfirmationModal({
     onSkip()
   }
 
-  // Helper to format ship window display
-  const formatShipWindow = (start: string | null, end: string | null): string => {
-    if (!start && !end) return 'TBD'
-    const startDate = start ? new Date(start).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''
-    const endDate = end ? new Date(end).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : ''
-    if (startDate && endDate) return `${startDate} - ${endDate}`
-    return startDate || endDate || 'TBD'
-  }
-
-  // Calculate total across all shipments
-  const totalAmount = shipments.reduce((sum, s) => sum + s.orderAmount, 0)
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[550px]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Mail className="h-5 w-5" />
-            Order {shipments[0]?.orderNumber} Submitted
+            Order {orders[0]?.orderNumber} Submitted
           </DialogTitle>
         </DialogHeader>
 
@@ -200,37 +186,10 @@ export function EmailConfirmationModal({
           </div>
         ) : recipients && (
           <div className="space-y-6">
-            {/* Shipments Summary Section */}
-            {shipmentCount > 1 && (
-              <div className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <Package className="h-4 w-4 text-muted-foreground" />
-                  <Label className="text-base font-semibold">
-                    Your order will ship in {shipmentCount} shipments:
-                  </Label>
-                </div>
-                <div className="bg-muted/50 rounded-lg p-3 space-y-2">
-                  {shipments.map((shipment) => (
-                    <div key={shipment.orderId} className="flex items-center justify-between text-sm">
-                      <div className="flex items-center gap-3">
-                        <span className="font-mono font-medium">{shipment.collectionName || 'Standard'}</span>
-                        <span className="text-muted-foreground">
-                          Ships {formatShipWindow(shipment.shipWindowStart, shipment.shipWindowEnd)}
-                        </span>
-                      </div>
-                      <span className="font-medium">
-                        {formatCurrency(shipment.orderAmount, currency)}
-                      </span>
-                    </div>
-                  ))}
-                  <div className="border-t pt-2 mt-2 flex items-center justify-between text-sm font-semibold">
-                    <span>Total</span>
-                    <span>{formatCurrency(totalAmount, currency)}</span>
-                  </div>
-                </div>
-                <p className="text-sm text-muted-foreground">
-                  A confirmation email will be sent for your order.
-                </p>
+            {/* Orders Summary Section */}
+            {orderCount > 1 && (
+              <div className="p-3 bg-blue-50 border border-blue-200 rounded-md text-sm text-blue-800">
+                Your cart was split into {orderCount} orders by collection.
               </div>
             )}
 
