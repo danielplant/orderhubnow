@@ -64,13 +64,15 @@ export function AffectedOrdersClient({
   const [isUpdating, setIsUpdating] = useState(false)
   const [isNotifying, setIsNotifying] = useState(false)
 
-  const formatDate = (d: string | null) =>
-    d
-      ? new Date(d).toLocaleDateString('en-US', {
-          month: 'short',
-          day: 'numeric',
-        })
-      : '-'
+  const formatDate = (d: string | null) => {
+    if (!d) return '-'
+    // Extract date-only part and force local midnight (avoids UTC timezone shift)
+    const dateOnly = d.split('T')[0]
+    return new Date(dateOnly + 'T00:00:00').toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+    })
+  }
 
   function toggleAll(checked: boolean) {
     if (checked) {

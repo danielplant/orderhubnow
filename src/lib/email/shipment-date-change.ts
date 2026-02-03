@@ -34,12 +34,15 @@ export async function sendDateChangeEmail(
     process.env.NEXT_PUBLIC_APP_URL || 'https://app.orderhubnow.com'
   const orderUrl = `${baseUrl}/admin/orders/${data.orderId}`
 
-  const formatDate = (d: string) =>
-    new Date(d).toLocaleDateString('en-US', {
+  const formatDate = (d: string) => {
+    // Extract date-only part and force local midnight (avoids UTC timezone shift)
+    const dateOnly = d.split('T')[0]
+    return new Date(dateOnly + 'T00:00:00').toLocaleDateString('en-US', {
       month: 'long',
       day: 'numeric',
       year: 'numeric',
     })
+  }
 
   const subject = `Ship Date Update for Order ${data.orderNumber}`
 

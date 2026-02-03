@@ -21,7 +21,9 @@ export function CollectionCard({ collection, onClick }: CollectionCardProps) {
 
   const formatDate = (dateStr: string | null) => {
     if (!dateStr) return null
-    const d = new Date(dateStr)
+    // Extract date-only part and force local midnight (avoids UTC timezone shift)
+    const dateOnly = dateStr.split('T')[0]
+    const d = new Date(dateOnly + 'T00:00:00')
     return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
   }
 

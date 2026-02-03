@@ -171,7 +171,10 @@ export function EmailConfirmationModal({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Mail className="h-5 w-5" />
-            Order {orders[0]?.orderNumber} Submitted
+            {orderCount > 1
+              ? `${orderCount} Orders Submitted`
+              : `Order ${orders[0]?.orderNumber} Submitted`
+            }
           </DialogTitle>
         </DialogHeader>
 
@@ -187,9 +190,46 @@ export function EmailConfirmationModal({
         ) : recipients && (
           <div className="space-y-6">
             {/* Orders Summary Section */}
-            {orderCount > 1 && (
-              <div className="p-3 bg-blue-50 border border-blue-200 rounded-md text-sm text-blue-800">
-                Your cart was split into {orderCount} orders by collection.
+            {orderCount > 1 ? (
+              <div className="space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  Your cart was split into {orderCount} orders:
+                </p>
+                <div className="border rounded-md overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/50">
+                      <tr>
+                        <th className="text-left px-3 py-2 font-medium">Order</th>
+                        <th className="text-left px-3 py-2 font-medium">Collection</th>
+                        <th className="text-right px-3 py-2 font-medium">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {orders.map((order) => (
+                        <tr key={order.orderId} className="border-t">
+                          <td className="px-3 py-2 font-mono">{order.orderNumber}</td>
+                          <td className="px-3 py-2">{order.collectionName ?? 'Available to Ship'}</td>
+                          <td className="px-3 py-2 text-right">
+                            {currency === 'CAD' ? 'C' : ''}${order.orderAmount.toFixed(2)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Confirmation emails will be sent for each order.
+                </p>
+              </div>
+            ) : (
+              <div className="p-3 bg-muted/30 border rounded-md text-sm">
+                <div className="flex justify-between">
+                  <span className="font-mono">{orders[0]?.orderNumber}</span>
+                  <span>{currency === 'CAD' ? 'C' : ''}${orders[0]?.orderAmount.toFixed(2)}</span>
+                </div>
+                {orders[0]?.collectionName && (
+                  <p className="text-muted-foreground mt-1">{orders[0].collectionName}</p>
+                )}
               </div>
             )}
 

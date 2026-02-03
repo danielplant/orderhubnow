@@ -57,6 +57,13 @@ export default async function MyOrderPage({ searchParams }: Props) {
             shipWindowEnd: true,
           },
         },
+        // Fallback for ATS items without CollectionID
+        CategoryID: true,
+        SkuCategories: {
+          select: {
+            Name: true,
+          },
+        },
       },
     }),
   ])
@@ -72,7 +79,8 @@ export default async function MyOrderPage({ searchParams }: Props) {
         priceUSD: parseFloat(sku.PriceUSD || '0'),
         description: sku.Description || '',
         collectionId: sku.CollectionID ?? null,
-        collectionName: sku.Collection?.name ?? null,
+        // Use Collection name, fallback to Category name for ATS items
+        collectionName: sku.Collection?.name ?? sku.SkuCategories?.Name ?? null,
         shipWindowStart: sku.Collection?.shipWindowStart?.toISOString().slice(0, 10) ?? null,
         shipWindowEnd: sku.Collection?.shipWindowEnd?.toISOString().slice(0, 10) ?? null,
       },

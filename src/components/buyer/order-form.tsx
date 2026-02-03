@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useTransition, useCallback, useRef, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
-import { useForm } from 'react-hook-form'
+import { useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { toast } from 'sonner'
 import { Input } from '@/components/ui/input'
@@ -36,7 +36,7 @@ import type { Currency } from '@/lib/types'
 import type { OrderForEditing } from '@/lib/data/queries/orders'
 import { EmailConfirmationModal, type OrderSummary } from './email-confirmation-modal'
 import { SaveDraftModal, type DraftCustomerInfo } from './save-draft-modal'
-import { OrderPreviewCard, type OrderPreview, type OrderPreviewItem } from './order-preview-card'
+import { OrderDateCard, type OrderDateData, type OrderDateItem } from './order-date-card'
 
 interface OrderFormProps {
   currency: Currency
@@ -121,8 +121,20 @@ export function OrderForm({
   const [showSaveDraftModal, setShowSaveDraftModal] = useState(false)
   const [saveDraftModalKey, setSaveDraftModalKey] = useState(0)
 
-  // Group cart items by collection for order preview
-  const orderPreviews = useMemo<OrderPreview[]>(() => {
+  // Per-order date overrides (for multi-order carts)
+  const [orderDates, setOrderDates] = useState<Map<string, { start: string; end: string }>>(new Map())
+
+  // Handler for per-order date changes
+  const handleOrderDatesChange = useCallback((orderId: string, start: string, end: string) => {
+    setOrderDates(prev => {
+      const next = new Map(prev)
+      next.set(orderId, { start, end })
+      return next
+    })
+  }, [])
+
+  // Group cart items by collection for order preview with editable dates
+  const orderPreviews = useMemo<OrderDateData[]>(() => {
     if (!cartItems.length) return []
 
     const groups = new Map<
@@ -132,7 +144,7 @@ export function OrderForm({
         collectionName: string | null
         shipWindowStart: string | null
         shipWindowEnd: string | null
-        items: OrderPreviewItem[]
+        items: OrderDateItem[]
       }
     >()
 
@@ -162,15 +174,24 @@ export function OrderForm({
       group.shipWindowEnd = group.shipWindowEnd ?? item.shipWindowEnd ?? null
     }
 
-    return Array.from(groups.entries()).map(([key, group]) => ({
-      id: key,
-      collectionId: group.collectionId,
-      collectionName: group.collectionName,
-      shipWindowStart: group.shipWindowStart,
-      shipWindowEnd: group.shipWindowEnd,
-      items: group.items,
-    }))
-  }, [cartItems])
+    return Array.from(groups.entries()).map(([key, group]) => {
+      // Get date override if exists, otherwise use collection defaults
+      const override = orderDates.get(key)
+      const defaultStart = group.shipWindowStart?.split('T')[0] || formatDateForInput(new Date())
+      const defaultEnd = group.shipWindowEnd?.split('T')[0] || formatDateForInput(new Date())
+
+      return {
+        id: key,
+        collectionId: group.collectionId,
+        collectionName: group.collectionName,
+        minAllowedStart: group.shipWindowStart,  // Constraint from collection
+        minAllowedEnd: group.shipWindowEnd,      // Constraint from collection
+        shipStart: override?.start || defaultStart,  // Editable value
+        shipEnd: override?.end || defaultEnd,        // Editable value
+        items: group.items,
+      }
+    })
+  }, [cartItems, orderDates])
 
   // Get pre-order ship window from cart metadata (if available)
   const preOrderWindow = isPreOrder ? getPreOrderShipWindow() : null
@@ -198,6 +219,7 @@ export function OrderForm({
     register,
     handleSubmit,
     setValue,
+    control,
     watch,
     reset,
     formState: { errors },
@@ -255,7 +277,7 @@ export function OrderForm({
   })
 
   // Watch store name for autocomplete
-  const storeNameValue = watch('storeName')
+  const storeNameValue = useWatch({ control, name: 'storeName' })
 
   // Set initial salesRepId for edit mode (Select component doesn't read from defaultValues well)
   useEffect(() => {
@@ -979,34 +1001,36 @@ export function OrderForm({
           <CardTitle>Order Details</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          {/* Ship date inputs */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="shipStartDate">Ship Start Date *</Label>
-              <Input
-                id="shipStartDate"
-                type="date"
-                {...register('shipStartDate')}
-              />
-              {errors.shipStartDate && (
-                <p className="text-sm text-destructive">{errors.shipStartDate.message}</p>
-              )}
-            </div>
+          {/* Single order: show simple date inputs */}
+          {orderPreviews.length <= 1 && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="shipStartDate">Ship Start Date *</Label>
+                <Input
+                  id="shipStartDate"
+                  type="date"
+                  {...register('shipStartDate')}
+                />
+                {errors.shipStartDate && (
+                  <p className="text-sm text-destructive">{errors.shipStartDate.message}</p>
+                )}
+              </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="shipEndDate">Ship End Date *</Label>
-              <Input
-                id="shipEndDate"
-                type="date"
-                {...register('shipEndDate')}
-              />
-              {errors.shipEndDate && (
-                <p className="text-sm text-destructive">{errors.shipEndDate.message}</p>
-              )}
+              <div className="space-y-2">
+                <Label htmlFor="shipEndDate">Ship End Date *</Label>
+                <Input
+                  id="shipEndDate"
+                  type="date"
+                  {...register('shipEndDate')}
+                />
+                {errors.shipEndDate && (
+                  <p className="text-sm text-destructive">{errors.shipEndDate.message}</p>
+                )}
+              </div>
             </div>
-          </div>
+          )}
 
-          {/* Order Preview Cards - show when cart will split into multiple orders */}
+          {/* Multiple orders: show per-order date cards */}
           {orderPreviews.length > 1 && (
             <div className="space-y-3">
               <p className="text-sm text-muted-foreground">
@@ -1014,11 +1038,12 @@ export function OrderForm({
               </p>
               <div className="space-y-4">
                 {orderPreviews.map((order, index) => (
-                  <OrderPreviewCard
+                  <OrderDateCard
                     key={order.id}
                     order={order}
                     index={index}
                     currency={currency}
+                    onDatesChange={handleOrderDatesChange}
                   />
                 ))}
               </div>

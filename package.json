@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
+    "predev": "bash scripts/dev-ensure.sh",
     "dev": "next dev",
     "dev:reset": "bash scripts/dev-reset.sh",
     "build": "next build",

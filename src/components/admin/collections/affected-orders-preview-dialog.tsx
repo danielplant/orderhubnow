@@ -55,14 +55,16 @@ export function AffectedOrdersPreviewDialog({
     }
   }
 
-  const formatDate = (d: string | null) =>
-    d
-      ? new Date(d).toLocaleDateString('en-US', {
-          month: 'short',
-          day: 'numeric',
-          year: 'numeric',
-        })
-      : 'Not set'
+  const formatDate = (d: string | null) => {
+    if (!d) return 'Not set'
+    // Extract date-only part and force local midnight (avoids UTC timezone shift)
+    const dateOnly = d.split('T')[0]
+    return new Date(dateOnly + 'T00:00:00').toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    })
+  }
 
   return (
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
