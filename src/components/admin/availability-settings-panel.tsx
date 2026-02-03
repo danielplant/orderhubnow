@@ -360,6 +360,66 @@ export function AvailabilitySettingsPanel({
 
             <Card className="border-dashed">
               <CardHeader>
+                <CardTitle className="text-base">Export Legend / Footer Text</CardTitle>
+                <CardDescription>
+                  Configure the footer text shown at the bottom of XLSX and PDF exports.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Legend text</label>
+                  <Input
+                    value={settings.legendText}
+                    onChange={(e) => updateSetting('legendText', e.target.value)}
+                    placeholder="Footer text for exports..."
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Show legend when export contains:</div>
+                  <div className="space-y-2 text-sm">
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        id="showLegendAts"
+                        checked={settings.showLegendAts}
+                        onCheckedChange={(val) => updateSetting('showLegendAts', Boolean(val))}
+                      />
+                      <label htmlFor="showLegendAts" className="cursor-pointer">
+                        ATS (in stock) items
+                      </label>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        id="showLegendPreorderIncoming"
+                        checked={settings.showLegendPreorderIncoming}
+                        onCheckedChange={(val) => updateSetting('showLegendPreorderIncoming', Boolean(val))}
+                      />
+                      <label htmlFor="showLegendPreorderIncoming" className="cursor-pointer">
+                        Pre-Order items with incoming PO
+                      </label>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        id="showLegendPreorderNoIncoming"
+                        checked={settings.showLegendPreorderNoIncoming}
+                        onCheckedChange={(val) => updateSetting('showLegendPreorderNoIncoming', Boolean(val))}
+                      />
+                      <label htmlFor="showLegendPreorderNoIncoming" className="cursor-pointer">
+                        Pre-Order items with no inbound PO
+                      </label>
+                    </div>
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    Legend appears at the bottom of XLSX/PDF if ANY item in the export matches a checked scenario.
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <Card className="border-dashed">
+              <CardHeader>
                 <CardTitle className="text-base">Live preview (real SKUs)</CardTitle>
                 <CardDescription>
                   Uses actual data from Shopify sync. {AVAILABILITY_LEGEND_TEXT}

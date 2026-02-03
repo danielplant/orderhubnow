@@ -22,9 +22,29 @@ import { getImageDataUrlByPolicyWithStats } from '@/lib/utils/pdf-images'
 import { type ExportPolicy } from '@/lib/data/queries/export-policy'
 import { getAvailabilitySettings, getIncomingMapForSkus } from '@/lib/data/queries/availability-settings'
 import { computeAvailabilityDisplay, getAvailabilityScenario } from '@/lib/availability/compute'
-import { AVAILABILITY_LEGEND_TEXT } from '@/lib/availability/settings'
 import type { CurrencyMode } from '@/lib/types/export'
 import type { AvailabilitySettingsRecord } from '@/lib/types/availability-settings'
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+interface ScenariosPresent {
+  hasAts: boolean
+  hasPreorderIncoming: boolean
+  hasPreorderNoIncoming: boolean
+}
+
+function shouldShowLegend(
+  scenarios: ScenariosPresent,
+  settings: Pick<AvailabilitySettingsRecord, 'showLegendAts' | 'showLegendPreorderIncoming' | 'showLegendPreorderNoIncoming'>
+): boolean {
+  return (
+    (scenarios.hasAts && settings.showLegendAts) ||
+    (scenarios.hasPreorderIncoming && settings.showLegendPreorderIncoming) ||
+    (scenarios.hasPreorderNoIncoming && settings.showLegendPreorderNoIncoming)
+  )
+}
 
 // ============================================================================
 // Types
@@ -241,6 +261,13 @@ export async function generatePdfExport(
   // -------------------------------------------------------------------------
   await onProgress('querying', 'Grouping and sorting products', 15)
 
+  // Track which scenarios are present for legend display
+  const scenariosPresent = {
+    hasAts: false,
+    hasPreorderIncoming: false,
+    hasPreorderNoIncoming: false,
+  }
+
   const skusWithParsed = rawSkus.map((sku) => {
     const baseSku = getBaseSku(sku.SkuID, sku.Size)
     const size = sku.Size || ''
@@ -248,6 +275,12 @@ export async function generatePdfExport(
     const incoming = incomingEntry?.incoming ?? null
     const committed = incomingEntry?.committed ?? null
     const scenario = getAvailabilityScenario(sku.Collection?.type ?? null, incoming)
+
+    // Track scenario for legend display
+    if (scenario === 'ats') scenariosPresent.hasAts = true
+    else if (scenario === 'preorder_incoming') scenariosPresent.hasPreorderIncoming = true
+    else if (scenario === 'preorder_no_incoming') scenariosPresent.hasPreorderNoIncoming = true
+
     const displayResult = computeAvailabilityDisplay(
       scenario,
       'pdf',
@@ -405,7 +438,9 @@ export async function generatePdfExport(
       availableLabel,
       showOnRoute,
       onRouteLabel,
-      legendText: AVAILABILITY_LEGEND_TEXT,
+      legendText: shouldShowLegend(scenariosPresent, availabilitySettings)
+        ? availabilitySettings.legendText
+        : undefined,
     }
   )
 

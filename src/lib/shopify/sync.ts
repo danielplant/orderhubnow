@@ -1268,7 +1268,21 @@ export async function transformToSkuTable(options?: { skipBackup?: boolean }): P
       console.log(`Created ${newUnmapped} new unmapped entries`)
     }
 
-    // 7. Truncate and bulk insert
+    // 7. Preserve thumbnail metadata before truncate
+    console.log('[Sync] Preserving thumbnail metadata...')
+    const thumbnailData = await prisma.sku.findMany({
+      where: { ThumbnailPath: { not: null } },
+      select: { SkuID: true, CollectionID: true, ThumbnailPath: true, ThumbnailSizes: true }
+    })
+    const thumbnailMap = new Map<string, { path: string; sizes: string | null }>()
+    for (const s of thumbnailData) {
+      // Key by SkuID + CollectionID since SKUs can appear in multiple collections
+      const key = `${s.SkuID}|${s.CollectionID}`
+      thumbnailMap.set(key, { path: s.ThumbnailPath!, sizes: s.ThumbnailSizes })
+    }
+    console.log(`[Sync] Preserved ${thumbnailMap.size} thumbnail references`)
+
+    // 8. Truncate and bulk insert
     await prisma.$executeRawUnsafe('TRUNCATE TABLE Sku')
 
     // Insert in batches
@@ -1278,7 +1292,35 @@ export async function transformToSkuTable(options?: { skipBackup?: boolean }): P
       await prisma.sku.createMany({ data: batch })
     }
 
-    // 9. Remove duplicates (keep first by ID)
+    // 9. Restore thumbnail metadata
+    if (thumbnailMap.size > 0) {
+      console.log('[Sync] Restoring thumbnail metadata...')
+      let restored = 0
+
+      // Batch updates for performance (chunks of 100)
+      const entries = Array.from(thumbnailMap.entries())
+      for (let i = 0; i < entries.length; i += 100) {
+        const batch = entries.slice(i, i + 100)
+
+        await Promise.all(
+          batch.map(async ([key, thumb]) => {
+            const [skuId, collectionIdStr] = key.split('|')
+            const collectionId = parseInt(collectionIdStr)
+
+            const result = await prisma.sku.updateMany({
+              where: { SkuID: skuId, CollectionID: collectionId },
+              data: { ThumbnailPath: thumb.path, ThumbnailSizes: thumb.sizes }
+            })
+
+            if (result.count > 0) restored++
+          })
+        )
+      }
+
+      console.log(`[Sync] Restored ${restored} thumbnail references`)
+    }
+
+    // 10. Remove duplicates (keep first by ID)
     await prisma.$executeRawUnsafe(`
       WITH CTE AS (
         SELECT *, ROW_NUMBER() OVER (PARTITION BY SkuID, CollectionID ORDER BY ID DESC) AS rn FROM Sku
@@ -1289,7 +1331,7 @@ export async function transformToSkuTable(options?: { skipBackup?: boolean }): P
     const count = await prisma.sku.count()
     console.log(`Transform complete: ${count} SKUs`)
 
-    // 10. Populate MissingShopifySkus - SKUs in Raw that didn't make it to Sku
+    // 11. Populate MissingShopifySkus - SKUs in Raw that didn't make it to Sku
     // These are products with inventory but missing required metafields (pricing, collection mapping)
     console.log('Detecting missing SKUs...')
 

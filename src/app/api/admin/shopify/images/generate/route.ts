@@ -12,8 +12,10 @@ import {
   generateThumbnailCacheKey,
   generateThumbnailsByPixelSize,
   uploadThumbnailsByPixelSize,
+  getThumbnailS3KeyByPixel,
   type PixelSizeConfig,
 } from '@/lib/utils/thumbnails'
+import { existsInS3 } from '@/lib/s3'
 
 /**
  * POST /api/admin/shopify/images/generate
@@ -203,6 +205,30 @@ async function processThumbsInBackground(
               settingsVersion
             )
 
+            // Check if S3 already has thumbnails (recovery path)
+            // This handles the case where DB reference was lost but S3 files still exist
+            const firstSize = pixelSizes[0]
+            const s3Key = getThumbnailS3KeyByPixel(cacheKey, firstSize)
+            const alreadyInS3 = await existsInS3(s3Key)
+
+            if (alreadyInS3) {
+              // Files exist in S3, just restore DB reference (no re-upload needed)
+              const existingSizes = sku.ThumbnailSizes
+                ? sku.ThumbnailSizes.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n))
+                : []
+              const allSizes = [...new Set([...existingSizes, ...pixelSizes])].sort((a, b) => a - b)
+
+              await prisma.sku.update({
+                where: { ID: sku.ID },
+                data: {
+                  ThumbnailPath: cacheKey,
+                  ThumbnailSizes: allSizes.join(','),
+                },
+              })
+
+              return { skuId: sku.SkuID, status: 'recovered' as const, cacheKey }
+            }
+
             // Generate thumbnails using pixel-based function
             const buffers = await generateThumbnailsByPixelSize(
               sku.ShopifyImageURL,
@@ -245,6 +271,7 @@ async function processThumbsInBackground(
       // Update counts
       for (const r of results) {
         if (r.status === 'generated') processedCount++
+        else if (r.status === 'recovered') processedCount++ // Count as processed (S3 recovery)
         else if (r.status === 'skipped') skippedCount++
         else failedCount++
       }

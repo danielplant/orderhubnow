@@ -43,6 +43,7 @@ import { CollectionSelector, type CollectionFilterMode } from '@/components/admi
 import { MoreHorizontal, Download, Upload, ChevronDown, FileSpreadsheet, FileText } from 'lucide-react'
 import { ColumnVisibilityToggle, type ColumnConfig } from '@/components/admin/column-visibility-toggle'
 import { ExportProgress } from '@/components/admin/export-progress'
+import { ShopifyInventoryPopover } from '@/components/ui/shopify-inventory-popover'
 
 // ============================================================================
 // Column Visibility Constants
@@ -505,7 +506,9 @@ export function ProductsTable({
           </div>
         ),
         cell: (r) => (
-          <span className="text-right tabular-nums font-medium">{r.availableDisplay}</span>
+          <ShopifyInventoryPopover sku={r.skuId}>
+            {r.availableDisplay}
+          </ShopifyInventoryPopover>
         ),
       },
       {

@@ -25,7 +25,6 @@ import {
 import { type ExportPolicy } from '@/lib/data/queries/export-policy'
 import { getAvailabilitySettings, getIncomingMapForSkus } from '@/lib/data/queries/availability-settings'
 import { computeAvailabilityDisplay, getAvailabilityScenario } from '@/lib/availability/compute'
-import { AVAILABILITY_LEGEND_TEXT } from '@/lib/availability/settings'
 import { fetchThumbnailForExport } from './thumbnail-fetcher'
 import type { CurrencyMode } from '@/lib/types/export'
 import type { AvailabilityDisplayResult, AvailabilitySettingsRecord } from '@/lib/types/availability-settings'
@@ -338,6 +337,13 @@ export async function generateXlsxExport(
   const firstRowSkus = skus.filter((s) => s.isFirstInGroup)
   const totalImages = firstRowSkus.length
 
+  // Track which scenarios are present for legend display
+  const scenariosPresent = {
+    hasAts: false,
+    hasPreorderIncoming: false,
+    hasPreorderNoIncoming: false,
+  }
+
   for (let i = 0; i < skus.length; i++) {
     const sku = skus[i]
     const rowIndex = i + 2
@@ -360,6 +366,12 @@ export async function generateXlsxExport(
     const incoming = incomingEntry?.incoming ?? null
     const committed = incomingEntry?.committed ?? null
     const scenario = getAvailabilityScenario(sku.Collection?.type ?? null, incoming)
+
+    // Track scenario for legend display
+    if (scenario === 'ats') scenariosPresent.hasAts = true
+    else if (scenario === 'preorder_incoming') scenariosPresent.hasPreorderIncoming = true
+    else if (scenario === 'preorder_no_incoming') scenariosPresent.hasPreorderNoIncoming = true
+
     const availableResult = computeAvailabilityDisplay(
       scenario,
       'xlsx',
@@ -499,13 +511,20 @@ export async function generateXlsxExport(
     }
   }
 
-  // Legend / footnote row
-  const legendRow = sheet.addRow([AVAILABILITY_LEGEND_TEXT])
-  legendRow.font = { name: 'Arial', size: 9, italic: true, color: { argb: 'FF6B7280' } }
-  legendRow.alignment = { vertical: 'middle' }
-  legendRow.height = 18
-  if (exportColumns.length > 1) {
-    sheet.mergeCells(legendRow.number, 1, legendRow.number, exportColumns.length)
+  // Legend / footnote row - only show if any matching scenario is checked
+  const showLegend =
+    (scenariosPresent.hasAts && availabilitySettings.showLegendAts) ||
+    (scenariosPresent.hasPreorderIncoming && availabilitySettings.showLegendPreorderIncoming) ||
+    (scenariosPresent.hasPreorderNoIncoming && availabilitySettings.showLegendPreorderNoIncoming)
+
+  if (showLegend && availabilitySettings.legendText) {
+    const legendRow = sheet.addRow([availabilitySettings.legendText])
+    legendRow.font = { name: 'Arial', size: 9, italic: true, color: { argb: 'FF6B7280' } }
+    legendRow.alignment = { vertical: 'middle' }
+    legendRow.height = 18
+    if (exportColumns.length > 1) {
+      sheet.mergeCells(legendRow.number, 1, legendRow.number, exportColumns.length)
+    }
   }
 
   // -------------------------------------------------------------------------
