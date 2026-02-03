@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils'
 
 export interface InlineEditProps {
   value: string | number
+  displayValue?: string
   type: 'text' | 'number' | 'date'
   onSave: (newValue: string) => Promise<void>
   disabled?: boolean
@@ -14,26 +15,31 @@ export interface InlineEditProps {
 
 export function InlineEdit({
   value,
+  displayValue,
   type,
   onSave,
   disabled,
   placeholder,
   className,
 }: InlineEditProps) {
-  const display = useMemo(() => (value ?? '').toString(), [value])
+  const rawValue = useMemo(() => (value ?? '').toString(), [value])
+  const display = useMemo(
+    () => (displayValue ?? rawValue),
+    [displayValue, rawValue]
+  )
 
   const [editing, setEditing] = useState(false)
-  const [localValue, setLocalValue] = useState(display)
+  const [localValue, setLocalValue] = useState(rawValue)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!editing) setLocalValue(display)
-  }, [display, editing])
+    if (!editing) setLocalValue(rawValue)
+  }, [rawValue, editing])
 
   async function commit() {
     if (disabled) return
-    if (localValue === display) {
+    if (localValue === rawValue) {
       setEditing(false)
       return
     }

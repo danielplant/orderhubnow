@@ -1,0 +1,85 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy to Production
+    runs-on: [self-hosted, Linux, X64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Validate required secrets
+        env:
+          PROD_DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
+          PROD_SSH_HOST: ${{ secrets.PROD_SSH_HOST }}
+          PROD_SSH_USER: ${{ secrets.PROD_SSH_USER }}
+          PROD_SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
+          PROD_DEPLOY_DIR: ${{ secrets.PROD_DEPLOY_DIR }}
+        run: |
+          missing=()
+          [ -z "$PROD_DATABASE_URL" ] && missing+=("PROD_DATABASE_URL")
+          [ -z "$PROD_SSH_HOST" ] && missing+=("PROD_SSH_HOST")
+          [ -z "$PROD_SSH_USER" ] && missing+=("PROD_SSH_USER")
+          [ -z "$PROD_SSH_KEY" ] && missing+=("PROD_SSH_KEY")
+          [ -z "$PROD_DEPLOY_DIR" ] && missing+=("PROD_DEPLOY_DIR")
+          if [ ${#missing[@]} -ne 0 ]; then
+            echo "Missing required secrets: ${missing[*]}"
+            exit 1
+          fi
+          echo "All secrets present"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Run database migrations
+        env:
+          DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
+        run: npx prisma migrate deploy
+
+      - name: Build application
+        env:
+          DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
+        run: npm run build
+
+      - name: Stamp build commit
+        run: echo "${GITHUB_SHA}" > .next/BUILD_COMMIT
+
+      - name: Set up SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.PROD_SSH_KEY }}
+
+      - name: Add host key
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H "${{ secrets.PROD_SSH_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Deploy to server
+        env:
+          HOST: ${{ secrets.PROD_SSH_HOST }}
+          USER: ${{ secrets.PROD_SSH_USER }}
+          APP_DIR: ${{ secrets.PROD_DEPLOY_DIR }}
+        run: |
+          ssh "${USER}@${HOST}" "cd ${APP_DIR} && git fetch origin main && git reset --hard origin/main"
+          rsync -avz --delete \
+            --exclude='/dev/' \
+            --exclude='/cache/' \
+            --exclude='trace' \
+            --exclude='trace-build' \
+            .next/ "${USER}@${HOST}:${APP_DIR}/.next/"
+          ssh "${USER}@${HOST}" "cd ${APP_DIR} && npm ci --omit=dev --ignore-scripts && npx prisma generate && pm2 restart orderhubnow"
+
+      - name: Deployment complete
+        run: echo "Successfully deployed to production"

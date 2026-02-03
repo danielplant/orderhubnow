@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FeatureSpec",
+  "type": "object",
+  "required": ["title", "description", "acceptanceCriteria"],
+  "properties": {
+    "title": {"type": "string"},
+    "description": {"type": "string"},
+    "userStories": {"type": "array", "items": {"type": "string"}},
+    "nonGoals": {"type": "array", "items": {"type": "string"}},
+    "acceptanceCriteria": {"type": "array", "items": {"type": "string"}},
+    "risks": {"type": "array", "items": {"type": "string"}},
+    "migrationExpected": {"type": "boolean"}
+  }
+}

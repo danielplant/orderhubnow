@@ -28,6 +28,7 @@ export interface ProductVariant {
   sku: string;
   available: number;
   onRoute: number;
+  availableDisplay: string;
   priceCad: number;
   priceUsd: number;
   status?: VariantStatus;

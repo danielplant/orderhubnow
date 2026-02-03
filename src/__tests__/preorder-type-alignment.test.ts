@@ -12,6 +12,7 @@
 
 import { describe, it, expect } from 'vitest'
 import type { Product, ProductVariant } from '@/lib/types/inventory'
+import { buildVariant } from '@/lib/types/build-variant'
 
 // ============================================================================
 // Type Structure Tests
@@ -42,14 +43,14 @@ describe('Product Type Structure', () => {
   })
 
   it('should have variants with onRoute field', () => {
-    const variant: ProductVariant = {
+    const variant: ProductVariant = buildVariant({
       sku: '582P-DO-6',
       size: '6',
       available: 5,
       onRoute: 10,
       priceCad: 11.50,
       priceUsd: 9.50,
-    }
+    })
 
     expect(variant.available).toBeDefined()
     expect(variant.onRoute).toBeDefined()
@@ -117,37 +118,37 @@ describe('PreOrder to Product Field Mapping', () => {
 
 describe('ProductVariant Structure for PreOrder', () => {
   it('should include onRoute field for PreOrder display', () => {
-    const variant: ProductVariant = {
+    const variant: ProductVariant = buildVariant({
       sku: '582P-DO-6',
       size: '6',
       available: 0,
       onRoute: 15,
       priceCad: 11.50,
       priceUsd: 9.50,
-    }
+    })
 
     // PreOrder can order against onRoute when available is 0
     expect(variant.onRoute).toBeGreaterThan(0)
   })
 
   it('should have same structure as ATS variants', () => {
-    const atsVariant: ProductVariant = {
+    const atsVariant: ProductVariant = buildVariant({
       sku: 'ATS-001-M',
       size: 'M',
       available: 10,
       onRoute: 5,
       priceCad: 29.99,
       priceUsd: 24.99,
-    }
+    })
 
-    const preOrderVariant: ProductVariant = {
+    const preOrderVariant: ProductVariant = buildVariant({
       sku: 'PRE-001-M',
       size: 'M',
       available: 0,
       onRoute: 20,
       priceCad: 29.99,
       priceUsd: 24.99,
-    }
+    })
 
     // Both should have the exact same shape
     expect(Object.keys(atsVariant).sort()).toEqual(Object.keys(preOrderVariant).sort())
@@ -184,7 +185,7 @@ describe('Unified ProductOrderCard Compatibility', () => {
       msrpUsd: 21.00,
       imageUrl: 'https://example.com/image.jpg',
       variants: [
-        { sku: '582P-DO-6', size: '6', available: 5, onRoute: 10, priceCad: 11.50, priceUsd: 9.50 },
+        buildVariant({ sku: '582P-DO-6', size: '6', available: 5, onRoute: 10, priceCad: 11.50, priceUsd: 9.50 }),
       ],
     }
 
@@ -208,8 +209,8 @@ describe('Unified ProductOrderCard Compatibility', () => {
       msrpUsd: 39.99,
       imageUrl: 'https://example.com/future.jpg',
       variants: [
-        { sku: '999P-XX-S', size: 'S', available: 0, onRoute: 50, priceCad: 24.99, priceUsd: 19.99 },
-        { sku: '999P-XX-M', size: 'M', available: 0, onRoute: 75, priceCad: 24.99, priceUsd: 19.99 },
+        buildVariant({ sku: '999P-XX-S', size: 'S', available: 0, onRoute: 50, priceCad: 24.99, priceUsd: 19.99 }),
+        buildVariant({ sku: '999P-XX-M', size: 'M', available: 0, onRoute: 75, priceCad: 24.99, priceUsd: 19.99 }),
       ],
     }
 
@@ -232,7 +233,7 @@ describe('Unified ProductOrderCard Compatibility', () => {
       msrpCad: 20,
       msrpUsd: 16,
       imageUrl: '',
-      variants: [{ sku: 'A', size: 'M', available: 5, onRoute: 0, priceCad: 10, priceUsd: 8 }],
+      variants: [buildVariant({ sku: 'A', size: 'M', available: 5, onRoute: 0, priceCad: 10, priceUsd: 8 })],
     }
 
     const preOrderProduct: Product = {
@@ -247,7 +248,7 @@ describe('Unified ProductOrderCard Compatibility', () => {
       msrpCad: 30,
       msrpUsd: 24,
       imageUrl: '',
-      variants: [{ sku: 'B', size: 'L', available: 0, onRoute: 20, priceCad: 15, priceUsd: 12 }],
+      variants: [buildVariant({ sku: 'B', size: 'L', available: 0, onRoute: 20, priceCad: 15, priceUsd: 12 })],
     }
 
     // Both should use the exact same function/component

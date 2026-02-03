@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Task",
+  "type": "object",
+  "required": ["id", "title", "owner", "branchSuffix", "status", "scope"],
+  "properties": {
+    "id": {"type": "string"},
+    "title": {"type": "string"},
+    "owner": {"type": "string", "enum": ["master", "ui", "db", "infra", "api", "tests"]},
+    "branchSuffix": {"type": "string"},
+    "status": {"type": "string", "enum": ["todo", "in_progress", "done", "blocked"]},
+    "scope": {"type": "string"},
+    "filesLikelyTouched": {"type": "array", "items": {"type": "string"}},
+    "notes": {"type": "string"}
+  }
+}
