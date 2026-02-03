@@ -1,13 +1,12 @@
 'use client'
 
-import { useState, useEffect, useTransition, useCallback, useRef } from 'react'
+import { useState, useEffect, useTransition, useCallback, useRef, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
-import { useForm } from 'react-hook-form'
+import { useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { toast } from 'sonner'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Checkbox } from '@/components/ui/checkbox'
 import { Button } from '@/components/ui/button'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import {
@@ -35,22 +34,9 @@ import { formatCurrency } from '@/lib/utils'
 import { isValidPortalReturn } from '@/lib/utils/rep-context'
 import type { Currency } from '@/lib/types'
 import type { OrderForEditing } from '@/lib/data/queries/orders'
-import { EmailConfirmationModal, type ShipmentSummary } from './email-confirmation-modal'
+import { EmailConfirmationModal, type OrderSummary } from './email-confirmation-modal'
 import { SaveDraftModal, type DraftCustomerInfo } from './save-draft-modal'
-import { ShipmentDateCard } from './shipment-date-card'
-import type { CartPlannedShipment } from '@/lib/types/planned-shipment'
-
-function formatShortDate(isoDate: string): string {
-  const [year, month, day] = isoDate.split('T')[0].split('-').map(Number)
-  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-  return `${monthNames[month - 1]} ${day} '${String(year).slice(-2)}`
-}
-
-function formatDateNoYear(isoDate: string): string {
-  const [, month, day] = isoDate.split('T')[0].split('-').map(Number)
-  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-  return `${monthNames[month - 1]} ${day}`
-}
+import { OrderDateCard, type OrderDateData, type OrderDateItem } from './order-date-card'
 
 interface OrderFormProps {
   currency: Currency
@@ -76,14 +62,6 @@ interface OrderFormProps {
   repName?: string | null
   // Items missing CollectionID - blocks checkout
   itemsMissingCollection?: Array<{ sku: string; description: string }>
-  // Planned shipments with per-shipment dates
-  plannedShipments?: CartPlannedShipment[]
-  onShipmentDatesChange?: (shipmentId: string, start: string, end: string) => void
-  shipmentValidationErrors?: Map<string, { start?: string; end?: string }>
-  hasShipmentValidationErrors?: boolean
-  // PR-3b: Combine/split handlers
-  onCombineShipments?: (shipmentIds: string[]) => string
-  onSplitShipment?: (combinedId: string) => void
 }
 
 // Helper to format date as YYYY-MM-DD for input[type="date"]
@@ -116,13 +94,6 @@ export function OrderForm({
   repContext = null,
   repName = null,
   itemsMissingCollection = [],
-  plannedShipments = [],
-  onShipmentDatesChange,
-  shipmentValidationErrors = new Map(),
-  hasShipmentValidationErrors = false,
-  // PR-3b: Combine/split handlers
-  onCombineShipments,
-  onSplitShipment,
 }: OrderFormProps) {
   const router = useRouter()
   const { clearDraft, clearEditMode, getPreOrderShipWindow, formData: draftFormData, setFormData, isLoadingDraft, saveDraftToServer, totalItems } = useOrder()
@@ -144,40 +115,83 @@ export function OrderForm({
 
   // Email confirmation modal state
   const [showEmailModal, setShowEmailModal] = useState(false)
-  const [submittedShipments, setSubmittedShipments] = useState<ShipmentSummary[]>([])
+  const [submittedShipments, setSubmittedShipments] = useState<OrderSummary[]>([])
 
   // Save Draft modal state
   const [showSaveDraftModal, setShowSaveDraftModal] = useState(false)
   const [saveDraftModalKey, setSaveDraftModalKey] = useState(0)
 
-  // Determine if multi-shipment UI should be used (enabled in both new and edit modes)
-  // Also true for combined shipments (single shipment with isCombined flag)
-  const useMultiShipmentUI = plannedShipments.length > 1 || plannedShipments.some(s => s.isCombined)
+  // Per-order date overrides (for multi-order carts)
+  const [orderDates, setOrderDates] = useState<Map<string, { start: string; end: string }>>(new Map())
 
-  // Override confirmation state - allows submission despite validation errors
-  const [overrideConfirmed, setOverrideConfirmed] = useState(false)
+  // Handler for per-order date changes
+  const handleOrderDatesChange = useCallback((orderId: string, start: string, end: string) => {
+    setOrderDates(prev => {
+      const next = new Map(prev)
+      next.set(orderId, { start, end })
+      return next
+    })
+  }, [])
 
-  // Reset override when validation errors are resolved
-  useEffect(() => {
-    if (!hasShipmentValidationErrors) {
-      setOverrideConfirmed(false)
+  // Group cart items by collection for order preview with editable dates
+  const orderPreviews = useMemo<OrderDateData[]>(() => {
+    if (!cartItems.length) return []
+
+    const groups = new Map<
+      string,
+      {
+        collectionId: number | null
+        collectionName: string | null
+        shipWindowStart: string | null
+        shipWindowEnd: string | null
+        items: OrderDateItem[]
+      }
+    >()
+
+    for (const item of cartItems) {
+      const key = item.collectionId ? `collection-${item.collectionId}` : 'default'
+
+      if (!groups.has(key)) {
+        groups.set(key, {
+          collectionId: item.collectionId ?? null,
+          collectionName: item.collectionName ?? null,
+          shipWindowStart: item.shipWindowStart ?? null,
+          shipWindowEnd: item.shipWindowEnd ?? null,
+          items: [],
+        })
+      }
+
+      const group = groups.get(key)!
+      group.items.push({
+        sku: item.sku,
+        description: item.description,
+        quantity: item.quantity,
+        price: item.price,
+      })
+
+      // Keep first non-null ship windows for display
+      group.shipWindowStart = group.shipWindowStart ?? item.shipWindowStart ?? null
+      group.shipWindowEnd = group.shipWindowEnd ?? item.shipWindowEnd ?? null
     }
-  }, [hasShipmentValidationErrors])
 
-  // Calculate legacy dates from planned shipments (for backward compat)
-  const getLegacyDatesFromShipments = useCallback(() => {
-    if (plannedShipments.length === 0) {
-      return { shipStartDate: '', shipEndDate: '' }
-    }
+    return Array.from(groups.entries()).map(([key, group]) => {
+      // Get date override if exists, otherwise use collection defaults
+      const override = orderDates.get(key)
+      const defaultStart = group.shipWindowStart?.split('T')[0] || formatDateForInput(new Date())
+      const defaultEnd = group.shipWindowEnd?.split('T')[0] || formatDateForInput(new Date())
 
-    const allStarts = plannedShipments.map((s) => s.plannedShipStart).sort()
-    const allEnds = plannedShipments.map((s) => s.plannedShipEnd).sort()
-
-    return {
-      shipStartDate: allStarts[0], // Earliest start
-      shipEndDate: allEnds[allEnds.length - 1], // Latest end
-    }
-  }, [plannedShipments])
+      return {
+        id: key,
+        collectionId: group.collectionId,
+        collectionName: group.collectionName,
+        minAllowedStart: group.shipWindowStart,  // Constraint from collection
+        minAllowedEnd: group.shipWindowEnd,      // Constraint from collection
+        shipStart: override?.start || defaultStart,  // Editable value
+        shipEnd: override?.end || defaultEnd,        // Editable value
+        items: group.items,
+      }
+    })
+  }, [cartItems, orderDates])
 
   // Get pre-order ship window from cart metadata (if available)
   const preOrderWindow = isPreOrder ? getPreOrderShipWindow() : null
@@ -205,6 +219,7 @@ export function OrderForm({
     register,
     handleSubmit,
     setValue,
+    control,
     watch,
     reset,
     formState: { errors },
@@ -262,7 +277,7 @@ export function OrderForm({
   })
 
   // Watch store name for autocomplete
-  const storeNameValue = watch('storeName')
+  const storeNameValue = useWatch({ control, name: 'storeName' })
 
   // Set initial salesRepId for edit mode (Select component doesn't read from defaultValues well)
   useEffect(() => {
@@ -278,16 +293,6 @@ export function OrderForm({
       setIsRepLocked(true)
     }
   }, [repContext, setValue])
-
-  // Sync hidden form fields for multi-shipment to pass validation
-  // (these values aren't shown to user but satisfy schema requirements)
-  useEffect(() => {
-    if (useMultiShipmentUI && plannedShipments.length > 0) {
-      const legacyDates = getLegacyDatesFromShipments()
-      setValue('shipStartDate', legacyDates.shipStartDate, { shouldValidate: false })
-      setValue('shipEndDate', legacyDates.shipEndDate, { shouldValidate: false })
-    }
-  }, [useMultiShipmentUI, plannedShipments, setValue, getLegacyDatesFromShipments])
 
   // Initialize form from draft data when it changes (e.g., loading a shared draft)
   useEffect(() => {
@@ -493,13 +498,6 @@ export function OrderForm({
 
   const onSubmit = async (data: OrderFormData) => {
     if (isSubmitting) return // Prevent double-click
-
-    // Block submit if there are shipment validation errors (unless override confirmed)
-    if (hasShipmentValidationErrors && !overrideConfirmed) {
-      toast.error('Please fix ship date errors or check override to continue')
-      return
-    }
-
     setIsSubmitting(true)
 
     startTransition(async () => {
@@ -525,16 +523,6 @@ export function OrderForm({
               quantity: item.quantity,
               price: item.price,
             })),
-            // Phase 5: Sync planned shipments during edit
-            plannedShipments: plannedShipments.map((s) => ({
-              id: s.id,
-              collectionId: s.collectionId,
-              collectionName: s.collectionName,
-              plannedShipStart: s.plannedShipStart,
-              plannedShipEnd: s.plannedShipEnd,
-              itemSkus: s.itemIds,
-              allowOverride: hasShipmentValidationErrors && overrideConfirmed,
-            })),
           })
 
           if (result.success) {
@@ -546,31 +534,9 @@ export function OrderForm({
             setIsSubmitting(false)
           }
         } else {
-          // Create new order with customerId for strong ownership
-          // Skip automatic email - show confirmation popup instead
-          // Uses Collection data for order splitting by delivery date
-
-          // Build final shipments with correct date source
-          const finalPlannedShipments = useMultiShipmentUI
-            ? plannedShipments  // Multi: dates from context
-            : plannedShipments.map((s) => ({
-                ...s,
-                plannedShipStart: data.shipStartDate,  // Single: dates from form
-                plannedShipEnd: data.shipEndDate,
-              }))
-
-          // Calculate legacy dates for backward compatibility
-          const legacyDates = getLegacyDatesFromShipments()
-
+          // Create new order - server splits by collection automatically
           const result = await createOrder({
             ...data,
-            // Legacy dates: single shipment uses form, multiple uses calculated
-            shipStartDate: useMultiShipmentUI
-              ? legacyDates.shipStartDate
-              : data.shipStartDate,
-            shipEndDate: useMultiShipmentUI
-              ? legacyDates.shipEndDate
-              : data.shipEndDate,
             currency,
             items: cartItems.map((item) => ({
               sku: item.sku,
@@ -582,36 +548,22 @@ export function OrderForm({
               shipWindowStart: item.shipWindowStart,
               shipWindowEnd: item.shipWindowEnd,
             })),
-            isPreOrder, // P prefix for pre-orders, A prefix for ATS
-            customerId: selectedCustomerId, // Pass selected customer ID for strong ownership
-            skipEmail: true, // Emails will be sent via confirmation popup
-            // Include planned shipments for Phase 3 server-side processing
-            plannedShipments: finalPlannedShipments.map((s) => ({
-              id: s.id,
-              collectionId: s.collectionId,
-              collectionName: s.collectionName,
-              itemSkus: s.itemIds,
-              plannedShipStart: s.plannedShipStart,
-              plannedShipEnd: s.plannedShipEnd,
-              allowOverride: hasShipmentValidationErrors && overrideConfirmed,
-            })),
+            isPreOrder,
+            customerId: selectedCustomerId,
+            skipEmail: true,
           })
 
           if (result.success && result.orders?.length) {
-            // Store shipment summaries for the modal
+            // Store order summaries for the modal (orders[] is the canonical return)
             setSubmittedShipments(result.orders.map((o) => ({
               orderId: o.orderId,
               orderNumber: o.orderNumber,
               collectionName: o.collectionName,
               shipWindowStart: o.shipWindowStart,
               shipWindowEnd: o.shipWindowEnd,
-              orderAmount: o.orderAmount,
+              orderAmount: o.orderAmount ?? orderTotal,
             })))
-            
-            // NOTE: Do NOT call clearDraft() here - it empties the cart and triggers redirect
-            // clearDraft() is called in handleEmailConfirm/handleEmailSkip after modal interaction
-            
-            // Show email confirmation popup
+
             setShowEmailModal(true)
           } else if (result.success && result.orderId) {
             // Backwards compatibility: single order without orders array
@@ -645,13 +597,13 @@ export function OrderForm({
   // Handle email confirmation modal actions
   const handleEmailConfirm = async () => {
     setShowEmailModal(false)
-    
+
     // Show success message
     const orderNumber = submittedShipments[0]?.orderNumber
-    const shipmentCount = submittedShipments.length
-    
-    if (shipmentCount > 1) {
-      toast.success(`Order ${orderNumber} created with ${shipmentCount} shipments!`)
+    const orderCount = submittedShipments.length
+
+    if (orderCount > 1) {
+      toast.success(`${orderCount} orders created successfully!`)
     } else {
       toast.success(`Order ${orderNumber} created successfully!`)
     }
@@ -670,13 +622,13 @@ export function OrderForm({
 
   const handleEmailSkip = async () => {
     setShowEmailModal(false)
-    
+
     // Show success message
     const orderNumber = submittedShipments[0]?.orderNumber
-    const shipmentCount = submittedShipments.length
-    
-    if (shipmentCount > 1) {
-      toast.success(`Order ${orderNumber} created with ${shipmentCount} shipments (emails skipped)`)
+    const orderCount = submittedShipments.length
+
+    if (orderCount > 1) {
+      toast.success(`${orderCount} orders created (emails skipped)`)
     } else {
       toast.success(`Order ${orderNumber} created (emails skipped)`)
     }
@@ -1049,8 +1001,8 @@ export function OrderForm({
           <CardTitle>Order Details</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          {/* SINGLE SHIPMENT: Simple inline dates (1 shipment only, and not combined) */}
-          {plannedShipments.length <= 1 && !plannedShipments.some(s => s.isCombined) && (
+          {/* Single order: show simple date inputs */}
+          {orderPreviews.length <= 1 && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="shipStartDate">Ship Start Date *</Label>
@@ -1058,13 +1010,7 @@ export function OrderForm({
                   id="shipStartDate"
                   type="date"
                   {...register('shipStartDate')}
-                  min={plannedShipments[0]?.minAllowedStart ?? undefined}
                 />
-                {plannedShipments[0]?.minAllowedStart && (
-                  <p className="text-xs text-muted-foreground">
-                    Cannot be prior to {formatDateNoYear(plannedShipments[0].minAllowedStart)}
-                  </p>
-                )}
                 {errors.shipStartDate && (
                   <p className="text-sm text-destructive">{errors.shipStartDate.message}</p>
                 )}
@@ -1076,13 +1022,7 @@ export function OrderForm({
                   id="shipEndDate"
                   type="date"
                   {...register('shipEndDate')}
-                  min={plannedShipments[0]?.minAllowedEnd ?? undefined}
                 />
-                {plannedShipments[0]?.minAllowedEnd && (
-                  <p className="text-xs text-muted-foreground">
-                    Cannot be prior to {formatDateNoYear(plannedShipments[0].minAllowedEnd)}
-                  </p>
-                )}
                 {errors.shipEndDate && (
                   <p className="text-sm text-destructive">{errors.shipEndDate.message}</p>
                 )}
@@ -1090,55 +1030,23 @@ export function OrderForm({
             </div>
           )}
 
-          {/* MULTIPLE SHIPMENTS: Card per shipment (works in both new and edit modes) */}
-          {/* Also show when combined shipments exist so user can split them */}
-          {(plannedShipments.length > 1 || plannedShipments.some(s => s.isCombined)) && (
-            <div className="space-y-4">
+          {/* Multiple orders: show per-order date cards */}
+          {orderPreviews.length > 1 && (
+            <div className="space-y-3">
               <p className="text-sm text-muted-foreground">
-                Set delivery dates for each shipment:
+                Your cart will split into {orderPreviews.length} orders:
               </p>
-              {plannedShipments.map((shipment, index) => (
-                <ShipmentDateCard
-                  key={shipment.id}
-                  shipment={shipment}
-                  index={index}
-                  cartItems={cartItems.filter((item) =>
-                    shipment.itemIds.includes(item.sku)
-                  )}
-                  currency={currency}
-                  onDatesChange={(start, end) =>
-                    onShipmentDatesChange?.(shipment.id, start, end)
-                  }
-                  externalErrors={shipmentValidationErrors.get(shipment.id)}
-                  // PR-3b: Combine/split props
-                  canCombineWith={shipment.canCombineWith}
-                  isCombined={shipment.isCombined}
-                  onCombine={(targetId) => onCombineShipments?.([shipment.id, targetId])}
-                  onSplit={() => onSplitShipment?.(shipment.id)}
-                  allShipments={plannedShipments}
-                />
-              ))}
-
-              {/* Validation error summary with override option */}
-              {hasShipmentValidationErrors && (
-                <div className="p-3 bg-amber-50 border border-amber-200 rounded-md space-y-2">
-                  <p className="text-sm text-amber-800 font-medium">
-                    Ship dates are outside collection windows
-                  </p>
-                  {/* Override checkbox commented out per Devika - to be re-enabled for reps only
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      id="override-dates"
-                      checked={overrideConfirmed}
-                      onCheckedChange={(checked) => setOverrideConfirmed(checked === true)}
-                    />
-                    <Label htmlFor="override-dates" className="text-sm text-amber-800">
-                      Override and submit anyway
-                    </Label>
-                  </div>
-                  */}
-                </div>
-              )}
+              <div className="space-y-4">
+                {orderPreviews.map((order, index) => (
+                  <OrderDateCard
+                    key={order.id}
+                    order={order}
+                    index={index}
+                    currency={currency}
+                    onDatesChange={handleOrderDatesChange}
+                  />
+                ))}
+              </div>
             </div>
           )}
 
@@ -1246,7 +1154,7 @@ export function OrderForm({
     <EmailConfirmationModal
       open={showEmailModal}
       onOpenChange={setShowEmailModal}
-      shipments={submittedShipments}
+      orders={submittedShipments}
       currency={currency}
       onConfirm={handleEmailConfirm}
       onSkip={handleEmailSkip}

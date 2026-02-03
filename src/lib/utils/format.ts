@@ -10,12 +10,25 @@
 // =============================================================================
 
 /**
+ * Parse a date string as local midnight to avoid timezone shift.
+ * "2026-01-20" → Jan 20 local time (not Jan 19 due to UTC interpretation)
+ */
+function parseLocalDate(date: Date | string): Date {
+  if (date instanceof Date) return date
+  // For date-only strings, append T00:00:00 to force local midnight
+  // This prevents "2026-01-20" from being interpreted as UTC midnight
+  // If string already has 'T', extract just the date part first
+  const dateOnly = date.split('T')[0]
+  return new Date(dateOnly + 'T00:00:00')
+}
+
+/**
  * Format a date as a short date string (e.g., "1/15/2026")
  * Uses en-US locale for consistent server/client rendering.
  */
 export function formatDate(date: Date | string | null | undefined): string {
   if (!date) return '—'
-  const d = typeof date === 'string' ? new Date(date) : date
+  const d = parseLocalDate(date)
   if (isNaN(d.getTime())) return '—'
   return d.toLocaleDateString('en-US')
 }
@@ -26,9 +39,13 @@ export function formatDate(date: Date | string | null | undefined): string {
  */
 export function formatDateISO(date: Date | string | null | undefined): string {
   if (!date) return '—'
-  const d = typeof date === 'string' ? new Date(date) : date
+  const d = parseLocalDate(date)
   if (isNaN(d.getTime())) return '—'
-  return d.toISOString().split('T')[0]
+  // Use local date components to avoid timezone shift
+  const year = d.getFullYear()
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
 }
 
 /**
@@ -36,7 +53,7 @@ export function formatDateISO(date: Date | string | null | undefined): string {
  */
 export function formatDateTime(date: Date | string | null | undefined): string {
   if (!date) return '—'
-  const d = typeof date === 'string' ? new Date(date) : date
+  const d = parseLocalDate(date)
   if (isNaN(d.getTime())) return '—'
   return d.toLocaleString('en-US', {
     dateStyle: 'short',
@@ -49,7 +66,7 @@ export function formatDateTime(date: Date | string | null | undefined): string {
  */
 export function formatRelativeDate(date: Date | string | null | undefined): string {
   if (!date) return '—'
-  const d = typeof date === 'string' ? new Date(date) : date
+  const d = parseLocalDate(date)
   if (isNaN(d.getTime())) return '—'
 
   const now = new Date()

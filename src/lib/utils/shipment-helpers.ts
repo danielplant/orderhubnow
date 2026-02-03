@@ -1,15 +1,26 @@
 /**
  * Shipment helper utilities.
  *
- * These are pure utility functions (not server actions) that help with
- * planned shipment calculations.
+ * NOTE: These functions are deprecated and no longer used after reverting
+ * to collection-based order splitting. Left for Phase 3 cleanup.
  */
 
-import type { PlannedShipmentData, CreateOrderInput } from '@/lib/schemas/order'
+import type { CreateOrderInput } from '@/lib/schemas/order'
 import { getATSDefaultDates } from '@/lib/validation/ship-window'
+
+// Local type since PlannedShipmentData was removed from schema
+type PlannedShipmentData = {
+  id: string
+  collectionId: number | null
+  collectionName: string | null
+  itemSkus: string[]
+  plannedShipStart: string
+  plannedShipEnd: string
+}
 
 /**
  * Find which planned shipment a SKU belongs to.
+ * @deprecated No longer used - kept for Phase 3 cleanup
  */
 export function findShipmentIdForSku(
   sku: string,
@@ -23,7 +34,7 @@ export function findShipmentIdForSku(
 
 /**
  * Derive planned shipments when client doesn't send them.
- * Backward compatibility for old clients.
+ * @deprecated No longer used - kept for Phase 3 cleanup
  */
 export function deriveShipmentsFromItems(
   items: CreateOrderInput['items'],

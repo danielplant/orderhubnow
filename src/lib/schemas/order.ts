@@ -70,42 +70,14 @@ export const orderItemSchema = z.object({
 export type OrderItem = z.infer<typeof orderItemSchema>
 
 /**
- * Planned shipment data for order submission.
- * Each shipment has its own ship window dates validated against collection constraints.
- */
-export const plannedShipmentSchema = z.object({
-  id: z.string(),
-  collectionId: z.number().nullable(),
-  collectionName: z.string().nullable(),
-  itemSkus: z.array(z.string()),
-  plannedShipStart: z.string().min(1, 'Ship start date is required'),
-  plannedShipEnd: z.string().min(1, 'Ship end date is required'),
-  // Override flag: allows submission even if dates violate collection window
-  allowOverride: z.boolean().optional(),
-  // PR-3b: Combined shipment tracking for multi-collection support
-  isCombined: z.boolean().optional(),
-  originalShipmentIds: z.array(z.string()).optional(),
-})
-
-export type PlannedShipmentData = z.infer<typeof plannedShipmentSchema>
-
-/**
  * Full order creation input schema
  */
 export const createOrderInputSchema = orderFormSchema.extend({
   currency: z.enum(['USD', 'CAD']),
   items: z.array(orderItemSchema).min(1, 'Order must have at least one item'),
-  // isPreOrder is now derived from SKU data on the server.
-  // Kept optional for backwards compatibility but ignored by server.
   isPreOrder: z.boolean().optional(),
-  // Optional customer ID for existing customer - enables strong ownership on order
-  // Nullable to handle client state sending null for new stores
   customerId: z.number().int().positive().nullable().optional(),
-  // Skip automatic email sending - emails will be sent via confirmation popup
   skipEmail: z.boolean().optional(),
-  // Planned shipments array - each shipment has its own ship window dates
-  // Optional for backward compatibility with existing orders
-  plannedShipments: z.array(plannedShipmentSchema).optional(),
 })
 
 export type CreateOrderInput = z.infer<typeof createOrderInputSchema>

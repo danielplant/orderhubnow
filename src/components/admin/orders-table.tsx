@@ -16,7 +16,6 @@ import {
   type DateRange,
   SearchInput,
   FilterPill,
-  ShipmentTimeline,
 } from '@/components/ui'
 import { BulkActionsBar } from '@/components/admin/bulk-actions-bar'
 import { OrderCommentsModal } from '@/components/admin/order-comments-modal'
@@ -548,25 +547,6 @@ export function OrdersTable({ initialOrders, total, statusCounts, facets }: Orde
             <Link href={`/admin/orders/${o.id}`} className="font-medium hover:underline">
               {o.orderNumber}
             </Link>
-            {/* Phase 5: Show shipment timeline for multi-shipment orders
-                NOTE: Using synthetic shipments for compact view. All shipments use the same
-                first date since we only have firstShipmentDate and count in AdminOrderRow.
-                For expanded/full view with real per-shipment dates, would need to:
-                1. Add plannedShipments array to AdminOrderRow type
-                2. Query real PlannedShipment records in getOrders()
-                3. Pass real shipment data here instead of synthetic array */}
-            {o.plannedShipmentCount > 1 && (
-              <ShipmentTimeline
-                shipments={Array.from({ length: o.plannedShipmentCount }, (_, i) => ({
-                  id: `shipment-${i}`,
-                  collectionName: null,
-                  plannedShipStart: o.firstShipmentDate ?? o.shipStartDate ?? '',
-                  plannedShipEnd: o.firstShipmentDate ?? o.shipStartDate ?? '',
-                }))}
-                variant="compact"
-                className="ml-1"
-              />
-            )}
           </div>
         ),
       },

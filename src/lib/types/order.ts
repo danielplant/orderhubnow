@@ -134,36 +134,24 @@ export interface OrderFacets {
 
 /**
  * Result shape from createOrder action.
- * 
- * Phase 3: Now creates single order with multiple PlannedShipments.
- * The orders[] array is kept for backward compatibility (single-item array).
  */
 export interface CreateOrderResult {
   success: boolean
-  // Single order
   orderId?: string
   orderNumber?: string
-  // Number of PlannedShipment records created (Phase 3)
-  plannedShipmentCount?: number
-  // Backward compat: single-item array for consumers expecting orders[]
   orders?: Array<{
     orderId: string
     orderNumber: string
-    // Collection name - deprecated (now multiple collections per order)
     collectionName: string | null
     shipWindowStart: string | null
     shipWindowEnd: string | null
-    orderAmount: number
+    orderAmount?: number
   }>
   error?: string
 }
 
 /**
  * Input for updating an existing order.
- * 
- * Phase 5: Added plannedShipments array to sync PlannedShipment records
- * during edit mode. Each shipment can have a real DB ID (existing) or
- * temp ID starting with "new-" (to be created).
  */
 export interface UpdateOrderInput {
   orderId: string
@@ -183,19 +171,6 @@ export interface UpdateOrderInput {
     skuVariantId: number
     quantity: number
     price: number
-  }>
-  // Phase 5: Planned shipments to sync during edit
-  plannedShipments?: Array<{
-    id: string  // Real DB ID or temp ID starting with "new-"
-    collectionId: number | null
-    collectionName: string | null
-    plannedShipStart: string  // ISO date (YYYY-MM-DD)
-    plannedShipEnd: string
-    itemSkus: string[]  // SKUs belonging to this shipment
-    allowOverride?: boolean  // PR-3a: Allow submission despite date validation errors
-    // PR-3b: Combined shipment tracking
-    isCombined?: boolean
-    originalShipmentIds?: string[]
   }>
 }
 

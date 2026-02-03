@@ -19,7 +19,9 @@ function formatShipWindow(start: string | null, end: string | null): string {
   if (!start && !end) return "Ship date TBD";
 
   const formatDate = (dateStr: string) => {
-    const date = new Date(dateStr);
+    // Extract date-only part and force local midnight (avoids UTC timezone shift)
+    const dateOnly = dateStr.split('T')[0]
+    const date = new Date(dateOnly + 'T00:00:00');
     return date.toLocaleDateString("en-US", {
       month: "short",
       day: "numeric",
