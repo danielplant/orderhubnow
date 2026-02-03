@@ -775,8 +775,16 @@ async function processJsonlItem(
       }
     }
 
-    // Extract inventory item ID from parent
-    const inventoryItemId = parseShopifyGid(parentId)?.toString() ?? parentId
+    // Extract inventory item ID from the InventoryLevel id (not from parentId)
+    // Format: "gid://shopify/InventoryLevel/27878412?inventory_item_id=48740130128117"
+    // parentId is the ProductVariant GID, but we need the InventoryItem ID for the join
+    const inventoryItemIdMatch = itemId.match(/inventory_item_id=(\d+)/)
+    const inventoryItemId = inventoryItemIdMatch?.[1] ?? null
+
+    if (!inventoryItemId) {
+      console.warn(`[Sync] InventoryLevel missing inventory_item_id in id: ${itemId}`)
+      return false
+    }
 
     await upsertInventoryLevel({
       inventoryItemId,
