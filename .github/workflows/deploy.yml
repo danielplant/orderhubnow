@@ -6,10 +6,9 @@ on:
   workflow_dispatch:
 
 jobs:
-  deploy_staging:
-    name: Deploy (staging)
+  deploy:
+    name: Deploy to Production
     runs-on: ubuntu-latest
-    environment: staging
     steps:
       - uses: actions/checkout@v4
 
@@ -18,85 +17,7 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
-      - name: Validate required secrets (staging)
-        env:
-          STAGING_DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
-          STAGING_SSH_HOST: ${{ secrets.STAGING_SSH_HOST }}
-          STAGING_SSH_USER: ${{ secrets.STAGING_SSH_USER }}
-          STAGING_SSH_KEY: ${{ secrets.STAGING_SSH_KEY }}
-          STAGING_DEPLOY_DIR: ${{ secrets.STAGING_DEPLOY_DIR }}
-        run: |
-          missing=()
-          [ -z "$STAGING_DATABASE_URL" ] && missing+=("STAGING_DATABASE_URL")
-          [ -z "$STAGING_SSH_HOST" ] && missing+=("STAGING_SSH_HOST")
-          [ -z "$STAGING_SSH_USER" ] && missing+=("STAGING_SSH_USER")
-          [ -z "$STAGING_SSH_KEY" ] && missing+=("STAGING_SSH_KEY")
-          [ -z "$STAGING_DEPLOY_DIR" ] && missing+=("STAGING_DEPLOY_DIR")
-          if [ ${#missing[@]} -ne 0 ]; then
-            echo "Missing required secrets: ${missing[*]}"
-            exit 1
-          fi
-          echo "Secrets OK"
-
-      - name: Clean install
-        run: npm ci
-
-      - name: Generate Prisma client
-        run: npx prisma generate
-
-      - name: Migrate database (staging)
-        env:
-          DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
-        run: npx prisma migrate deploy
-
-      - name: Build (staging)
-        env:
-          DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
-        run: npm run build
-
-      - name: Stamp build commit
-        run: echo "${GITHUB_SHA}" > .next/BUILD_COMMIT
-
-      - name: Set up SSH
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.STAGING_SSH_KEY }}
-
-      - name: Add host key
-        run: |
-          mkdir -p ~/.ssh
-          ssh-keyscan -H "${{ secrets.STAGING_SSH_HOST }}" >> ~/.ssh/known_hosts
-
-      - name: Deploy to staging server
-        env:
-          HOST: ${{ secrets.STAGING_SSH_HOST }}
-          USER: ${{ secrets.STAGING_SSH_USER }}
-          APP_DIR: ${{ secrets.STAGING_DEPLOY_DIR }}
-        run: |
-          ssh "${USER}@${HOST}" "cd ${APP_DIR} && git fetch origin main && git reset --hard origin/main"
-          rsync -avz --delete \
-            --exclude='/dev/' \
-            --exclude='/cache/' \
-            --exclude='trace' \
-            --exclude='trace-build' \
-            .next/ "${USER}@${HOST}:${APP_DIR}/.next/"
-          ssh "${USER}@${HOST}" "cd ${APP_DIR} && npm ci --omit=dev --ignore-scripts && npx prisma generate && pm2 restart orderhubnow"
-
-  deploy_production:
-    name: Deploy (production)
-    runs-on: ubuntu-latest
-    needs: [deploy_staging]
-    if: ${{ always() && (needs.deploy_staging.result == 'success' || needs.deploy_staging.result == 'skipped') }}
-    environment: production
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-
-      - name: Validate required secrets (production)
+      - name: Validate required secrets
         env:
           PROD_DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
           PROD_SSH_HOST: ${{ secrets.PROD_SSH_HOST }}
@@ -114,20 +35,20 @@ jobs:
             echo "Missing required secrets: ${missing[*]}"
             exit 1
           fi
-          echo "Secrets OK"
+          echo "All secrets present"
 
-      - name: Clean install
+      - name: Install dependencies
         run: npm ci
 
       - name: Generate Prisma client
         run: npx prisma generate
 
-      - name: Migrate database (production)
+      - name: Run database migrations
         env:
           DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
         run: npx prisma migrate deploy
 
-      - name: Build (production)
+      - name: Build application
         env:
           DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
         run: npm run build
@@ -145,7 +66,7 @@ jobs:
           mkdir -p ~/.ssh
           ssh-keyscan -H "${{ secrets.PROD_SSH_HOST }}" >> ~/.ssh/known_hosts
 
-      - name: Deploy to production server
+      - name: Deploy to server
         env:
           HOST: ${{ secrets.PROD_SSH_HOST }}
           USER: ${{ secrets.PROD_SSH_USER }}
@@ -159,3 +80,6 @@ jobs:
             --exclude='trace-build' \
             .next/ "${USER}@${HOST}:${APP_DIR}/.next/"
           ssh "${USER}@${HOST}" "cd ${APP_DIR} && npm ci --omit=dev --ignore-scripts && npx prisma generate && pm2 restart orderhubnow"
+
+      - name: Deployment complete
+        run: echo "Successfully deployed to production"
