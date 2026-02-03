@@ -68,7 +68,8 @@ async function _deriveIsPreOrderFromSkus(
   const result = new Map<string, boolean>()
   for (const sku of skus) {
     // Use Collection.type to determine pre-order status
-    const isPreOrder = sku.Collection?.type === 'PreOrder'
+    const collectionType = sku.Collection?.type
+    const isPreOrder = collectionType === 'preorder_no_po' || collectionType === 'preorder_po'
     result.set(String(sku.ID), isPreOrder)
   }
 
@@ -234,7 +235,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     // Build pre-order map from Collection.type
     const skuPreOrderMap = new Map<string, boolean>()
     for (const sku of skuRecords) {
-      skuPreOrderMap.set(String(sku.ID), sku.Collection?.type === 'PreOrder')
+      const collectionType = sku.Collection?.type
+      skuPreOrderMap.set(String(sku.ID), collectionType === 'preorder_no_po' || collectionType === 'preorder_po')
     }
 
     for (const [, skuQtys] of Object.entries(state.orders)) {

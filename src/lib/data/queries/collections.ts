@@ -21,7 +21,7 @@ import type { AffectedOrder, AffectedOrdersResult } from '@/lib/types/planned-sh
 // ============================================================================
 
 /**
- * Get all collections grouped by type (ATS and PreOrder)
+ * Get all collections grouped by type (3 categories)
  */
 export async function getCollectionsGrouped(): Promise<CollectionsGrouped> {
   const collections = await prisma.collection.findMany({
@@ -35,8 +35,9 @@ export async function getCollectionsGrouped(): Promise<CollectionsGrouped> {
   const mapped = collections.map(mapCollectionWithCount)
 
   return {
-    ats: mapped.filter((c) => c.type === 'ATS'),
-    preOrder: mapped.filter((c) => c.type === 'PreOrder'),
+    preorderNoPo: mapped.filter((c) => c.type === 'preorder_no_po'),
+    preorderPo: mapped.filter((c) => c.type === 'preorder_po'),
+    ats: mapped.filter((c) => c.type === 'ats'),
   }
 }
 
@@ -117,8 +118,9 @@ export async function getAllCollectionsGrouped(): Promise<CollectionsGrouped> {
   const mapped = collections.map(mapCollectionWithCount)
 
   return {
-    ats: mapped.filter((c) => c.type === 'ATS'),
-    preOrder: mapped.filter((c) => c.type === 'PreOrder'),
+    preorderNoPo: mapped.filter((c) => c.type === 'preorder_no_po'),
+    preorderPo: mapped.filter((c) => c.type === 'preorder_po'),
+    ats: mapped.filter((c) => c.type === 'ats'),
   }
 }
 
@@ -371,7 +373,7 @@ export interface BuyerPreOrderCollection extends BuyerCollection {
  */
 export async function getATSCollectionsForBuyer(): Promise<BuyerCollection[]> {
   const collections = await prisma.collection.findMany({
-    where: { type: 'ATS', isActive: true },
+    where: { type: 'ats', isActive: true },
     orderBy: { sortOrder: 'asc' },
     include: {
       _count: { select: { skus: true } },
@@ -395,7 +397,7 @@ export async function getATSCollectionsForBuyer(): Promise<BuyerCollection[]> {
  */
 export async function getPreOrderCollectionsForBuyer(): Promise<BuyerPreOrderCollection[]> {
   const collections = await prisma.collection.findMany({
-    where: { type: 'PreOrder', isActive: true },
+    where: { type: { in: ['preorder_no_po', 'preorder_po'] }, isActive: true },
     orderBy: { sortOrder: 'asc' },
     include: {
       _count: { select: { skus: true } },
@@ -486,7 +488,7 @@ export async function getSkusByCollection(collectionId: number): Promise<Product
         const incomingEntry = incomingMap.get(sku.SkuID)
         const incoming = incomingEntry?.incoming ?? null
         const committed = incomingEntry?.committed ?? null
-        const scenario = getAvailabilityScenario('ATS', incoming)
+        const scenario = getAvailabilityScenario('ats')
         const displayResult = computeAvailabilityDisplay(
           scenario,
           'buyer_products',
@@ -542,6 +544,13 @@ export async function getSkusByCollection(collectionId: number): Promise<Product
  * Image: Uses product-level image (canonical, not per-variant).
  */
 export async function getPreOrderProductsByCollection(collectionId: number): Promise<Product[]> {
+  // Fetch collection to get its type for availability scenario
+  const collection = await prisma.collection.findUnique({
+    where: { id: collectionId },
+    select: { type: true },
+  })
+  const collectionType = collection?.type ?? 'preorder_no_po'
+
   const skus = await prisma.sku.findMany({
     where: {
       CollectionID: collectionId,
@@ -588,7 +597,7 @@ export async function getPreOrderProductsByCollection(collectionId: number): Pro
         const incomingEntry = incomingMap.get(sku.SkuID)
         const incoming = incomingEntry?.incoming ?? null
         const committed = incomingEntry?.committed ?? null
-        const scenario = getAvailabilityScenario('PreOrder', incoming)
+        const scenario = getAvailabilityScenario(collectionType)
         const displayResult = computeAvailabilityDisplay(
           scenario,
           'buyer_preorder',
@@ -639,8 +648,8 @@ export async function getPreOrderProductsByCollection(collectionId: number): Pro
  * Get PreOrder collection by ID with ship window dates
  */
 export async function getPreOrderCollectionById(collectionId: number): Promise<BuyerPreOrderCollection | null> {
-  const collection = await prisma.collection.findUnique({
-    where: { id: collectionId, type: 'PreOrder', isActive: true },
+  const collection = await prisma.collection.findFirst({
+    where: { id: collectionId, type: { in: ['preorder_no_po', 'preorder_po'] }, isActive: true },
     include: {
       _count: { select: { skus: true } },
     },
@@ -688,7 +697,8 @@ export async function getAffectedOrdersByWindowChange(
     where: { id: collectionId },
     select: { type: true },
   })
-  if (collection?.type !== 'PreOrder') {
+  const isPreOrder = collection?.type === 'preorder_no_po' || collection?.type === 'preorder_po'
+  if (!isPreOrder) {
     return {
       affected: [],
       totalOrders: 0,

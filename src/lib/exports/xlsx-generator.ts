@@ -102,10 +102,10 @@ function resolveAvailableLabel(
   const unique = new Set(types)
   if (unique.size === 1) {
     const onlyType = Array.from(unique)[0]
-    if (onlyType === 'PreOrder') {
+    if (onlyType === 'preorder_no_po' || onlyType === 'preorder_po') {
       return settings.matrix.preorder_incoming.xlsx.label
     }
-    if (onlyType === 'ATS') {
+    if (onlyType === 'ats') {
       return settings.matrix.ats.xlsx.label
     }
   }
@@ -185,9 +185,9 @@ export async function generateXlsxExport(
 
   // Collections filter
   if (collectionsRaw === 'ats') {
-    where.Collection = { type: 'ATS' }
+    where.Collection = { type: 'ats' }
   } else if (collectionsRaw === 'preorder') {
-    where.Collection = { type: 'PreOrder' }
+    where.Collection = { type: { in: ['preorder_no_po', 'preorder_po'] } }
   } else if (collectionsRaw !== 'all' && collectionsRaw !== 'specific') {
     const ids = collectionsRaw.split(',').map(Number).filter(Number.isFinite)
     if (ids.length > 0) {
@@ -365,7 +365,7 @@ export async function generateXlsxExport(
     const incomingEntry = incomingMap.get(sku.SkuID)
     const incoming = incomingEntry?.incoming ?? null
     const committed = incomingEntry?.committed ?? null
-    const scenario = getAvailabilityScenario(sku.Collection?.type ?? null, incoming)
+    const scenario = getAvailabilityScenario(sku.Collection?.type ?? null)
 
     // Track scenario for legend display
     if (scenario === 'ats') scenariosPresent.hasAts = true

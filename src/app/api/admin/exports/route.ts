@@ -50,7 +50,7 @@ export async function POST(request: NextRequest) {
       if (collections === 'ats' || collections === 'preorder') {
         // Get collection IDs by type
         const cols = await prisma.collection.findMany({
-          where: { type: collections === 'ats' ? 'ATS' : 'PreOrder' },
+          where: { type: collections === 'ats' ? 'ats' : { in: ['preorder_no_po', 'preorder_po'] } },
           select: { id: true }
         })
         collectionIds = cols.map(c => c.id)

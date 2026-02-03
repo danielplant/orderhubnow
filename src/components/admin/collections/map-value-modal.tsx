@@ -48,8 +48,8 @@ export function MapValueModal({
   if (!mapping) return null
 
   // Group collections by type for the dropdown
-  const atsCollections = collections.filter((c) => c.type === 'ATS')
-  const preOrderCollections = collections.filter((c) => c.type === 'PreOrder')
+  const atsCollections = collections.filter((c) => c.type === 'ats')
+  const preOrderCollections = collections.filter((c) => c.type === 'preorder_no_po' || c.type === 'preorder_po')
 
   async function handleMap() {
     if (!selectedCollectionId || !mapping) {

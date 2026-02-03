@@ -74,7 +74,7 @@ export async function getInventoryMetrics(): Promise<DashboardMetrics> {
   // Get ATS collections with SKU counts (only active, visible collections)
   const atsCollections = await prisma.collection.findMany({
     where: {
-      type: 'ATS',
+      type: 'ats',
       isActive: true,
     },
     include: {
@@ -88,7 +88,7 @@ export async function getInventoryMetrics(): Promise<DashboardMetrics> {
   // Get PreOrder collections with SKU counts (only active, visible collections)
   const preOrderCollections = await prisma.collection.findMany({
     where: {
-      type: 'PreOrder',
+      type: { in: ['preorder_no_po', 'preorder_po'] },
       isActive: true,
     },
     include: {
@@ -241,7 +241,7 @@ export async function getInventoryList(
     const incomingEntry = incomingMap.get(r.SkuID)
     const incoming = incomingEntry?.incoming ?? null
     const committed = incomingEntry?.committed ?? null
-    const scenario = getAvailabilityScenario(r.Collection?.type ?? null, incoming)
+    const scenario = getAvailabilityScenario(r.Collection?.type ?? null)
     const displayResult = computeAvailabilityDisplay(
       scenario,
       'admin_inventory',

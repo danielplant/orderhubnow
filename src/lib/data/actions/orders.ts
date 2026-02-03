@@ -323,8 +323,9 @@ async function deriveIsPreOrderFromSkus(
   const result = new Map<string, boolean>()
   for (const sku of skus) {
     // Use Collection.type to determine pre-order status
-    // 'PreOrder' = true, 'ATS' or null = false
-    const isPreOrder = sku.Collection?.type === 'PreOrder'
+    // 'preorder_no_po' or 'preorder_po' = true, 'ats' or null = false
+    const collectionType = sku.Collection?.type
+    const isPreOrder = collectionType === 'preorder_no_po' || collectionType === 'preorder_po'
     result.set(String(sku.ShopifyProductVariantId), isPreOrder)
   }
 

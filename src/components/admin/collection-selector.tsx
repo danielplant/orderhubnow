@@ -39,8 +39,8 @@ export function CollectionSelector({
   onSelectionChange,
 }: CollectionSelectorProps) {
   // Group collections by type
-  const atsCollections = collections.filter((c) => c.type === 'ATS')
-  const preorderCollections = collections.filter((c) => c.type === 'PreOrder')
+  const atsCollections = collections.filter((c) => c.type === 'ats')
+  const preorderCollections = collections.filter((c) => c.type === 'preorder_no_po' || c.type === 'preorder_po')
 
   // Get selected collection objects
   const selectedCollections = collections.filter((c) => selectedIds.includes(c.id))
@@ -223,14 +223,14 @@ function CollectionChip({
   onRemove,
 }: {
   name: string
-  type: 'ATS' | 'PreOrder'
+  type: string
   onRemove: () => void
 }) {
   return (
     <span
       className={cn(
         'inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-medium',
-        type === 'ATS'
+        type === 'ats'
           ? 'bg-green-100 text-green-800'
           : 'bg-purple-100 text-purple-800'
       )}

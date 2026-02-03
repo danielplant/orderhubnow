@@ -146,11 +146,11 @@ export async function getProducts(
   switch (input.collectionsMode) {
     case 'ats':
       // Filter to products from ATS-type collections
-      where.Collection = { type: 'ATS' }
+      where.Collection = { type: 'ats' }
       break
     case 'preorder':
       // Filter to products from PreOrder-type collections
-      where.Collection = { type: 'PreOrder' }
+      where.Collection = { type: { in: ['preorder_no_po', 'preorder_po'] } }
       break
     case 'specific':
       // Filter to specific collection IDs (if any selected)
@@ -213,7 +213,7 @@ export async function getProducts(
     const incomingEntry = incomingMap.get(skuId)
     const incoming = incomingEntry?.incoming ?? null
     const committed = incomingEntry?.committed ?? null
-    const scenario = getAvailabilityScenario(r.Collection?.type ?? null, incoming)
+    const scenario = getAvailabilityScenario(r.Collection?.type ?? null)
     const displayResult = computeAvailabilityDisplay(
       scenario,
       view,
@@ -314,7 +314,7 @@ export async function getCollectionsForFilter(): Promise<CategoryForFilter[]> {
   return collections.map((c) => ({
     id: c.id,
     name: c.name,
-    type: c.type as 'ATS' | 'PreOrder',
+    type: c.type as 'preorder_no_po' | 'preorder_po' | 'ats',
   }))
 }
 

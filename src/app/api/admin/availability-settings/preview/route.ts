@@ -59,7 +59,7 @@ export async function GET() {
     const incomingEntry = incomingMap.get(row.SkuID)
     const incoming = incomingEntry?.incoming ?? null
     const committed = incomingEntry?.committed ?? null
-    const scenario = getAvailabilityScenario(row.Collection?.type ?? null, incoming)
+    const scenario = getAvailabilityScenario(row.Collection?.type ?? null)
     if (samples[scenario].length >= 5) continue
 
     samples[scenario].push({
