@@ -21,6 +21,10 @@ export async function updateAvailabilitySettings(
       onRouteLabelInventory: settings.onRouteLabelInventory,
       onRouteLabelXlsx: settings.onRouteLabelXlsx,
       onRouteLabelPdf: settings.onRouteLabelPdf,
+      legendText: settings.legendText,
+      showLegendAts: settings.showLegendAts,
+      showLegendPreorderIncoming: settings.showLegendPreorderIncoming,
+      showLegendPreorderNoIncoming: settings.showLegendPreorderNoIncoming,
       updatedBy: updatedBy ?? null,
       updatedAt: new Date(),
     }

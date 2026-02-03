@@ -7,6 +7,7 @@
  * Phase 2: Enforce S3-Only Export Policy
  */
 
+import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 
 /**
@@ -37,16 +38,26 @@ const LEGACY_SIZES = [120, 240, 480, 720]
  * Returns list of missing SKU IDs for remediation UI.
  *
  * @param pixelSize - The thumbnail pixel size to check (e.g., 120)
+ * @param collectionIds - Optional array of collection IDs to scope the check
  * @returns Coverage analysis with missing SKU IDs
  */
 export async function getThumbnailCoverageForExport(
-  pixelSize: number
+  pixelSize: number,
+  collectionIds?: number[]
 ): Promise<ThumbnailCoverage> {
-  // Get all SKUs with Shopify images
+  // Build where clause
+  const whereClause: Prisma.SkuWhereInput = {
+    ShopifyImageURL: { not: null },
+  }
+
+  // Add collection filter if provided
+  if (collectionIds && collectionIds.length > 0) {
+    whereClause.CollectionID = { in: collectionIds }
+  }
+
+  // Get SKUs with Shopify images (optionally filtered by collection)
   const skus = await prisma.sku.findMany({
-    where: {
-      ShopifyImageURL: { not: null },
-    },
+    where: whereClause,
     select: {
       SkuID: true,
       ThumbnailPath: true,
@@ -103,9 +114,13 @@ export async function getThumbnailCoverageForExport(
  * Convenience function for quick boolean check.
  *
  * @param pixelSize - The thumbnail pixel size to check
+ * @param collectionIds - Optional array of collection IDs to scope the check
  * @returns true if all SKUs have thumbnails at this size
  */
-export async function isExportCoverageReady(pixelSize: number): Promise<boolean> {
-  const coverage = await getThumbnailCoverageForExport(pixelSize)
+export async function isExportCoverageReady(
+  pixelSize: number,
+  collectionIds?: number[]
+): Promise<boolean> {
+  const coverage = await getThumbnailCoverageForExport(pixelSize, collectionIds)
   return coverage.coveragePercent === 100
 }

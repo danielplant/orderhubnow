@@ -91,6 +91,10 @@ export const DEFAULT_SETTINGS: AvailabilitySettingsRecord = {
   onRouteLabelInventory: 'On Route',
   onRouteLabelXlsx: 'On Route',
   onRouteLabelPdf: 'On Route',
+  legendText: AVAILABILITY_LEGEND_TEXT,
+  showLegendAts: false,
+  showLegendPreorderIncoming: false,
+  showLegendPreorderNoIncoming: true,
 }
 
 export function normalizeCellConfig(
@@ -155,5 +159,9 @@ export function normalizeAvailabilitySettings(
     onRouteLabelInventory: input.onRouteLabelInventory ?? DEFAULT_SETTINGS.onRouteLabelInventory,
     onRouteLabelXlsx: input.onRouteLabelXlsx ?? DEFAULT_SETTINGS.onRouteLabelXlsx,
     onRouteLabelPdf: input.onRouteLabelPdf ?? DEFAULT_SETTINGS.onRouteLabelPdf,
+    legendText: input.legendText ?? DEFAULT_SETTINGS.legendText,
+    showLegendAts: input.showLegendAts ?? DEFAULT_SETTINGS.showLegendAts,
+    showLegendPreorderIncoming: input.showLegendPreorderIncoming ?? DEFAULT_SETTINGS.showLegendPreorderIncoming,
+    showLegendPreorderNoIncoming: input.showLegendPreorderNoIncoming ?? DEFAULT_SETTINGS.showLegendPreorderNoIncoming,
   }
 }

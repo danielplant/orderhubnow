@@ -43,9 +43,27 @@ export async function POST(request: NextRequest) {
     // Get export policy for coverage check
     const exportPolicy = await getExportPolicy()
 
+    // Parse collection filter for scoped coverage check
+    let collectionIds: number[] | undefined
+
+    if (collections && collections !== 'all') {
+      if (collections === 'ats' || collections === 'preorder') {
+        // Get collection IDs by type
+        const cols = await prisma.collection.findMany({
+          where: { type: collections === 'ats' ? 'ATS' : 'PreOrder' },
+          select: { id: true }
+        })
+        collectionIds = cols.map(c => c.id)
+      } else {
+        // Comma-separated IDs
+        collectionIds = collections.split(',').map((id: string) => parseInt(id)).filter((n: number) => !isNaN(n))
+      }
+    }
+
     // Coverage check for admins (reps bypass and use fallback)
+    // Now scoped to the collections being exported
     if (session.user.role === 'admin' && exportPolicy.requireS3) {
-      const coverage = await getThumbnailCoverageForExport(exportPolicy.thumbnailSize)
+      const coverage = await getThumbnailCoverageForExport(exportPolicy.thumbnailSize, collectionIds)
       if (coverage.coveragePercent < 100) {
         return NextResponse.json(
           {

@@ -1354,6 +1354,10 @@ model AvailabilitySettings {
   onRouteLabelInventory String   @default("On Route") @db.NVarChar(100) @map("OnRouteLabelInventory")
   onRouteLabelXlsx      String   @default("On Route") @db.NVarChar(100) @map("OnRouteLabelXlsx")
   onRouteLabelPdf       String   @default("On Route") @db.NVarChar(100) @map("OnRouteLabelPdf")
+  legendText                    String   @default("Blank means no inbound PO yet — pre-order allowed.") @db.NVarChar(500) @map("LegendText")
+  showLegendAts                 Boolean  @default(false) @map("ShowLegendAts")
+  showLegendPreorderIncoming    Boolean  @default(false) @map("ShowLegendPreorderIncoming")
+  showLegendPreorderNoIncoming  Boolean  @default(true) @map("ShowLegendPreorderNoIncoming")
   updatedAt             DateTime @default(now()) @updatedAt @map("UpdatedAt")
   updatedBy             String?  @db.NVarChar(255) @map("UpdatedBy")
 

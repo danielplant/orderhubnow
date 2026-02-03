@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3'
+import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3'
 
 const bucket = process.env.AWS_S3_BUCKET_NAME
 const region = process.env.AWS_REGION || 'us-east-1'
@@ -105,5 +105,32 @@ export async function getFromS3(key: string): Promise<Buffer | null> {
       return null
     }
     throw error
+  }
+}
+
+/**
+ * Check if a file exists in S3 (HEAD request - no data transfer)
+ * @param key - S3 key (path) to check
+ * @returns true if file exists, false otherwise
+ */
+export async function existsInS3(key: string): Promise<boolean> {
+  if (!bucket) {
+    throw new Error('AWS_S3_BUCKET_NAME environment variable is not set')
+  }
+
+  try {
+    const command = new HeadObjectCommand({
+      Bucket: bucket,
+      Key: key,
+    })
+    await s3Client.send(command)
+    return true
+  } catch (error) {
+    if ((error as { name?: string }).name === 'NotFound') {
+      return false
+    }
+    // For other errors, assume file doesn't exist to be safe
+    console.warn(`[S3] HEAD check failed for ${key}:`, error)
+    return false
   }
 }

@@ -54,6 +54,10 @@ export interface AvailabilitySettingsRecord {
   onRouteLabelInventory: string
   onRouteLabelXlsx: string
   onRouteLabelPdf: string
+  legendText: string
+  showLegendAts: boolean
+  showLegendPreorderIncoming: boolean
+  showLegendPreorderNoIncoming: boolean
 }
 
 export interface AvailabilityInputs {
