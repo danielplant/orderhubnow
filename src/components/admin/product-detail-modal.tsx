@@ -15,7 +15,6 @@ interface ProductVariant {
   sku: string
   size: string
   available: number
-  onRoute: number
   priceCad: number
   priceUsd: number
 }
@@ -164,7 +163,6 @@ export function ProductDetailModal({
                   <th className="px-4 py-2 text-left font-medium">SKU</th>
                   <th className="px-4 py-2 text-left font-medium">Size</th>
                   <th className="px-4 py-2 text-right font-medium">Available</th>
-                  <th className="px-4 py-2 text-right font-medium">On Route</th>
                 </tr>
               </thead>
               <tbody>
@@ -179,12 +177,6 @@ export function ProductDetailModal({
                     <td className="px-4 py-2 font-mono text-xs">{variant.sku}</td>
                     <td className="px-4 py-2">{variant.size}</td>
                     <td className="px-4 py-2 text-right tabular-nums">{variant.available}</td>
-                    <td className={cn(
-                      'px-4 py-2 text-right tabular-nums',
-                      variant.onRoute > 0 ? 'text-blue-600' : 'text-muted-foreground'
-                    )}>
-                      {variant.onRoute}
-                    </td>
                   </tr>
                 ))}
               </tbody>

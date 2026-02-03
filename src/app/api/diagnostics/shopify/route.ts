@@ -72,7 +72,10 @@ export async function GET(request: NextRequest) {
   }
 
   // 5. Extract and return raw values
-  const data = result.data as ShopifyVariantResponse
+  // Note: shopifyGraphQLFetch returns { data: <GraphQL response> }
+  // and GraphQL response is { data: { productVariants: ... } }
+  const graphqlResponse = result.data as { data?: ShopifyVariantResponse }
+  const data = graphqlResponse?.data
   const variant = data?.productVariants?.edges?.[0]?.node
   const quantities = variant?.inventoryItem?.inventoryLevels?.edges?.[0]?.node?.quantities || []
 
@@ -82,6 +85,8 @@ export async function GET(request: NextRequest) {
     onHand: quantities.find((q) => q.name === 'on_hand')?.quantity ?? null,
     committed: quantities.find((q) => q.name === 'committed')?.quantity ?? null,
     incoming: quantities.find((q) => q.name === 'incoming')?.quantity ?? null,
+    // Include raw response for debugging
+    _raw: result.data,
   }
 
   return NextResponse.json(response)

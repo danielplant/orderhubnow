@@ -402,11 +402,15 @@ export async function getProductByBaseSku(baseSku: string) {
 
   // Build variants array with size info
   const variants = skus.map((sku) => {
+    // For PreOrder items, use OnRoute (incoming - committed) as the available value
+    // For ATS items, use Quantity (on_hand from Shopify)
+    const isPreOrder = sku.ShowInPreOrder ?? false
+    const available = isPreOrder ? (sku.OnRoute ?? 0) : (sku.Quantity ?? 0)
+
     return {
       sku: sku.SkuID,
       size: sku.Size || '',
-      available: sku.Quantity ?? 0,
-      onRoute: sku.OnRoute ?? 0,
+      available,
       priceCad: parsePrice(sku.PriceCAD),
       priceUsd: parsePrice(sku.PriceUSD),
     }
