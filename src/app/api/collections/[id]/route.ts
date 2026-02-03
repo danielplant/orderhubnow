@@ -50,7 +50,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     if (typeof body?.name === 'string') {
       updateData.name = body.name.trim()
     }
-    if (body?.type && ['ATS', 'PreOrder'].includes(body.type)) {
+    if (body?.type && ['preorder_no_po', 'preorder_po', 'ats'].includes(body.type)) {
       updateData.type = body.type
     }
     if (typeof body?.isActive === 'boolean') {

@@ -65,14 +65,14 @@ export function InventoryTable({
     if (!availabilitySettings) return 'Available'
     const types = initialItems
       .map((item) => item.collectionType)
-      .filter(Boolean) as Array<'ATS' | 'PreOrder'>
+      .filter(Boolean) as string[]
     const uniqueTypes = new Set(types)
     if (uniqueTypes.size === 1) {
       const onlyType = Array.from(uniqueTypes)[0]
-      if (onlyType === 'PreOrder') {
+      if (onlyType === 'preorder_no_po' || onlyType === 'preorder_po') {
         return availabilitySettings.matrix.preorder_incoming.admin_inventory.label
       }
-      if (onlyType === 'ATS') {
+      if (onlyType === 'ats') {
         return availabilitySettings.matrix.ats.admin_inventory.label
       }
     }

@@ -101,5 +101,5 @@ export interface UpdateSkuInput {
 export interface CategoryForFilter {
   id: number
   name: string
-  type: 'ATS' | 'PreOrder'
+  type: 'preorder_no_po' | 'preorder_po' | 'ats'
 }

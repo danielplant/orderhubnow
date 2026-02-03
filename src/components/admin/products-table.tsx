@@ -194,11 +194,11 @@ export function ProductsTable({
     if (collectionMode === 'specific' && selectedCollectionIds.length > 0) {
       const types = selectedCollectionIds
         .map((id) => categories.find((c) => c.id === id)?.type)
-        .filter(Boolean) as Array<'ATS' | 'PreOrder'>
-      if (types.length > 0 && types.every((t) => t === 'ATS')) {
+        .filter(Boolean) as string[]
+      if (types.length > 0 && types.every((t) => t === 'ats')) {
         return availabilitySettings.matrix.ats[availabilityView].label
       }
-      if (types.length > 0 && types.every((t) => t === 'PreOrder')) {
+      if (types.length > 0 && types.every((t) => t === 'preorder_no_po' || t === 'preorder_po')) {
         return availabilitySettings.matrix.preorder_incoming[availabilityView].label
       }
     }

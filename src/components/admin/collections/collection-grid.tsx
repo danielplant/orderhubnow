@@ -10,18 +10,20 @@ import { useUserPreferences } from '@/lib/hooks/useUserPreferences'
 import type { CollectionWithCount, CollectionType } from '@/lib/types/collection'
 
 interface CollectionGridProps {
-  atsCollections: CollectionWithCount[]
-  preOrderCollections: CollectionWithCount[]
+  preorderNoPo: CollectionWithCount[]
+  preorderPo: CollectionWithCount[]
+  ats: CollectionWithCount[]
 }
 
 export function CollectionGrid({
-  atsCollections,
-  preOrderCollections,
+  preorderNoPo,
+  preorderPo,
+  ats,
 }: CollectionGridProps) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [modalOpen, setModalOpen] = useState(false)
-  const [modalType, setModalType] = useState<CollectionType>('ATS')
+  const [modalType, setModalType] = useState<CollectionType>('preorder_no_po')
   const [editingCollection, setEditingCollection] = useState<CollectionWithCount | null>(null)
   
   // User preferences for hiding empty collections
@@ -29,30 +31,39 @@ export function CollectionGrid({
   const hideEmpty = preferences?.collections?.hideEmpty ?? true
 
   // Local state for optimistic reordering
-  const [atsOrder, setAtsOrder] = useState(atsCollections)
-  const [preOrderOrder, setPreOrderOrder] = useState(preOrderCollections)
+  const [preorderNoPoOrder, setPreorderNoPoOrder] = useState(preorderNoPo)
+  const [preorderPoOrder, setPreorderPoOrder] = useState(preorderPo)
+  const [atsOrder, setAtsOrder] = useState(ats)
   
   // Filter out empty collections if hideEmpty is true
+  const filteredPreorderNoPo = useMemo(
+    () => (hideEmpty ? preorderNoPoOrder.filter((c) => c.skuCount > 0) : preorderNoPoOrder),
+    [preorderNoPoOrder, hideEmpty]
+  )
+  const filteredPreorderPo = useMemo(
+    () => (hideEmpty ? preorderPoOrder.filter((c) => c.skuCount > 0) : preorderPoOrder),
+    [preorderPoOrder, hideEmpty]
+  )
   const filteredAts = useMemo(
     () => (hideEmpty ? atsOrder.filter((c) => c.skuCount > 0) : atsOrder),
     [atsOrder, hideEmpty]
   )
-  const filteredPreOrder = useMemo(
-    () => (hideEmpty ? preOrderOrder.filter((c) => c.skuCount > 0) : preOrderOrder),
-    [preOrderOrder, hideEmpty]
-  )
   
   // Count hidden collections
+  const hiddenPreorderNoPoCount = preorderNoPoOrder.filter((c) => c.skuCount === 0).length
+  const hiddenPreorderPoCount = preorderPoOrder.filter((c) => c.skuCount === 0).length
   const hiddenAtsCount = atsOrder.filter((c) => c.skuCount === 0).length
-  const hiddenPreOrderCount = preOrderOrder.filter((c) => c.skuCount === 0).length
-  const totalHidden = hiddenAtsCount + hiddenPreOrderCount
+  const totalHidden = hiddenPreorderNoPoCount + hiddenPreorderPoCount + hiddenAtsCount
 
   // Sync props to local state when they change
-  if (atsCollections !== atsOrder && !isPending) {
-    setAtsOrder(atsCollections)
+  if (preorderNoPo !== preorderNoPoOrder && !isPending) {
+    setPreorderNoPoOrder(preorderNoPo)
   }
-  if (preOrderCollections !== preOrderOrder && !isPending) {
-    setPreOrderOrder(preOrderCollections)
+  if (preorderPo !== preorderPoOrder && !isPending) {
+    setPreorderPoOrder(preorderPo)
+  }
+  if (ats !== atsOrder && !isPending) {
+    setAtsOrder(ats)
   }
 
   function handleAddCollection(type: CollectionType) {
@@ -68,17 +79,22 @@ export function CollectionGrid({
   }
 
   async function handleReorder(type: CollectionType, orderedIds: number[]) {
-    // Optimistic update
-    if (type === 'ATS') {
+    // Optimistic update based on type
+    if (type === 'preorder_no_po') {
+      const reordered = orderedIds
+        .map((id) => preorderNoPoOrder.find((c) => c.id === id))
+        .filter((c): c is CollectionWithCount => c !== undefined)
+      setPreorderNoPoOrder(reordered)
+    } else if (type === 'preorder_po') {
+      const reordered = orderedIds
+        .map((id) => preorderPoOrder.find((c) => c.id === id))
+        .filter((c): c is CollectionWithCount => c !== undefined)
+      setPreorderPoOrder(reordered)
+    } else {
       const reordered = orderedIds
         .map((id) => atsOrder.find((c) => c.id === id))
         .filter((c): c is CollectionWithCount => c !== undefined)
       setAtsOrder(reordered)
-    } else {
-      const reordered = orderedIds
-        .map((id) => preOrderOrder.find((c) => c.id === id))
-        .filter((c): c is CollectionWithCount => c !== undefined)
-      setPreOrderOrder(reordered)
     }
 
     // Persist to server
@@ -131,25 +147,36 @@ export function CollectionGrid({
         </label>
       </div>
 
-      {/* ATS Collections Section */}
+      {/* PreOrder (No PO Yet) Section */}
       <CollectionSection
-        title="Available to Ship (ATS)"
-        type="ATS"
-        collections={filteredAts}
-        onAddCollection={() => handleAddCollection('ATS')}
+        title="PreOrder (No PO Yet)"
+        type="preorder_no_po"
+        collections={filteredPreorderNoPo}
+        onAddCollection={() => handleAddCollection('preorder_no_po')}
         onEditCollection={handleEditCollection}
-        onReorder={(ids) => handleReorder('ATS', ids)}
+        onReorder={(ids) => handleReorder('preorder_no_po', ids)}
         isPending={isPending}
       />
 
-      {/* PreOrder Collections Section */}
+      {/* PreOrder (PO Placed) Section */}
       <CollectionSection
-        title="Pre-Order"
-        type="PreOrder"
-        collections={filteredPreOrder}
-        onAddCollection={() => handleAddCollection('PreOrder')}
+        title="PreOrder (PO Placed)"
+        type="preorder_po"
+        collections={filteredPreorderPo}
+        onAddCollection={() => handleAddCollection('preorder_po')}
         onEditCollection={handleEditCollection}
-        onReorder={(ids) => handleReorder('PreOrder', ids)}
+        onReorder={(ids) => handleReorder('preorder_po', ids)}
+        isPending={isPending}
+      />
+
+      {/* ATS Collections Section */}
+      <CollectionSection
+        title="ATS (Available to Ship)"
+        type="ats"
+        collections={filteredAts}
+        onAddCollection={() => handleAddCollection('ats')}
+        onEditCollection={handleEditCollection}
+        onReorder={(ids) => handleReorder('ats', ids)}
         isPending={isPending}
       />
 
@@ -234,6 +261,12 @@ function CollectionSection({
     setDropPosition(null)
   }
 
+  // Get display name for empty state
+  const typeDisplayName = 
+    type === 'preorder_no_po' ? 'PreOrder (No PO Yet)' :
+    type === 'preorder_po' ? 'PreOrder (PO Placed)' : 
+    'ATS'
+
   return (
     <div className="bg-background rounded-lg border border-border overflow-hidden">
       <div className="flex justify-between items-center px-6 py-4 border-b border-border bg-muted/30">
@@ -247,7 +280,7 @@ function CollectionSection({
       <div className="p-6">
         {collections.length === 0 ? (
           <div className="text-center py-12 text-muted-foreground">
-            No {type === 'ATS' ? 'ATS' : 'Pre-Order'} collections yet.{' '}
+            No {typeDisplayName} collections yet.{' '}
             <button
               onClick={onAddCollection}
               className="underline hover:text-foreground"

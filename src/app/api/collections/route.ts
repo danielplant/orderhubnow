@@ -19,8 +19,8 @@ export async function POST(req: Request) {
       return Response.json({ error: 'Name is required' }, { status: 400 })
     }
 
-    if (!body?.type || !['ATS', 'PreOrder'].includes(body.type)) {
-      return Response.json({ error: 'Type must be ATS or PreOrder' }, { status: 400 })
+    if (!body?.type || !['preorder_no_po', 'preorder_po', 'ats'].includes(body.type)) {
+      return Response.json({ error: 'Type must be preorder_no_po, preorder_po, or ats' }, { status: 400 })
     }
 
     const type = body.type as CollectionType

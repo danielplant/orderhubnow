@@ -5,8 +5,8 @@ export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => null)
 
-    if (!body?.type || !['ATS', 'PreOrder'].includes(body.type)) {
-      return Response.json({ error: 'Type must be ATS or PreOrder' }, { status: 400 })
+    if (!body?.type || !['preorder_no_po', 'preorder_po', 'ats'].includes(body.type)) {
+      return Response.json({ error: 'Type must be preorder_no_po, preorder_po, or ats' }, { status: 400 })
     }
 
     if (!Array.isArray(body?.orderedIds) || body.orderedIds.length === 0) {

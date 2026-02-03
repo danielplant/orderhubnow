@@ -42,8 +42,9 @@ export default async function CollectionsPage() {
       )}
 
       <CollectionGrid
-        atsCollections={collections.ats}
-        preOrderCollections={collections.preOrder}
+        preorderNoPo={collections.preorderNoPo}
+        preorderPo={collections.preorderPo}
+        ats={collections.ats}
       />
     </main>
   )

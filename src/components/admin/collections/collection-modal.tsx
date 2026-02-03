@@ -120,7 +120,8 @@ export function CollectionModal({
     setError(null)
 
     // Phase 8: Check if this is a PreOrder edit with changed dates
-    if (isEditing && collectionType === 'PreOrder' && collection) {
+    const isPreOrder = collectionType === 'preorder_no_po' || collectionType === 'preorder_po'
+    if (isEditing && isPreOrder && collection) {
       const originalStart = collection.shipWindowStart?.split('T')[0] || ''
       const originalEnd = collection.shipWindowEnd?.split('T')[0] || ''
       const datesChanged = originalStart !== shipStart || originalEnd !== shipEnd
@@ -266,29 +267,39 @@ export function CollectionModal({
             />
           </div>
 
-          {/* Type */}
+          {/* Status */}
           <div className="space-y-2">
-            <label className="text-sm font-medium">Type</label>
-            <div className="flex gap-4">
+            <label className="text-sm font-medium">Status</label>
+            <div className="flex flex-col gap-2">
               <label className="flex items-center gap-2 cursor-pointer">
                 <input
                   type="radio"
                   name="type"
-                  checked={collectionType === 'ATS'}
-                  onChange={() => setCollectionType('ATS')}
+                  checked={collectionType === 'preorder_no_po'}
+                  onChange={() => setCollectionType('preorder_no_po')}
                   className="w-4 h-4"
                 />
-                <span className="text-sm">ATS (Available to Ship)</span>
+                <span className="text-sm">PreOrder - No PO Yet</span>
               </label>
               <label className="flex items-center gap-2 cursor-pointer">
                 <input
                   type="radio"
                   name="type"
-                  checked={collectionType === 'PreOrder'}
-                  onChange={() => setCollectionType('PreOrder')}
+                  checked={collectionType === 'preorder_po'}
+                  onChange={() => setCollectionType('preorder_po')}
                   className="w-4 h-4"
                 />
-                <span className="text-sm">PreOrder</span>
+                <span className="text-sm">PreOrder - PO Placed</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="type"
+                  checked={collectionType === 'ats'}
+                  onChange={() => setCollectionType('ats')}
+                  className="w-4 h-4"
+                />
+                <span className="text-sm">ATS (Available to Ship)</span>
               </label>
             </div>
           </div>
@@ -325,8 +336,8 @@ export function CollectionModal({
             </button>
           </div>
 
-          {/* Ship Window (PreOrder only) */}
-          {collectionType === 'PreOrder' && (
+          {/* Ship Window (PreOrder types only) */}
+          {(collectionType === 'preorder_no_po' || collectionType === 'preorder_po') && (
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <label className="text-sm font-medium">Ship Window Start</label>

@@ -2,7 +2,7 @@
  * Collection types for the Collections Admin system
  */
 
-export type CollectionType = 'ATS' | 'PreOrder'
+export type CollectionType = 'preorder_no_po' | 'preorder_po' | 'ats'
 
 export interface Collection {
   id: number
@@ -56,8 +56,9 @@ export interface MappingStats {
 
 // API response types
 export interface CollectionsGrouped {
+  preorderNoPo: CollectionWithCount[]
+  preorderPo: CollectionWithCount[]
   ats: CollectionWithCount[]
-  preOrder: CollectionWithCount[]
 }
 
 export interface ReorderCollectionsRequest {

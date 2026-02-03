@@ -1193,7 +1193,7 @@ export async function transformToSkuTable(options?: { skipBackup?: boolean }): P
         if (collectionId) {
           // Determine if PreOrder based on collection type
           const collectionType = collectionTypeMap.get(collectionId)
-          const isPreOrder = collectionType === 'PreOrder'
+          const isPreOrder = collectionType === 'preorder_no_po' || collectionType === 'preorder_po'
 
           // Parse units from SKU prefix (e.g., "2PC-..." → 2)
           const skuIdUpper = r.SkuID.toUpperCase()

@@ -64,7 +64,7 @@ export async function getSkusByCategory(categoryId: number): Promise<Product[]> 
         const incomingEntry = incomingMap.get(sku.SkuID)
         const incoming = incomingEntry?.incoming ?? null
         const committed = incomingEntry?.committed ?? null
-        const scenario = getAvailabilityScenario('ATS', incoming)
+        const scenario = getAvailabilityScenario('ats')
         const displayResult = computeAvailabilityDisplay(
           scenario,
           'buyer_products',

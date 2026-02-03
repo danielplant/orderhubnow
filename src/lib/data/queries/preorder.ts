@@ -129,7 +129,7 @@ export async function getPreOrderProductsWithVariants(
     return []
   }
 
-  // Fetch SKUs from SQL database
+  // Fetch SKUs from SQL database with their collection
   // Match .NET behavior: Show sizes where ShowInPreOrder=true OR Quantity<1
   // This ensures all available sizes appear, not just those explicitly marked
   const skus = await prisma.sku.findMany({
@@ -139,6 +139,9 @@ export async function getPreOrderProductsWithVariants(
         { ShowInPreOrder: true },
         { Quantity: { lt: 1 } },
       ],
+    },
+    include: {
+      Collection: { select: { type: true } },
     },
     orderBy: [{ DisplayPriority: 'asc' }, { SkuID: 'asc' }],
   })
@@ -195,7 +198,8 @@ export async function getPreOrderProductsWithVariants(
       const incomingEntry = incomingMap.get(sku.SkuID)
       const incoming = incomingEntry?.incoming ?? null
       const committed = incomingEntry?.committed ?? null
-      const scenario = getAvailabilityScenario('PreOrder', incoming)
+      const collectionType = sku.Collection?.type ?? 'preorder_no_po'
+      const scenario = getAvailabilityScenario(collectionType)
       const displayResult = computeAvailabilityDisplay(
         scenario,
         'buyer_preorder',
