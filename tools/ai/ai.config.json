@@ -2,6 +2,9 @@
   "project": "orderhubnow",
   "default_base_branch": "main",
   "feature_branch_prefix": "feature/",
+  "worktree_root": "../worktrees",
+  "default_worktree": true,
+  "worktree_copy_env": true,
   "agent_branch_suffixes": [
     "ui",
     "db",
@@ -16,7 +19,10 @@
     "build": "npm run build",
     "schema_drift": "bash tools/ai/lib/check-schema-drift.sh",
     "apply_migration": "npm run apply-migration",
-    "clear_next_cache": "rm -rf .next"
+    "clear_next_cache": "rm -rf .next",
+    "db_tunnel": "npm run db:tunnel",
+    "test_dev": "npm run dev",
+    "test_prod": "rm -rf .next && npx prisma generate && npm run build && npm start"
   },
   "migration": {
     "schema_file": "prisma/schema.prisma",

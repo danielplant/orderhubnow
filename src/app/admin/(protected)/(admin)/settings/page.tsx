@@ -11,9 +11,12 @@ import {
   getMissingImageProducts,
   getMissingColorProducts,
 } from '@/lib/data/queries/settings'
+import { getAvailabilitySettingsWithMeta } from '@/lib/data/queries/availability-settings'
+import { getSyncStatus } from '@/lib/data/queries/shopify'
 import { SettingsForm } from '@/components/admin/settings-form'
 import { SizeOrderConfig } from '@/components/admin/size-order-config'
 import { MissingShopifyDataPanels } from '@/components/admin/missing-shopify-data-panels'
+import { AvailabilitySettingsPanel } from '@/components/admin/availability-settings-panel'
 
 export const dynamic = 'force-dynamic'
 
@@ -23,7 +26,7 @@ export default async function SettingsPage() {
     redirect('/admin/login')
   }
 
-  const [settings, companySettings, sizeOrderConfig, distinctSizes, missingSizeVariants, aliases, syncSettings, missingImages, missingColors] = await Promise.all([
+  const [settings, companySettings, sizeOrderConfig, distinctSizes, missingSizeVariants, aliases, syncSettings, missingImages, missingColors, availabilityMeta, syncStatus] = await Promise.all([
     getInventorySettings(),
     getCompanySettings(),
     getSizeOrderConfig(),
@@ -33,6 +36,8 @@ export default async function SettingsPage() {
     getSyncSettings(),
     getMissingImageProducts(),
     getMissingColorProducts(),
+    getAvailabilitySettingsWithMeta(),
+    getSyncStatus(),
   ])
 
   return (
@@ -51,6 +56,14 @@ export default async function SettingsPage() {
         initialValidatedSizes={sizeOrderConfig.ValidatedSizes}
         distinctSizes={distinctSizes}
         aliases={aliases}
+      />
+
+      <AvailabilitySettingsPanel
+        initialSettings={availabilityMeta.settings}
+        updatedAt={availabilityMeta.updatedAt?.toISOString() ?? null}
+        updatedBy={availabilityMeta.updatedBy ?? null}
+        lastSyncTime={syncStatus.lastSyncTime?.toISOString() ?? null}
+        lastSyncStatus={syncStatus.lastSyncStatus}
       />
 
       <MissingShopifyDataPanels

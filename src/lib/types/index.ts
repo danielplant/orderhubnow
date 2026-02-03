@@ -29,6 +29,17 @@ export type {
   InventorySettingsEditableFields,
   ActionResult,
 } from "./settings";
+export type {
+  AvailabilityScenario,
+  AvailabilityView,
+  ValueSource,
+  ZeroNullDisplay,
+  AvailabilityCellConfig,
+  AvailabilityMatrix,
+  AvailabilitySettingsRecord,
+  AvailabilityInputs,
+  AvailabilityDisplayResult,
+} from "./availability-settings";
 
 // Admin product types
 export type {

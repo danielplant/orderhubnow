@@ -4,6 +4,7 @@
  */
 
 import { getProducts, getCollectionsForFilter } from '@/lib/data/queries/products'
+import { getAvailabilitySettings } from '@/lib/data/queries/availability-settings'
 import { ProductsTable } from '@/components/admin/products-table'
 
 export const dynamic = 'force-dynamic'
@@ -24,8 +25,9 @@ export default async function RepProductsPage({ searchParams }: ProductsPageProp
   const params = await searchParams
 
   // Fetch data in parallel
+  const availabilitySettings = await getAvailabilitySettings()
   const [productsResult, collections] = await Promise.all([
-    getProducts(params),
+    getProducts(params, { view: 'rep_products', settings: availabilitySettings }),
     getCollectionsForFilter(),
   ])
 
@@ -41,6 +43,8 @@ export default async function RepProductsPage({ searchParams }: ProductsPageProp
         initialRows={productsResult.rows}
         total={productsResult.total}
         categories={collections}
+        availabilitySettings={availabilitySettings}
+        availabilityView="rep_products"
         readOnly
       />
     </main>

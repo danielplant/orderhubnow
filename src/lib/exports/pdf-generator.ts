@@ -20,7 +20,11 @@ import { parsePrice, getBaseSku, resolveColor } from '@/lib/utils'
 import { sortBySize, loadSizeOrderConfig, loadSizeAliasConfig } from '@/lib/utils/size-sort'
 import { getImageDataUrlByPolicyWithStats } from '@/lib/utils/pdf-images'
 import { type ExportPolicy } from '@/lib/data/queries/export-policy'
+import { getAvailabilitySettings, getIncomingMapForSkus } from '@/lib/data/queries/availability-settings'
+import { computeAvailabilityDisplay, getAvailabilityScenario } from '@/lib/availability/compute'
+import { AVAILABILITY_LEGEND_TEXT } from '@/lib/availability/settings'
 import type { CurrencyMode } from '@/lib/types/export'
+import type { AvailabilitySettingsRecord } from '@/lib/types/availability-settings'
 
 // ============================================================================
 // Types
@@ -86,6 +90,31 @@ function formatPrice(priceCAD: number, priceUSD: number, mode: CurrencyMode): st
       }
       return ''
   }
+}
+
+function resolveAvailableLabel(
+  settings: AvailabilitySettingsRecord,
+  collectionsRaw: string,
+  collectionTypes: Array<string | null | undefined>
+): string {
+  if (collectionsRaw === 'preorder') {
+    return settings.matrix.preorder_incoming.pdf.label
+  }
+  if (collectionsRaw === 'ats') {
+    return settings.matrix.ats.pdf.label
+  }
+  const types = collectionTypes.filter(Boolean) as string[]
+  const unique = new Set(types)
+  if (unique.size === 1) {
+    const onlyType = Array.from(unique)[0]
+    if (onlyType === 'PreOrder') {
+      return settings.matrix.preorder_incoming.pdf.label
+    }
+    if (onlyType === 'ATS') {
+      return settings.matrix.ats.pdf.label
+    }
+  }
+  return settings.matrix.ats.pdf.label
 }
 
 /**
@@ -193,9 +222,19 @@ export async function generatePdfExport(
       ThumbnailPath: true,
       CollectionID: true,
       Size: true,
-      Collection: { select: { name: true } },
+      Collection: { select: { name: true, type: true } },
     },
   })
+
+  const availabilitySettings = await getAvailabilitySettings()
+  const incomingMap = await getIncomingMapForSkus(rawSkus.map((sku) => sku.SkuID))
+  const showOnRoute = availabilitySettings.showOnRoutePdf
+  const onRouteLabel = availabilitySettings.onRouteLabelPdf
+  const availableLabel = resolveAvailableLabel(
+    availabilitySettings,
+    collectionsRaw,
+    rawSkus.map((sku) => sku.Collection?.type)
+  )
 
   // -------------------------------------------------------------------------
   // Step 3: Group and sort SKUs
@@ -205,7 +244,29 @@ export async function generatePdfExport(
   const skusWithParsed = rawSkus.map((sku) => {
     const baseSku = getBaseSku(sku.SkuID, sku.Size)
     const size = sku.Size || ''
-    return { ...sku, baseSku, size }
+    const incomingEntry = incomingMap.get(sku.SkuID)
+    const incoming = incomingEntry?.incoming ?? null
+    const committed = incomingEntry?.committed ?? null
+    const scenario = getAvailabilityScenario(sku.Collection?.type ?? null, incoming)
+    const displayResult = computeAvailabilityDisplay(
+      scenario,
+      'pdf',
+      {
+        quantity: sku.Quantity ?? 0,
+        onRoute: sku.OnRoute ?? 0,
+        incoming,
+        committed,
+      },
+      availabilitySettings
+    )
+
+    return {
+      ...sku,
+      baseSku,
+      size,
+      availableDisplay: displayResult.display,
+      availableNumeric: displayResult.numericValue,
+    }
   })
 
   const grouped = new Map<string, typeof skusWithParsed>()
@@ -326,17 +387,27 @@ export async function generatePdfExport(
   // -------------------------------------------------------------------------
   await onProgress('generating', 'Building PDF content', 75)
 
-  const totalQuantity = skus.reduce((sum, s) => sum + (s.Quantity ?? 0), 0)
+  const totalQuantity = skus.reduce((sum, s) => sum + (s.availableNumeric ?? 0), 0)
 
-  const html = generateProductsPdfHtml(skus, imageMap, {
-    totalStyles: sortedBaseSkus.length,
-    totalSkus: skus.length,
-    totalQuantity,
-    collectionName,
-    collectionsMode: collectionsRaw,
-    currency,
-    orientation,
-  })
+  const html = generateProductsPdfHtml(
+    skus,
+    imageMap,
+    {
+      totalStyles: sortedBaseSkus.length,
+      totalSkus: skus.length,
+      totalQuantity,
+      collectionName,
+      collectionsMode: collectionsRaw,
+      currency,
+      orientation,
+    },
+    {
+      availableLabel,
+      showOnRoute,
+      onRouteLabel,
+      legendText: AVAILABILITY_LEGEND_TEXT,
+    }
+  )
 
   // -------------------------------------------------------------------------
   // Step 7: Render PDF
@@ -385,6 +456,8 @@ interface SkuForPdf {
   ShopifyImageURL: string | null
   ThumbnailPath: string | null
   Collection: { name: string } | null
+  availableDisplay: string
+  availableNumeric: number | null
   isFirstInGroup: boolean
   isLastInGroup: boolean
 }
@@ -400,6 +473,12 @@ function generateProductsPdfHtml(
     collectionsMode: string
     currency: CurrencyMode
     orientation: 'landscape' | 'portrait'
+  },
+  availability: {
+    availableLabel: string
+    showOnRoute: boolean
+    onRouteLabel: string
+    legendText?: string
   }
 ): string {
   const now = new Date()
@@ -413,6 +492,9 @@ function generateProductsPdfHtml(
   }
 
   const isPortrait = summary.orientation === 'portrait'
+  const availableLabel = availability.availableLabel
+  const onRouteLabel = availability.onRouteLabel
+  const showOnRoute = availability.showOnRoute
 
   const tableBodyGroups = Array.from(groupedByBaseSku.entries())
     .map(([, groupSkus]) => {
@@ -447,18 +529,21 @@ function generateProductsPdfHtml(
                  <div class="product-details">${description.substring(0, 40)}${description.length > 40 ? '...' : ''}</div>`
               : ''
 
+            const onRouteValue = (sku.OnRoute ?? 0).toLocaleString()
             return `
               <tr class="${rowClass}">
                 <td class="image-cell">${imageCell}</td>
                 <td class="product-cell">${productCell}</td>
                 <td class="text-center">${sku.size || '—'}</td>
-                <td class="text-right">${(sku.Quantity ?? 0).toLocaleString()}</td>
+                <td class="text-right">${sku.availableDisplay}</td>
+                ${showOnRoute ? `<td class="text-right">${onRouteValue}</td>` : ''}
                 <td class="price-cell">${sku.isFirstInGroup ? packPrice : ''}</td>
                 <td class="price-cell">${sku.isFirstInGroup ? unitPrice : ''}</td>
                 <td class="text-center qty-col-portrait"></td>
               </tr>
             `
           } else {
+            const onRouteValue = (sku.OnRoute ?? 0).toLocaleString()
             return `
               <tr class="${rowClass}">
                 <td class="image-cell">${imageCell}</td>
@@ -467,7 +552,8 @@ function generateProductsPdfHtml(
                 <td class="desc-cell">${sku.isFirstInGroup ? description.substring(0, 35) + (description.length > 35 ? '...' : '') : ''}</td>
                 <td>${sku.isFirstInGroup ? color : ''}</td>
                 <td class="text-center">${sku.size || '—'}</td>
-                <td class="text-right">${(sku.Quantity ?? 0).toLocaleString()}</td>
+                <td class="text-right">${sku.availableDisplay}</td>
+                ${showOnRoute ? `<td class="text-right">${onRouteValue}</td>` : ''}
                 <td class="text-center">${sku.isFirstInGroup ? (sku.ShowInPreOrder ? 'Pre-Order' : 'ATS') : ''}</td>
                 <td class="text-center">${sku.isFirstInGroup ? unitsPerSku : ''}</td>
                 <td class="price-cell">${sku.isFirstInGroup ? packPrice : ''}</td>
@@ -498,7 +584,8 @@ function generateProductsPdfHtml(
         <th>Image</th>
         <th>Product</th>
         <th class="text-center">Size</th>
-        <th class="text-right">Avail</th>
+        <th class="text-right">${availableLabel}</th>
+        ${showOnRoute ? `<th class="text-right">${onRouteLabel}</th>` : ''}
         <th>Pack Price</th>
         <th>Unit Price</th>
         <th class="text-center qty-col-portrait">Order Qty</th>
@@ -510,7 +597,8 @@ function generateProductsPdfHtml(
         <th>Description</th>
         <th>Color</th>
         <th class="text-center">Size</th>
-        <th class="text-right">Avail</th>
+        <th class="text-right">${availableLabel}</th>
+        ${showOnRoute ? `<th class="text-right">${onRouteLabel}</th>` : ''}
         <th class="text-center">Status</th>
         <th class="text-center">Units</th>
         <th>Pack Price</th>
@@ -618,6 +706,12 @@ function generateProductsPdfHtml(
         color: #6b7280;
         line-height: 1.3;
       }
+
+      .pdf-legend {
+        margin-top: 10px;
+        font-size: 7pt;
+        color: #6b7280;
+      }
     </style>
 
     <div class="pdf-header">
@@ -642,7 +736,7 @@ function generateProductsPdfHtml(
       </div>
       <div class="pdf-summary-card">
         <div class="pdf-summary-value">${summary.totalQuantity.toLocaleString()}</div>
-        <div class="pdf-summary-label">Available</div>
+        <div class="pdf-summary-label">${availableLabel}</div>
       </div>
     </div>
 
@@ -652,6 +746,8 @@ function generateProductsPdfHtml(
       </thead>
       ${tableBodyGroups}
     </table>
+
+    ${availability.legendText ? `<div class="pdf-legend">${availability.legendText}</div>` : ''}
 
     <div class="pdf-footer">
       <span>Exported from OrderHub on ${formatDate(now)}</span>

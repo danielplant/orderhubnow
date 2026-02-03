@@ -16,8 +16,11 @@ Everything under `.ai/runs/` is **local-only** and **must be gitignored**.
 From the repo root:
 
 ```bash
-# start a new feature run
+# start a new feature run (creates a worktree if default_worktree=true)
 ./tools/ai/run.sh start "<feature description>"
+
+# or explicitly create a worktree for the run
+./tools/ai/run.sh start --worktree "<feature description>"
 
 # check that you are on the right branch + run
 ./tools/ai/run.sh status
@@ -28,8 +31,24 @@ From the repo root:
 # merge completed agent branches into the feature branch + run checks + handle migration gate
 ./tools/ai/run.sh implement
 
+# interactive local QA (required before finalize)
+./tools/ai/run.sh test
+
 # final checks + strict drift gate + generate PR title/body + push branch
 ./tools/ai/run.sh finalize
+```
+
+## Worktrees (recommended/default)
+
+When `default_worktree` is enabled, `start` creates a new worktree under `worktree_root`
+and initializes the run there. This lets you run multiple features in parallel without
+branch-switching conflicts.
+
+Useful commands:
+
+```bash
+./tools/ai/run.sh worktree list
+./tools/ai/run.sh worktree add "<feature description>"
 ```
 
 ## Workflow model
@@ -41,10 +60,11 @@ From the repo root:
 
 ## Branch continuity across tools (Cursor / Claude / Codex)
 
-- You always work in the same local repo folder unless you explicitly create a new worktree.
+- Open the **same worktree path** in Cursor, Claude Code, and Codex for a given feature.
 - The current Git branch is the source of truth, not the UI.
 - `./tools/ai/run.sh status` prints branch + runId + whether the branch matches the active run.
 - Any command that mutates state (`dispatch`, `implement`, `finalize`) refuses to run if you are on the wrong branch.
+- Use `./tools/ai/run.sh worktree list` to see all active worktrees and their branches.
 
 ## Next.js build artifacts
 
@@ -92,6 +112,27 @@ This tool **does not deploy** and refuses to deploy from feature branches.
 Deployment should occur only after:
 1) feature branch PR is merged (squash) and `origin/main` updates
 2) CI passes on main
+
+## Manual QA (required)
+
+Before `finalize`, you must record a QA confirmation:
+
+```bash
+./tools/ai/run.sh test
+```
+
+This is an **interactive** step that:
+- optionally opens the production DB tunnel (`npm run db:tunnel`)
+- asks whether you want to run **dev** or **prod-like** testing
+- records your confirmation under `.ai/runs/<runId>/qa/confirmed.md`
+
+Default prod-like command:
+
+```bash
+rm -rf .next && npx prisma generate && npm run build && npm start
+```
+
+If you skip QA, the tool requires a reason and records it.
 
 ### Recommended GitHub Actions pattern
 
