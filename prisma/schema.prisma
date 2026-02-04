@@ -1362,6 +1362,34 @@ model AvailabilitySettings {
   @@map("AvailabilitySettings")
 }
 
+/// Calculated field for display rules - user-defined formulas
+model CalculatedField {
+  id          Int      @id(map: "PK__Calculat__3214EC2771D5AFE2") @default(autoincrement()) @map("ID")
+  name        String   @unique(map: "UQ_CalculatedField_Name") @map("Name") @db.NVarChar(50)
+  formula     String   @map("Formula") @db.NVarChar(500)
+  description String?  @map("Description") @db.NVarChar(500)
+  isSystem    Boolean  @default(false, map: "DF__Calculate__IsSys__3B61941E") @map("IsSystem")
+  createdAt   DateTime @default(dbgenerated("getutcdate()"), map: "DF__Calculate__Creat__3C55B857") @map("CreatedAt")
+  updatedAt   DateTime @default(dbgenerated("getutcdate()"), map: "DF__Calculate__Updat__3D49DC90") @updatedAt @map("UpdatedAt")
+
+  @@map("CalculatedField")
+}
+
+/// Display rule for scenario x view matrix
+model DisplayRule {
+  id          Int      @id(map: "PK__DisplayR__3214EC27D8210383") @default(autoincrement()) @map("ID")
+  scenario    String   @map("Scenario") @db.NVarChar(50)
+  view        String   @map("View") @db.NVarChar(50)
+  fieldSource String   @map("FieldSource") @db.NVarChar(50)
+  label       String   @map("Label") @db.NVarChar(100)
+  rowBehavior String   @default("show", map: "DF__DisplayRu__RowBe__420E91AD") @map("RowBehavior") @db.NVarChar(20)
+  createdAt   DateTime @default(dbgenerated("getutcdate()"), map: "DF__DisplayRu__Creat__4302B5E6") @map("CreatedAt")
+  updatedAt   DateTime @default(dbgenerated("getutcdate()"), map: "DF__DisplayRu__Updat__43F6DA1F") @updatedAt @map("UpdatedAt")
+
+  @@unique([scenario, view], map: "UQ_DisplayRule_Scenario_View")
+  @@map("DisplayRule")
+}
+
 /// Size alias - maps raw Shopify size to canonical size for sorting
 model SizeAlias {
   ID            Int      @id(map: "PK_SizeAlias") @default(autoincrement())

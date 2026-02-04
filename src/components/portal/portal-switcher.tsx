@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { ChevronDown, Shield, Code, Users } from 'lucide-react'
+import { ChevronDown, Shield, Code, Users, Building2 } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -15,7 +15,7 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { RepPickerDialog } from './rep-picker-dialog'
 
-export type Portal = 'admin' | 'developer' | 'rep'
+export type Portal = 'admin' | 'business' | 'developer' | 'rep'
 
 interface PortalSwitcherProps {
   currentPortal: Portal
@@ -28,6 +28,11 @@ const portalConfig = {
     label: 'Admin Portal',
     icon: Shield,
     href: '/admin',
+  },
+  business: {
+    label: 'Business Portal',
+    icon: Building2,
+    href: '/admin/business',
   },
   developer: {
     label: 'Developer Portal',
@@ -43,7 +48,7 @@ const portalConfig = {
 
 /**
  * Portal switcher dropdown for admin users.
- * Allows switching between Admin, Developer, and Rep (via picker) portals.
+ * Allows switching between Admin, Business, Developer, and Rep (via picker) portals.
  *
  * Only renders for admin users and hides in view-as mode.
  */
@@ -87,6 +92,17 @@ export function PortalSwitcher({ currentPortal, userRole, isViewAsMode }: Portal
             <Link href="/admin" className="flex items-center gap-2">
               <Shield className="size-4" />
               Admin Portal
+            </Link>
+          </DropdownMenuItem>
+
+          {/* Business Portal */}
+          <DropdownMenuItem
+            asChild
+            className={cn(currentPortal === 'business' && 'bg-accent')}
+          >
+            <Link href="/admin/business" className="flex items-center gap-2">
+              <Building2 className="size-4" />
+              Business Portal
             </Link>
           </DropdownMenuItem>
 

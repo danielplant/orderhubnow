@@ -1,7 +1,7 @@
 /**
  * Navigation Constants
  * ============================================================================
- * Sidebar navigation for Admin, Rep, Developer, and Buyer portals.
+ * Sidebar navigation for Admin, Rep, Developer, Business, and Buyer portals.
  * Path: src/lib/constants/navigation.ts
  */
 
@@ -39,7 +39,15 @@ export const adminNav: NavItem[] = [
   { name: 'Settings', path: '/admin/settings' },
   { name: 'Feature Interest', path: '/admin/feature-interest' },
   { name: 'Export History', path: '/admin/export-history' },
+  { name: 'Business Portal', path: '/admin/business' },
   { name: 'Developer Portal', path: '/admin/dev' },
+]
+
+export const businessNav: NavItem[] = [
+  { name: 'Back to Admin', path: '/admin', back: true },
+
+  { name: 'CONFIGURATION', section: true },
+  { name: 'Display Rules', path: '/admin/business/display-rules' },
 ]
 
 export const devNav: NavItem[] = [
