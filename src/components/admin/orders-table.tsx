@@ -27,9 +27,13 @@ import { ColumnVisibilityToggle, type ColumnConfig } from '@/components/admin/co
 import { TransferPreviewModal } from '@/components/admin/transfer-preview-modal'
 import { BulkTransferModal } from '@/components/admin/bulk-transfer-modal'
 import { cn } from '@/lib/utils'
-import type { AdminOrderRow, OrderFacets, OrderStatus, OrdersListResult } from '@/lib/types/order'
+import type { AdminOrderRow, ArchiveTrashCounts, OrderFacets, OrderStatus, OrdersListResult, ViewMode } from '@/lib/types/order'
 import type { ShopifyValidationResult, BulkTransferResult, BatchValidationResult } from '@/lib/types/shopify'
-import { bulkUpdateStatus, updateOrderStatus } from '@/lib/data/actions/orders'
+import { bulkUpdateStatus, updateOrderStatus, archiveOrders, restoreFromArchive, trashOrders, restoreFromTrash, permanentlyDeleteOrders } from '@/lib/data/actions/orders'
+import { ViewModeTabs } from '@/components/admin/view-mode-tabs'
+import { ArchiveOrderDialog } from '@/components/admin/archive-order-dialog'
+import { TrashOrderDialog } from '@/components/admin/trash-order-dialog'
+import { PermanentDeleteDialog } from '@/components/admin/permanent-delete-dialog'
 import { validateOrderForShopify, transferOrderToShopify, bulkTransferOrdersToShopify, batchValidateOrdersForShopify } from '@/lib/data/actions/shopify'
 import { MoreHorizontal, AlertTriangle, SearchX } from 'lucide-react'
 
@@ -42,6 +46,7 @@ interface OrdersTableProps {
   total: number
   statusCounts: OrdersListResult['statusCounts']
   facets: OrderFacets
+  viewModeCounts: ArchiveTrashCounts
 }
 
 // ============================================================================
@@ -139,15 +144,18 @@ function formatShopifyStatus(s: string | null) {
 // Component
 // ============================================================================
 
-export function OrdersTable({ initialOrders, total, statusCounts, facets }: OrdersTableProps) {
+export function OrdersTable({ initialOrders, total, statusCounts, facets, viewModeCounts }: OrdersTableProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
 
   // Use shared table search hook for standard params
-  const { q, page, pageSize, sort, dir, setParam, setPage, setSort, getParam } = useTableSearch()
+  const { q, page, pageSize, sort, dir, setParam, setParams, setPage, setSort, getParam } = useTableSearch()
 
   // Default sort for orders
   const actualSort = sort || 'orderDate'
+
+  // View mode from URL (active/archived/trashed)
+  const viewMode: ViewMode = (getParam('viewMode') as ViewMode) || 'active'
 
   const [selectedIds, setSelectedIds] = React.useState<string[]>([])
   const [commentsOrderId, setCommentsOrderId] = React.useState<string | null>(null)
@@ -171,6 +179,13 @@ export function OrdersTable({ initialOrders, total, statusCounts, facets }: Orde
   const [isBulkTransferring, setIsBulkTransferring] = React.useState(false)
   const [bulkValidating, setBulkValidating] = React.useState(false)
   const [bulkValidationResult, setBulkValidationResult] = React.useState<BatchValidationResult | null>(null)
+
+  // Archive/Trash dialog state
+  const [archiveDialogOpen, setArchiveDialogOpen] = React.useState(false)
+  const [trashDialogOpen, setTrashDialogOpen] = React.useState(false)
+  const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false)
+  const [dialogOrderIds, setDialogOrderIds] = React.useState<string[]>([])
+  const [dialogShopifyCount, setDialogShopifyCount] = React.useState(0)
 
   // Column visibility state (localStorage persisted, no flash)
   const {
@@ -364,6 +379,79 @@ export function OrdersTable({ initialOrders, total, statusCounts, facets }: Orde
     [selectedIds, router]
   )
 
+  // Archive/Trash handlers
+  const openArchiveDialog = React.useCallback((orderIds: string[]) => {
+    const orders = initialOrders.filter(o => orderIds.includes(o.id))
+    const shopifyCount = orders.filter(o => o.inShopify).length
+    setDialogOrderIds(orderIds)
+    setDialogShopifyCount(shopifyCount)
+    setArchiveDialogOpen(true)
+  }, [initialOrders])
+
+  const openTrashDialog = React.useCallback((orderIds: string[]) => {
+    const orders = initialOrders.filter(o => orderIds.includes(o.id))
+    const shopifyCount = orders.filter(o => o.inShopify).length
+    setDialogOrderIds(orderIds)
+    setDialogShopifyCount(shopifyCount)
+    setTrashDialogOpen(true)
+  }, [initialOrders])
+
+  const openDeleteDialog = React.useCallback((orderIds: string[]) => {
+    const orders = initialOrders.filter(o => orderIds.includes(o.id))
+    const shopifyCount = orders.filter(o => o.inShopify).length
+    setDialogOrderIds(orderIds)
+    setDialogShopifyCount(shopifyCount)
+    setDeleteDialogOpen(true)
+  }, [initialOrders])
+
+  const handleArchive = React.useCallback(async () => {
+    setIsLoading(true)
+    try {
+      await archiveOrders({ orderIds: dialogOrderIds })
+      setSelectedIds([])
+      router.refresh()
+    } finally {
+      setIsLoading(false)
+    }
+  }, [dialogOrderIds, router])
+
+  const handleTrash = React.useCallback(async () => {
+    setIsLoading(true)
+    try {
+      await trashOrders({ orderIds: dialogOrderIds })
+      setSelectedIds([])
+      router.refresh()
+    } finally {
+      setIsLoading(false)
+    }
+  }, [dialogOrderIds, router])
+
+  const handleRestore = React.useCallback(async (orderIds: string[]) => {
+    setIsLoading(true)
+    try {
+      if (viewMode === 'archived') {
+        await restoreFromArchive({ orderIds })
+      } else if (viewMode === 'trashed') {
+        await restoreFromTrash({ orderIds })
+      }
+      setSelectedIds([])
+      router.refresh()
+    } finally {
+      setIsLoading(false)
+    }
+  }, [viewMode, router])
+
+  const handlePermanentDelete = React.useCallback(async () => {
+    setIsLoading(true)
+    try {
+      await permanentlyDeleteOrders({ orderIds: dialogOrderIds })
+      setSelectedIds([])
+      router.refresh()
+    } finally {
+      setIsLoading(false)
+    }
+  }, [dialogOrderIds, router])
+
   // Transfer handlers
   const handleValidateOrder = React.useCallback(async (orderId: string) => {
     modalSessionRef.current += 1 // New modal session
@@ -465,24 +553,29 @@ export function OrdersTable({ initialOrders, total, statusCounts, facets }: Orde
     }
   }, [previewOrderId, router])
 
+  // Calculate selected orders
+  const selectedOrders = React.useMemo(
+    () => initialOrders.filter((o) => selectedIds.includes(o.id)),
+    [initialOrders, selectedIds]
+  )
+
   // Calculate eligible orders for bulk transfer
   const eligibleForTransfer = React.useMemo(
     () =>
-      initialOrders.filter(
-        (o) => selectedIds.includes(o.id) && !o.inShopify && o.status !== 'Draft'
+      selectedOrders.filter(
+        (o) => !o.inShopify && o.status !== 'Draft'
       ),
-    [initialOrders, selectedIds]
+    [selectedOrders]
   )
 
   const ineligibleReasons = React.useMemo(() => {
     const reasons: Array<{ reason: string; count: number }> = []
-    const selected = initialOrders.filter((o) => selectedIds.includes(o.id))
-    const alreadySynced = selected.filter((o) => o.inShopify).length
-    const drafts = selected.filter((o) => o.status === 'Draft').length
+    const alreadySynced = selectedOrders.filter((o) => o.inShopify).length
+    const drafts = selectedOrders.filter((o) => o.status === 'Draft').length
     if (alreadySynced > 0) reasons.push({ reason: 'already in Shopify', count: alreadySynced })
     if (drafts > 0) reasons.push({ reason: 'Draft status', count: drafts })
     return reasons
-  }, [initialOrders, selectedIds])
+  }, [selectedOrders])
 
   const handleBulkTransfer = React.useCallback(async () => {
     // Filter out orders with discrepancies
@@ -746,7 +839,7 @@ export function OrdersTable({ initialOrders, total, statusCounts, facets }: Orde
               <DropdownMenuItem asChild>
                 <Link href={`/admin/orders/${o.id}`}>View</Link>
               </DropdownMenuItem>
-              {o.status === 'Pending' && !o.inShopify && (
+              {viewMode === 'active' && o.status === 'Pending' && !o.inShopify && (
                 <DropdownMenuItem asChild>
                   <Link href={`/buyer/my-order?editOrder=${o.id}&returnTo=/admin/orders`}>
                     Edit Items
@@ -756,43 +849,93 @@ export function OrdersTable({ initialOrders, total, statusCounts, facets }: Orde
               <DropdownMenuItem onClick={() => setCommentsOrderId(o.id)}>
                 Comments
               </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => setShipmentOrder(o)}
-                disabled={o.status === 'Cancelled' || o.status === 'Invoiced'}
-              >
-                Create Shipment
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => handleStatusChange(o.id, 'Processing')}
-                disabled={o.status === 'Processing'}
-              >
-                Mark Processing
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => handleStatusChange(o.id, 'Shipped')}
-                disabled={o.status === 'Shipped'}
-              >
-                Mark Shipped
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => handleStatusChange(o.id, 'Invoiced')}
-                disabled={o.status === 'Invoiced'}
-              >
-                Mark Invoiced
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => handleStatusChange(o.id, 'Cancelled')}
-                disabled={o.status === 'Cancelled'}
-                className="text-destructive"
-              >
-                Cancel Order
-              </DropdownMenuItem>
+              
+              {/* Active view: status changes and archive/trash */}
+              {viewMode === 'active' && (
+                <>
+                  <DropdownMenuItem
+                    onClick={() => setShipmentOrder(o)}
+                    disabled={o.status === 'Cancelled' || o.status === 'Invoiced'}
+                  >
+                    Create Shipment
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => handleStatusChange(o.id, 'Processing')}
+                    disabled={o.status === 'Processing'}
+                  >
+                    Mark Processing
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => handleStatusChange(o.id, 'Shipped')}
+                    disabled={o.status === 'Shipped'}
+                  >
+                    Mark Shipped
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => handleStatusChange(o.id, 'Invoiced')}
+                    disabled={o.status === 'Invoiced'}
+                  >
+                    Mark Invoiced
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => handleStatusChange(o.id, 'Cancelled')}
+                    disabled={o.status === 'Cancelled'}
+                    className="text-destructive"
+                  >
+                    Cancel Order
+                  </DropdownMenuItem>
+                  {/* Archive (only for Cancelled/Invoiced) */}
+                  {(o.status === 'Cancelled' || o.status === 'Invoiced') && (
+                    <DropdownMenuItem onClick={() => openArchiveDialog([o.id])}>
+                      Archive
+                    </DropdownMenuItem>
+                  )}
+                  {/* Trash (Shopify orders must be Cancelled/Invoiced) */}
+                  <DropdownMenuItem
+                    onClick={() => openTrashDialog([o.id])}
+                    disabled={o.inShopify && o.status !== 'Cancelled' && o.status !== 'Invoiced'}
+                    className="text-destructive"
+                  >
+                    Move to Trash
+                  </DropdownMenuItem>
+                </>
+              )}
+
+              {/* Archived view: restore and trash */}
+              {viewMode === 'archived' && (
+                <>
+                  <DropdownMenuItem onClick={() => handleRestore([o.id])}>
+                    Restore
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => openTrashDialog([o.id])}
+                    className="text-destructive"
+                  >
+                    Move to Trash
+                  </DropdownMenuItem>
+                </>
+              )}
+
+              {/* Trashed view: restore and delete permanently */}
+              {viewMode === 'trashed' && (
+                <>
+                  <DropdownMenuItem onClick={() => handleRestore([o.id])}>
+                    Restore
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => openDeleteDialog([o.id])}
+                    className="text-destructive"
+                  >
+                    Delete Permanently
+                  </DropdownMenuItem>
+                </>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         ),
       },
     ],
-    [handleStatusChange, handleValidateOrder, router]
+    [handleStatusChange, handleValidateOrder, router, viewMode, openArchiveDialog, openTrashDialog, openDeleteDialog, handleRestore]
   )
 
   // Filter columns by visibility
@@ -801,70 +944,152 @@ export function OrdersTable({ initialOrders, total, statusCounts, facets }: Orde
     [allColumns, visibleColumns]
   )
 
-  // Bulk actions
+  // Calculate eligible orders for archive (only Cancelled/Invoiced)
+  const eligibleForArchive = React.useMemo(() => {
+    return selectedOrders.filter(o => o.status === 'Cancelled' || o.status === 'Invoiced')
+  }, [selectedOrders])
+
+  // Calculate eligible orders for trash (Shopify orders must be Cancelled/Invoiced)
+  const eligibleForTrash = React.useMemo(() => {
+    return selectedOrders.filter(o => {
+      if (o.inShopify) {
+        return o.status === 'Cancelled' || o.status === 'Invoiced'
+      }
+      return true
+    })
+  }, [selectedOrders])
+
+  // Bulk actions - context-aware based on viewMode
   const bulkActions = React.useMemo(() => {
     if (selectedIds.length === 0) return []
 
-    const actions = [
-      {
-        label: 'Mark Processing',
-        onClick: () => handleBulkStatusChange('Processing'),
-      },
-      {
-        label: 'Mark Shipped',
-        onClick: () => handleBulkStatusChange('Shipped'),
-      },
-      {
-        label: 'Export QB',
-        onClick: () => doExport('qb'),
-      },
-    ]
+    const actions: Array<{ label: string; onClick: () => void; disabled?: boolean }> = []
 
-    // Add bulk transfer with eligibility info
-    if (eligibleForTransfer.length > 0) {
-      const label =
-        eligibleForTransfer.length < selectedIds.length
-          ? `Transfer to Shopify (${eligibleForTransfer.length} of ${selectedIds.length})`
-          : `Transfer to Shopify (${eligibleForTransfer.length})`
-      actions.push({
-        label,
-        onClick: async () => {
-          setBulkTransferResult(null)
-          setBulkValidationResult(null)
-          setBulkModalOpen(true)
-          setBulkValidating(true)
-
-          try {
-            // Run batch validation to check for customer name discrepancies
-            const result = await batchValidateOrdersForShopify(eligibleForTransfer.map(o => o.id))
-            setBulkValidationResult(result)
-          } catch (e) {
-            // If batch validation fails entirely, show all orders as needing review
-            console.error('Batch validation failed:', e)
-            setBulkValidationResult({
-              results: [],
-              hasDiscrepancies: true,
-              discrepancyOrderIds: eligibleForTransfer.map(o => o.id),
-              discrepancyOrders: eligibleForTransfer.map(o => ({
-                orderId: o.id,
-                orderNumber: o.orderNumber,
-                ohnName: o.storeName,
-                shopifyName: null,
-              })),
-              skippedDueToCapCount: 0,
-            })
-          } finally {
-            setBulkValidating(false)
-          }
+    // Active view actions
+    if (viewMode === 'active') {
+      actions.push(
+        {
+          label: 'Mark Processing',
+          onClick: () => handleBulkStatusChange('Processing'),
         },
-      })
+        {
+          label: 'Mark Shipped',
+          onClick: () => handleBulkStatusChange('Shipped'),
+        },
+        {
+          label: 'Export QB',
+          onClick: () => doExport('qb'),
+        }
+      )
+
+      // Add bulk transfer with eligibility info
+      if (eligibleForTransfer.length > 0) {
+        const label =
+          eligibleForTransfer.length < selectedIds.length
+            ? `Transfer to Shopify (${eligibleForTransfer.length} of ${selectedIds.length})`
+            : `Transfer to Shopify (${eligibleForTransfer.length})`
+        actions.push({
+          label,
+          onClick: async () => {
+            setBulkTransferResult(null)
+            setBulkValidationResult(null)
+            setBulkModalOpen(true)
+            setBulkValidating(true)
+
+            try {
+              const result = await batchValidateOrdersForShopify(eligibleForTransfer.map(o => o.id))
+              setBulkValidationResult(result)
+            } catch (e) {
+              console.error('Batch validation failed:', e)
+              setBulkValidationResult({
+                results: [],
+                hasDiscrepancies: true,
+                discrepancyOrderIds: eligibleForTransfer.map(o => o.id),
+                discrepancyOrders: eligibleForTransfer.map(o => ({
+                  orderId: o.id,
+                  orderNumber: o.orderNumber,
+                  ohnName: o.storeName,
+                  shopifyName: null,
+                })),
+                skippedDueToCapCount: 0,
+              })
+            } finally {
+              setBulkValidating(false)
+            }
+          },
+        })
+      }
+
+      // Archive action (only if there are eligible orders)
+      if (eligibleForArchive.length > 0) {
+        const archiveLabel = eligibleForArchive.length < selectedIds.length
+          ? `Archive (${eligibleForArchive.length} of ${selectedIds.length})`
+          : `Archive (${eligibleForArchive.length})`
+        actions.push({
+          label: archiveLabel,
+          onClick: () => openArchiveDialog(eligibleForArchive.map(o => o.id)),
+        })
+      }
+
+      // Trash action
+      if (eligibleForTrash.length > 0) {
+        const trashLabel = eligibleForTrash.length < selectedIds.length
+          ? `Move to Trash (${eligibleForTrash.length} of ${selectedIds.length})`
+          : `Move to Trash (${eligibleForTrash.length})`
+        actions.push({
+          label: trashLabel,
+          onClick: () => openTrashDialog(eligibleForTrash.map(o => o.id)),
+        })
+      }
+    }
+
+    // Archived view actions
+    if (viewMode === 'archived') {
+      actions.push(
+        {
+          label: `Restore (${selectedIds.length})`,
+          onClick: () => handleRestore(selectedIds),
+        },
+        {
+          label: `Move to Trash (${selectedIds.length})`,
+          onClick: () => openTrashDialog(selectedIds),
+        }
+      )
+    }
+
+    // Trashed view actions
+    if (viewMode === 'trashed') {
+      actions.push(
+        {
+          label: `Restore (${selectedIds.length})`,
+          onClick: () => handleRestore(selectedIds),
+        },
+        {
+          label: `Delete Permanently (${selectedIds.length})`,
+          onClick: () => openDeleteDialog(selectedIds),
+        }
+      )
     }
 
     return actions
-  }, [selectedIds, eligibleForTransfer, handleBulkStatusChange, doExport])
+  }, [selectedIds, eligibleForTransfer, eligibleForArchive, eligibleForTrash, handleBulkStatusChange, doExport, viewMode, openArchiveDialog, openTrashDialog, openDeleteDialog, handleRestore])
 
   return (
     <div className="space-y-4">
+      {/* View Mode Tabs (Active / Archived / Trash) */}
+      <ViewModeTabs
+        counts={viewModeCounts}
+        current={viewMode}
+        onChange={(mode) => {
+          // Update both params atomically to avoid race condition
+          setParams({
+            viewMode: mode === 'active' ? null : mode,
+            status: null,
+          })
+          setSelectedIds([])
+        }}
+      />
+
       {/* Tabs + Filters Container */}
       <div className="rounded-md border border-border bg-background">
         {/* Status Tabs */}
@@ -1070,6 +1295,33 @@ export function OrdersTable({ initialOrders, total, statusCounts, facets }: Orde
         discrepancyOrders={bulkValidationResult?.discrepancyOrders}
         skippedDueToCapCount={bulkValidationResult?.skippedDueToCapCount}
         onTransfer={handleBulkTransfer}
+      />
+
+      {/* Archive Dialog */}
+      <ArchiveOrderDialog
+        open={archiveDialogOpen}
+        onOpenChange={setArchiveDialogOpen}
+        orderCount={dialogOrderIds.length}
+        shopifyOrderCount={dialogShopifyCount}
+        onConfirm={handleArchive}
+      />
+
+      {/* Trash Dialog */}
+      <TrashOrderDialog
+        open={trashDialogOpen}
+        onOpenChange={setTrashDialogOpen}
+        orderCount={dialogOrderIds.length}
+        shopifyOrderCount={dialogShopifyCount}
+        onConfirm={handleTrash}
+      />
+
+      {/* Permanent Delete Dialog */}
+      <PermanentDeleteDialog
+        open={deleteDialogOpen}
+        onOpenChange={setDeleteDialogOpen}
+        orderCount={dialogOrderIds.length}
+        shopifyOrderCount={dialogShopifyCount}
+        onConfirm={handlePermanentDelete}
       />
     </div>
   )

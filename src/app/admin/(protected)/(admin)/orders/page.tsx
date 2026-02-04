@@ -1,4 +1,4 @@
-import { getOrders, getOrderFacets } from '@/lib/data/queries/orders'
+import { getOrders, getOrderFacets, getViewModeCounts } from '@/lib/data/queries/orders'
 import { OrdersTable } from '@/components/admin/orders-table'
 import { FulfillmentSyncIndicator } from '@/components/admin/fulfillment-sync-indicator'
 import { getFulfillmentSyncStatus } from '@/lib/data/actions/fulfillment-sync'
@@ -14,10 +14,11 @@ export default async function OrdersPage({ searchParams }: OrdersPageProps) {
   const params = await searchParams
 
   // Fetch data in parallel
-  const [ordersData, facets, syncStatus] = await Promise.all([
+  const [ordersData, facets, syncStatus, viewModeCounts] = await Promise.all([
     getOrders(params),
     getOrderFacets(),
     getFulfillmentSyncStatus(),
+    getViewModeCounts(),
   ])
 
   return (
@@ -35,6 +36,7 @@ export default async function OrdersPage({ searchParams }: OrdersPageProps) {
         total={ordersData.total}
         statusCounts={ordersData.statusCounts}
         facets={facets}
+        viewModeCounts={viewModeCounts}
       />
     </main>
   )
