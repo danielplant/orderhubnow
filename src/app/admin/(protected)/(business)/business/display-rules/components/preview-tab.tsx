@@ -4,6 +4,7 @@ import * as React from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Button } from '@/components/ui/button'
 import {
   Select,
   SelectContent,
@@ -11,6 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Search } from 'lucide-react'
 import type { CalculatedField, DisplayRule } from '../display-rules-client'
 
 const VIEWS = [
@@ -39,33 +41,54 @@ interface PreviewTabProps {
 }
 
 export function PreviewTab({ displayRules, calculatedFields }: PreviewTabProps) {
-  const [selectedView, setSelectedView] = React.useState('admin_products')
+  const [selectedView, setSelectedView] = React.useState('buyer_preorder')
   const [legendText, setLegendText] = React.useState('Blank means no inbound PO yet — pre-order allowed.')
   const [showLegendAts, setShowLegendAts] = React.useState(false)
   const [showLegendPreorderPo, setShowLegendPreorderPo] = React.useState(false)
   const [showLegendPreorderNoPo, setShowLegendPreorderNoPo] = React.useState(true)
-  const [previewData, setPreviewData] = React.useState<Record<string, PreviewRow[]>>({})
-  const [isLoadingPreview, setIsLoadingPreview] = React.useState(true)
 
-  // Load preview data
-  React.useEffect(() => {
-    async function loadPreview() {
-      setIsLoadingPreview(true)
-      try {
-        const res = await fetch('/api/admin/display-rules/preview')
-        if (res.ok) {
-          const data = await res.json()
-          setPreviewData(data.samples || {})
-        }
-      } catch (err) {
-        console.error('Failed to load preview:', err)
-      } finally {
-        setIsLoadingPreview(false)
-      }
+  // Single SKU search state
+  const [searchInput, setSearchInput] = React.useState('')
+  const [previewSku, setPreviewSku] = React.useState<PreviewRow | null>(null)
+  const [previewScenario, setPreviewScenario] = React.useState<string | null>(null)
+  const [previewMessage, setPreviewMessage] = React.useState<string>('Enter a SKU ID to preview display rules.')
+  const [isLoadingPreview, setIsLoadingPreview] = React.useState(false)
+  const [hasSearched, setHasSearched] = React.useState(false)
+
+  // Search for a SKU
+  const handleSearch = React.useCallback(async () => {
+    if (!searchInput.trim()) {
+      setPreviewMessage('Enter a SKU ID to preview display rules.')
+      setPreviewSku(null)
+      setPreviewScenario(null)
+      setHasSearched(false)
+      return
     }
 
-    loadPreview()
-  }, [])
+    setIsLoadingPreview(true)
+    setHasSearched(true)
+    try {
+      const res = await fetch(`/api/admin/display-rules/preview?sku=${encodeURIComponent(searchInput.trim())}`)
+      if (res.ok) {
+        const data = await res.json()
+        setPreviewSku(data.sku || null)
+        setPreviewScenario(data.scenario || null)
+        setPreviewMessage(data.message || '')
+      }
+    } catch (err) {
+      console.error('Failed to load preview:', err)
+      setPreviewMessage('Failed to load preview.')
+    } finally {
+      setIsLoadingPreview(false)
+    }
+  }, [searchInput])
+
+  // Handle Enter key in search input
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      handleSearch()
+    }
+  }
 
   // Build rule lookup
   const ruleMap = React.useMemo(() => {
@@ -132,11 +155,13 @@ export function PreviewTab({ displayRules, calculatedFields }: PreviewTabProps) 
     return '—'
   }
 
-  const scenarios = [
-    { key: 'ats', label: 'ATS (in stock)' },
-    { key: 'preorder_po', label: 'PreOrder (PO Placed)' },
-    { key: 'preorder_no_po', label: 'PreOrder (No PO Yet)' },
-  ]
+  // Get human-readable scenario label
+  const getScenarioLabel = (scenario: string | null): string => {
+    if (scenario === 'ats') return 'ATS (in stock)'
+    if (scenario === 'preorder_po') return 'PreOrder (PO Placed)'
+    if (scenario === 'preorder_no_po') return 'PreOrder (No PO Yet)'
+    return 'Unknown'
+  }
 
   return (
     <div className="space-y-6">
@@ -147,7 +172,7 @@ export function PreviewTab({ displayRules, calculatedFields }: PreviewTabProps) 
             <div>
               <CardTitle className="text-base">Live Preview</CardTitle>
               <CardDescription>
-                See how your display rules look with real product data.
+                Search for a SKU to see how display rules apply.
               </CardDescription>
             </div>
             <Select value={selectedView} onValueChange={setSelectedView}>
@@ -165,55 +190,78 @@ export function PreviewTab({ displayRules, calculatedFields }: PreviewTabProps) 
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          {isLoadingPreview ? (
-            <div className="text-muted-foreground">Loading preview...</div>
-          ) : (
-            <>
-              {scenarios.map((scenario) => {
-                const rows = previewData[scenario.key] || []
-                const rule = ruleMap[scenario.key]?.[selectedView]
+          {/* Search Input */}
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Input
+                placeholder="Enter SKU ID (e.g. ABC123-SM)"
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                className="pr-10"
+              />
+            </div>
+            <Button onClick={handleSearch} disabled={isLoadingPreview}>
+              <Search className="h-4 w-4 mr-2" />
+              Search
+            </Button>
+          </div>
 
-                return (
-                  <div key={scenario.key}>
-                    <div className="text-xs font-medium text-muted-foreground mb-2 flex items-center gap-2">
-                      {scenario.label}
-                      {rule && (
-                        <span className="text-[10px] bg-muted px-1.5 py-0.5 rounded">
-                          {rule.label}: {rule.fieldSource}
-                        </span>
-                      )}
-                    </div>
-                    <div className="space-y-2">
-                      {rows.length === 0 ? (
-                        <div className="text-xs text-muted-foreground italic">
-                          No sample SKUs found for this scenario.
-                        </div>
-                      ) : (
-                        rows.map((row) => (
-                          <div
-                            key={row.skuId}
-                            className="flex items-center justify-between rounded border px-3 py-2"
-                          >
-                            <div>
-                              <div className="font-medium text-sm">{row.skuId}</div>
-                              <div className="text-xs text-muted-foreground">{row.collectionName}</div>
-                            </div>
-                            <div className="text-right">
-                              <div className="font-semibold">
-                                {computeDisplayValue(scenario.key, row)}
-                              </div>
-                              <div className="text-[10px] text-muted-foreground">
-                                in: {row.incoming ?? '—'} / com: {row.committed ?? '—'}
-                              </div>
-                            </div>
-                          </div>
-                        ))
-                      )}
+          {/* Result */}
+          {isLoadingPreview ? (
+            <div className="text-muted-foreground text-sm">Searching...</div>
+          ) : previewSku && previewScenario ? (
+            <div className="space-y-3">
+              <div className="text-xs font-medium text-muted-foreground flex items-center gap-2">
+                Scenario: {getScenarioLabel(previewScenario)}
+                {ruleMap[previewScenario]?.[selectedView] && (
+                  <span className="text-[10px] bg-muted px-1.5 py-0.5 rounded">
+                    {ruleMap[previewScenario][selectedView].label}: {ruleMap[previewScenario][selectedView].fieldSource}
+                  </span>
+                )}
+              </div>
+              <div className="rounded border px-4 py-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="font-medium">{previewSku.skuId}</div>
+                    <div className="text-sm text-muted-foreground">{previewSku.description}</div>
+                    <div className="text-xs text-muted-foreground mt-1">
+                      Collection: {previewSku.collectionName ?? '(none)'}
                     </div>
                   </div>
-                )
-              })}
-            </>
+                  <div className="text-right">
+                    <div className="text-2xl font-bold">
+                      {computeDisplayValue(previewScenario, previewSku)}
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1">
+                      Display value for {VIEWS.find(v => v.key === selectedView)?.label}
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-3 pt-3 border-t grid grid-cols-4 gap-2 text-xs">
+                  <div>
+                    <div className="text-muted-foreground">On Hand</div>
+                    <div className="font-medium">{previewSku.quantity}</div>
+                  </div>
+                  <div>
+                    <div className="text-muted-foreground">On Route</div>
+                    <div className="font-medium">{previewSku.onRoute}</div>
+                  </div>
+                  <div>
+                    <div className="text-muted-foreground">Incoming</div>
+                    <div className="font-medium">{previewSku.incoming ?? '—'}</div>
+                  </div>
+                  <div>
+                    <div className="text-muted-foreground">Committed</div>
+                    <div className="font-medium">{previewSku.committed ?? '—'}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="text-sm text-muted-foreground py-4 text-center">
+              {hasSearched ? previewMessage : 'Enter a SKU ID above and click Search to preview display rules.'}
+            </div>
           )}
         </CardContent>
       </Card>

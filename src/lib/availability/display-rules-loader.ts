@@ -93,6 +93,43 @@ export function getScenarioFromCollectionType(
 }
 
 /**
+ * Result type for getDisplayRuleFor
+ */
+export interface DisplayRuleResult {
+  fieldSource: string
+  label: string
+  rowBehavior: 'show' | 'hide'
+}
+
+/**
+ * Get display rule configuration for a specific collection type and view.
+ * This is the main helper for consuming display rules in page components.
+ */
+export async function getDisplayRuleFor(
+  collectionType: string | null | undefined,
+  view: string
+): Promise<DisplayRuleResult> {
+  const data = await loadDisplayRulesData()
+  const scenario = getScenarioFromCollectionType(collectionType)
+  const ruleConfig = data.rules[scenario]?.[view]
+
+  if (!ruleConfig) {
+    // Fallback defaults
+    return {
+      fieldSource: 'on_hand',
+      label: 'Available',
+      rowBehavior: 'show',
+    }
+  }
+
+  return {
+    fieldSource: ruleConfig.fieldSource,
+    label: ruleConfig.label,
+    rowBehavior: (ruleConfig.rowBehavior === 'hide' ? 'hide' : 'show') as 'show' | 'hide',
+  }
+}
+
+/**
  * Compute the display value for a given scenario and view.
  */
 export function computeDisplayFromRules(

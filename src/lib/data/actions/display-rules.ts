@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { prisma } from '@/lib/prisma'
+import { clearDisplayRulesCache } from '@/lib/availability/display-rules-loader'
 
 export interface UpdateDisplayRuleInput {
   scenario: string
@@ -39,9 +40,13 @@ export async function updateDisplayRule(
       },
     })
 
+    // Clear in-memory cache so changes take effect immediately
+    clearDisplayRulesCache()
+
     revalidatePath('/admin/business/display-rules')
     revalidatePath('/admin/products')
     revalidatePath('/admin/inventory')
+    revalidatePath('/buyer', 'layout')
 
     return { success: true }
   } catch (err) {
@@ -85,9 +90,13 @@ export async function updateDisplayRulesBulk(
       }
     })
 
+    // Clear in-memory cache so changes take effect immediately
+    clearDisplayRulesCache()
+
     revalidatePath('/admin/business/display-rules')
     revalidatePath('/admin/products')
     revalidatePath('/admin/inventory')
+    revalidatePath('/buyer', 'layout')
 
     return { success: true, updated }
   } catch (err) {
