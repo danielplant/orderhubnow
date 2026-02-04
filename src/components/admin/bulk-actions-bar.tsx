@@ -9,6 +9,7 @@ export interface BulkActionsBarProps {
     label: string
     onClick: () => void
     variant?: 'default' | 'destructive'
+    disabled?: boolean
   }>
   onClear: () => void
   className?: string
@@ -38,12 +39,15 @@ export function BulkActionsBar({ count, actions, onClear, className }: BulkActio
             key={a.label}
             type="button"
             onClick={a.onClick}
+            disabled={a.disabled}
             className={cn(
               'rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
               focusRing,
-              a.variant === 'destructive'
-                ? 'text-error hover:bg-error/10'
-                : 'text-foreground hover:bg-muted/50'
+              a.disabled
+                ? 'text-muted-foreground/50 cursor-not-allowed'
+                : a.variant === 'destructive'
+                  ? 'text-error hover:bg-error/10'
+                  : 'text-foreground hover:bg-muted/50'
             )}
           >
             {a.label}
