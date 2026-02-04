@@ -26,12 +26,17 @@ import { FilterChips, type FilterChip } from '@/components/admin/filter-chips'
 import { ColumnVisibilityToggle, type ColumnConfig } from '@/components/admin/column-visibility-toggle'
 import { TransferPreviewModal } from '@/components/admin/transfer-preview-modal'
 import { BulkTransferModal } from '@/components/admin/bulk-transfer-modal'
+import { CancelOrderDialog } from '@/components/admin/cancel-order-dialog'
+import { CloseOrderDialog } from '@/components/admin/close-order-dialog'
+import { ShopifySyncErrorDialog, type SyncErrorAction } from '@/components/admin/shopify-sync-error-dialog'
 import { cn } from '@/lib/utils'
 import type { AdminOrderRow, OrderFacets, OrderStatus, OrdersListResult } from '@/lib/types/order'
 import type { ShopifyValidationResult, BulkTransferResult, BatchValidationResult } from '@/lib/types/shopify'
+import type { ShopifyCancelReason } from '@/lib/shopify/client'
 import { bulkUpdateStatus, updateOrderStatus } from '@/lib/data/actions/orders'
 import { validateOrderForShopify, transferOrderToShopify, bulkTransferOrdersToShopify, batchValidateOrdersForShopify } from '@/lib/data/actions/shopify'
 import { MoreHorizontal, AlertTriangle, SearchX } from 'lucide-react'
+import { toast } from 'sonner'
 
 // ============================================================================
 // Types
@@ -171,6 +176,35 @@ export function OrdersTable({ initialOrders, total, statusCounts, facets }: Orde
   const [isBulkTransferring, setIsBulkTransferring] = React.useState(false)
   const [bulkValidating, setBulkValidating] = React.useState(false)
   const [bulkValidationResult, setBulkValidationResult] = React.useState<BatchValidationResult | null>(null)
+
+  // Cancel order dialog state
+  const [cancelDialogOpen, setCancelDialogOpen] = React.useState(false)
+  const [cancelOrderData, setCancelOrderData] = React.useState<{
+    id: string
+    orderNumber: string
+    isShopifyOrder: boolean
+  } | null>(null)
+  const [pendingCancelOptions, setPendingCancelOptions] = React.useState<{
+    reason: ShopifyCancelReason
+    notifyCustomer: boolean
+    restockInventory: boolean
+  } | null>(null)
+
+  // Close order (Invoiced) dialog state
+  const [closeDialogOpen, setCloseDialogOpen] = React.useState(false)
+  const [closeOrderData, setCloseOrderData] = React.useState<{
+    id: string
+    orderNumber: string
+  } | null>(null)
+
+  // Shopify sync error dialog state
+  const [syncErrorDialogOpen, setSyncErrorDialogOpen] = React.useState(false)
+  const [syncErrorData, setSyncErrorData] = React.useState<{
+    orderNumber: string
+    errorMessage: string
+    action: 'cancel' | 'close'
+    orderId: string
+  } | null>(null)
 
   // Column visibility state (localStorage persisted, no flash)
   const {
@@ -349,6 +383,161 @@ export function OrdersTable({ initialOrders, total, statusCounts, facets }: Orde
     [router]
   )
 
+  // Handle cancel order click - opens dialog for confirmation
+  const handleCancelClick = React.useCallback((order: AdminOrderRow) => {
+    setCancelOrderData({
+      id: order.id,
+      orderNumber: order.orderNumber,
+      isShopifyOrder: order.inShopify,
+    })
+    setCancelDialogOpen(true)
+  }, [])
+
+  // Handle cancel order confirmation from dialog
+  const handleCancelConfirm = React.useCallback(async (options: {
+    reason: ShopifyCancelReason
+    notifyCustomer: boolean
+    restockInventory: boolean
+  }) => {
+    if (!cancelOrderData) return
+
+    const result = await updateOrderStatus({
+      orderId: cancelOrderData.id,
+      newStatus: 'Cancelled',
+      options: {
+        cancelReason: options.reason,
+        notifyCustomer: options.notifyCustomer,
+        restockInventory: options.restockInventory,
+      },
+    })
+
+    if (result.success) {
+      toast.success(`Order ${cancelOrderData.orderNumber} cancelled`)
+      setCancelDialogOpen(false)
+      setCancelOrderData(null)
+      router.refresh()
+    } else if (result.shopifySync && !result.shopifySync.success) {
+      // Shopify sync failed - show error dialog
+      setCancelDialogOpen(false)
+      setPendingCancelOptions(options)
+      setSyncErrorData({
+        orderId: cancelOrderData.id,
+        orderNumber: cancelOrderData.orderNumber,
+        errorMessage: result.shopifySync.error || 'Unknown error',
+        action: 'cancel',
+      })
+      setSyncErrorDialogOpen(true)
+    } else {
+      toast.error('Failed to cancel order', {
+        description: result.error,
+      })
+    }
+  }, [cancelOrderData, router])
+
+  // Handle invoiced click - opens dialog for Shopify orders
+  const handleInvoicedClick = React.useCallback((order: AdminOrderRow) => {
+    if (order.inShopify) {
+      // Show confirmation dialog for Shopify orders
+      setCloseOrderData({
+        id: order.id,
+        orderNumber: order.orderNumber,
+      })
+      setCloseDialogOpen(true)
+    } else {
+      // Non-Shopify order - just update directly
+      handleStatusChange(order.id, 'Invoiced')
+    }
+  }, [handleStatusChange])
+
+  // Handle invoiced confirmation from dialog
+  const handleInvoicedConfirm = React.useCallback(async () => {
+    if (!closeOrderData) return
+
+    const result = await updateOrderStatus({
+      orderId: closeOrderData.id,
+      newStatus: 'Invoiced',
+    })
+
+    if (result.success) {
+      toast.success(`Order ${closeOrderData.orderNumber} marked as Invoiced`)
+      setCloseDialogOpen(false)
+      setCloseOrderData(null)
+      router.refresh()
+    } else if (result.shopifySync && !result.shopifySync.success) {
+      // Shopify sync failed - show error dialog
+      setCloseDialogOpen(false)
+      setSyncErrorData({
+        orderId: closeOrderData.id,
+        orderNumber: closeOrderData.orderNumber,
+        errorMessage: result.shopifySync.error || 'Unknown error',
+        action: 'close',
+      })
+      setSyncErrorDialogOpen(true)
+    } else {
+      toast.error('Failed to mark order as Invoiced', {
+        description: result.error,
+      })
+    }
+  }, [closeOrderData, router])
+
+  // Handle sync error dialog action
+  const handleSyncErrorAction = React.useCallback(async (action: SyncErrorAction) => {
+    if (!syncErrorData) return
+
+    if (action === 'abort') {
+      // User chose to abort - just close everything
+      setSyncErrorDialogOpen(false)
+      setSyncErrorData(null)
+      setPendingCancelOptions(null)
+      setCancelOrderData(null)
+      setCloseOrderData(null)
+      return
+    }
+
+    if (action === 'retry') {
+      // User chose to retry - reopen the original dialog
+      setSyncErrorDialogOpen(false)
+      if (syncErrorData.action === 'cancel' && cancelOrderData) {
+        setCancelDialogOpen(true)
+      } else if (syncErrorData.action === 'close' && closeOrderData) {
+        setCloseDialogOpen(true)
+      }
+      setSyncErrorData(null)
+      return
+    }
+
+    if (action === 'proceed') {
+      // User chose to proceed without Shopify sync
+      const result = await updateOrderStatus({
+        orderId: syncErrorData.orderId,
+        newStatus: syncErrorData.action === 'cancel' ? 'Cancelled' : 'Invoiced',
+        options: {
+          skipShopifySync: true,
+          ...(syncErrorData.action === 'cancel' && pendingCancelOptions ? {
+            cancelReason: pendingCancelOptions.reason,
+            notifyCustomer: pendingCancelOptions.notifyCustomer,
+            restockInventory: pendingCancelOptions.restockInventory,
+          } : {}),
+        },
+      })
+
+      if (result.success) {
+        toast.success(`Order ${syncErrorData.orderNumber} ${syncErrorData.action === 'cancel' ? 'cancelled' : 'marked as Invoiced'} (local only)`)
+        router.refresh()
+      } else {
+        toast.error('Failed to update order', {
+          description: result.error,
+        })
+      }
+
+      setSyncErrorDialogOpen(false)
+      setSyncErrorData(null)
+      setPendingCancelOptions(null)
+      setCancelOrderData(null)
+      setCloseOrderData(null)
+    }
+  }, [syncErrorData, cancelOrderData, closeOrderData, pendingCancelOptions, router])
+
   const handleBulkStatusChange = React.useCallback(
     async (newStatus: OrderStatus) => {
       if (selectedIds.length === 0) return
@@ -469,7 +658,7 @@ export function OrdersTable({ initialOrders, total, statusCounts, facets }: Orde
   const eligibleForTransfer = React.useMemo(
     () =>
       initialOrders.filter(
-        (o) => selectedIds.includes(o.id) && !o.inShopify && o.status !== 'Draft'
+        (o) => selectedIds.includes(o.id) && !o.inShopify && o.status !== 'Draft' && o.status !== 'Cancelled'
       ),
     [initialOrders, selectedIds]
   )
@@ -479,10 +668,21 @@ export function OrdersTable({ initialOrders, total, statusCounts, facets }: Orde
     const selected = initialOrders.filter((o) => selectedIds.includes(o.id))
     const alreadySynced = selected.filter((o) => o.inShopify).length
     const drafts = selected.filter((o) => o.status === 'Draft').length
+    const cancelled = selected.filter((o) => o.status === 'Cancelled').length
     if (alreadySynced > 0) reasons.push({ reason: 'already in Shopify', count: alreadySynced })
     if (drafts > 0) reasons.push({ reason: 'Draft status', count: drafts })
+    if (cancelled > 0) reasons.push({ reason: 'Cancelled status', count: cancelled })
     return reasons
   }, [initialOrders, selectedIds])
+
+  // Calculate orders eligible for status changes (not cancelled or invoiced)
+  const eligibleForStatusChange = React.useMemo(
+    () =>
+      initialOrders.filter(
+        (o) => selectedIds.includes(o.id) && o.status !== 'Cancelled' && o.status !== 'Invoiced'
+      ),
+    [initialOrders, selectedIds]
+  )
 
   const handleBulkTransfer = React.useCallback(async () => {
     // Filter out orders with discrepancies
@@ -764,25 +964,25 @@ export function OrdersTable({ initialOrders, total, statusCounts, facets }: Orde
               </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={() => handleStatusChange(o.id, 'Processing')}
-                disabled={o.status === 'Processing'}
+                disabled={o.status === 'Processing' || o.status === 'Cancelled' || o.status === 'Invoiced'}
               >
                 Mark Processing
               </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={() => handleStatusChange(o.id, 'Shipped')}
-                disabled={o.status === 'Shipped'}
+                disabled={o.status === 'Shipped' || o.status === 'Cancelled' || o.status === 'Invoiced'}
               >
                 Mark Shipped
               </DropdownMenuItem>
               <DropdownMenuItem
-                onClick={() => handleStatusChange(o.id, 'Invoiced')}
-                disabled={o.status === 'Invoiced'}
+                onClick={() => handleInvoicedClick(o)}
+                disabled={o.status === 'Invoiced' || o.status === 'Cancelled'}
               >
                 Mark Invoiced
               </DropdownMenuItem>
               <DropdownMenuItem
-                onClick={() => handleStatusChange(o.id, 'Cancelled')}
-                disabled={o.status === 'Cancelled'}
+                onClick={() => handleCancelClick(o)}
+                disabled={o.status === 'Cancelled' || o.status === 'Invoiced'}
                 className="text-destructive"
               >
                 Cancel Order
@@ -792,7 +992,7 @@ export function OrdersTable({ initialOrders, total, statusCounts, facets }: Orde
         ),
       },
     ],
-    [handleStatusChange, handleValidateOrder, router]
+    [handleStatusChange, handleValidateOrder, handleCancelClick, handleInvoicedClick, router]
   )
 
   // Filter columns by visibility
@@ -805,20 +1005,49 @@ export function OrdersTable({ initialOrders, total, statusCounts, facets }: Orde
   const bulkActions = React.useMemo(() => {
     if (selectedIds.length === 0) return []
 
-    const actions = [
-      {
-        label: 'Mark Processing',
-        onClick: () => handleBulkStatusChange('Processing'),
+    const actions: Array<{ label: string; onClick: () => void; disabled?: boolean }> = []
+
+    // Status change actions - only show if there are eligible orders
+    const eligibleCount = eligibleForStatusChange.length
+    const hasEligible = eligibleCount > 0
+    const showCount = eligibleCount < selectedIds.length
+
+    actions.push({
+      label: showCount ? `Mark Processing (${eligibleCount} of ${selectedIds.length})` : 'Mark Processing',
+      onClick: async () => {
+        if (!hasEligible) return
+        setIsLoading(true)
+        try {
+          await bulkUpdateStatus({ orderIds: eligibleForStatusChange.map(o => o.id), newStatus: 'Processing' })
+          setSelectedIds([])
+          router.refresh()
+        } finally {
+          setIsLoading(false)
+        }
       },
-      {
-        label: 'Mark Shipped',
-        onClick: () => handleBulkStatusChange('Shipped'),
+      disabled: !hasEligible,
+    })
+
+    actions.push({
+      label: showCount ? `Mark Shipped (${eligibleCount} of ${selectedIds.length})` : 'Mark Shipped',
+      onClick: async () => {
+        if (!hasEligible) return
+        setIsLoading(true)
+        try {
+          await bulkUpdateStatus({ orderIds: eligibleForStatusChange.map(o => o.id), newStatus: 'Shipped' })
+          setSelectedIds([])
+          router.refresh()
+        } finally {
+          setIsLoading(false)
+        }
       },
-      {
-        label: 'Export QB',
-        onClick: () => doExport('qb'),
-      },
-    ]
+      disabled: !hasEligible,
+    })
+
+    actions.push({
+      label: 'Export QB',
+      onClick: () => doExport('qb'),
+    })
 
     // Add bulk transfer with eligibility info
     if (eligibleForTransfer.length > 0) {
@@ -861,7 +1090,7 @@ export function OrdersTable({ initialOrders, total, statusCounts, facets }: Orde
     }
 
     return actions
-  }, [selectedIds, eligibleForTransfer, handleBulkStatusChange, doExport])
+  }, [selectedIds, eligibleForTransfer, eligibleForStatusChange, doExport, router])
 
   return (
     <div className="space-y-4">
@@ -1071,6 +1300,39 @@ export function OrdersTable({ initialOrders, total, statusCounts, facets }: Orde
         skippedDueToCapCount={bulkValidationResult?.skippedDueToCapCount}
         onTransfer={handleBulkTransfer}
       />
+
+      {/* Cancel Order Dialog */}
+      {cancelOrderData && (
+        <CancelOrderDialog
+          open={cancelDialogOpen}
+          onOpenChange={setCancelDialogOpen}
+          orderNumber={cancelOrderData.orderNumber}
+          isShopifyOrder={cancelOrderData.isShopifyOrder}
+          onConfirm={handleCancelConfirm}
+        />
+      )}
+
+      {/* Close Order (Invoiced) Dialog */}
+      {closeOrderData && (
+        <CloseOrderDialog
+          open={closeDialogOpen}
+          onOpenChange={setCloseDialogOpen}
+          orderNumber={closeOrderData.orderNumber}
+          onConfirm={handleInvoicedConfirm}
+        />
+      )}
+
+      {/* Shopify Sync Error Dialog */}
+      {syncErrorData && (
+        <ShopifySyncErrorDialog
+          open={syncErrorDialogOpen}
+          onOpenChange={setSyncErrorDialogOpen}
+          orderNumber={syncErrorData.orderNumber}
+          errorMessage={syncErrorData.errorMessage}
+          action={syncErrorData.action}
+          onAction={handleSyncErrorAction}
+        />
+      )}
     </div>
   )
 }

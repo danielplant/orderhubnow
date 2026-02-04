@@ -620,3 +620,48 @@ export async function logShipmentDatesChangedByAdmin(params: {
     orderNumber: params.orderNumber,
   })
 }
+
+// ============================================================================
+// Order Status Change Logging (with Shopify sync tracking)
+// ============================================================================
+
+/**
+ * Log an order status change with optional Shopify sync information.
+ * Used by updateOrderStatus() to track status changes and Shopify sync results.
+ */
+export async function logOrderStatusChange(params: {
+  orderId: string
+  orderNumber: string
+  oldStatus: string
+  newStatus: string
+  performedBy: string
+  shopifySync?: {
+    attempted: boolean
+    success: boolean
+    error?: string
+    skippedByUser?: boolean
+  }
+}): Promise<void> {
+  const shopifySyncNote = params.shopifySync?.attempted
+    ? params.shopifySync.success
+      ? ' (synced to Shopify)'
+      : ` (Shopify sync failed: ${params.shopifySync.error})`
+    : params.shopifySync?.skippedByUser
+      ? ' (Shopify sync skipped by user)'
+      : ''
+
+  await logActivity({
+    entityType: 'order',
+    entityId: params.orderId,
+    action: 'order_status_changed',
+    description: `Order ${params.orderNumber} status changed: ${params.oldStatus} → ${params.newStatus}${shopifySyncNote}`,
+    oldValues: { status: params.oldStatus },
+    newValues: {
+      status: params.newStatus,
+      shopifySync: params.shopifySync,
+    },
+    performedBy: params.performedBy,
+    orderId: params.orderId,
+    orderNumber: params.orderNumber,
+  })
+}

@@ -4,10 +4,12 @@ import { revalidatePath } from 'next/cache'
 import { headers } from 'next/headers'
 import { prisma } from '@/lib/prisma'
 import { auth } from '@/lib/auth/providers'
-import type { OrderStatus, CreateOrderResult, UpdateOrderInput, UpdateOrderResult } from '@/lib/types/order'
+import type { OrderStatus, CreateOrderResult, UpdateOrderInput, UpdateOrderResult, StatusChangeOptions, StatusChangeResult } from '@/lib/types/order'
 import { createOrderInputSchema, type CreateOrderInput } from '@/lib/schemas/order'
 import { sendOrderEmails } from '@/lib/email/send-order-emails'
 import { validateShipDates } from '@/lib/validation/ship-window'
+import { shopify } from '@/lib/shopify/client'
+import { logOrderStatusChange } from '@/lib/audit/activity-logger'
 
 // ============================================================================
 // Auth Helpers
@@ -59,23 +61,153 @@ async function blockIfAdminViewAs(): Promise<{ blocked: true; error: string } | 
 // ============================================================================
 
 /**
- * Update a single order's status.
- * Matches .NET: ddlCurrentOrderStatus_SelectedIndexChanged
+ * Sync a status change to Shopify (cancel or close).
+ * Only called for orders that are in Shopify.
+ */
+async function syncStatusToShopify(
+  shopifyOrderId: string,
+  oldStatus: OrderStatus,
+  newStatus: OrderStatus,
+  options?: StatusChangeOptions
+): Promise<{ success: boolean; error?: string }> {
+  // Cancel: transitioning to Cancelled status
+  if (newStatus === 'Cancelled' && oldStatus !== 'Cancelled') {
+    const result = await shopify.orders.cancel(shopifyOrderId, {
+      reason: options?.cancelReason ?? 'STAFF',
+      notifyCustomer: options?.notifyCustomer ?? true,
+      restock: options?.restockInventory ?? true,
+      staffNote: 'Cancelled from Order Hub',
+    })
+
+    if (!result.success) {
+      return { success: false, error: result.error }
+    }
+
+    return { success: true }
+  }
+
+  // Close: transitioning to Invoiced status
+  if (newStatus === 'Invoiced' && oldStatus !== 'Invoiced') {
+    const result = await shopify.orders.close(shopifyOrderId)
+
+    if (!result.success) {
+      return { success: false, error: result.error }
+    }
+
+    return { success: true }
+  }
+
+  // Other status changes don't need to sync to Shopify
+  return { success: true }
+}
+
+/**
+ * Update a single order's status with optional Shopify sync.
+ * 
+ * For orders transferred to Shopify:
+ * - Cancelled -> calls Shopify orderCancel mutation
+ * - Invoiced -> calls Shopify orderClose mutation
+ * 
+ * Returns sync result so UI can handle success/failure appropriately.
  */
 export async function updateOrderStatus(input: {
   orderId: string
   newStatus: OrderStatus
-}): Promise<{ success: boolean; error?: string }> {
+  options?: StatusChangeOptions
+}): Promise<StatusChangeResult> {
   try {
-    await requireAdmin()
-    
+    const session = await requireAdmin()
+    const performedBy = session?.user?.name || session?.user?.loginId || 'Unknown'
+
+    // Fetch order to check Shopify status and current status
+    const order = await prisma.customerOrders.findUnique({
+      where: { ID: BigInt(input.orderId) },
+      select: {
+        ID: true,
+        OrderNumber: true,
+        OrderStatus: true,
+        IsTransferredToShopify: true,
+        ShopifyOrderID: true,
+      },
+    })
+
+    if (!order) {
+      return { success: false, error: 'Order not found' }
+    }
+
+    const oldStatus = order.OrderStatus as OrderStatus
+
+    // Prevent changes to terminal states (Cancelled/Invoiced)
+    if (oldStatus === 'Cancelled' || oldStatus === 'Invoiced') {
+      return { 
+        success: false, 
+        error: `Cannot change status of ${oldStatus.toLowerCase()} orders` 
+      }
+    }
+
+    let shopifySyncResult: StatusChangeResult['shopifySync']
+
+    // Check if this is a Shopify order and sync is needed
+    const isShopifyOrder = order.IsTransferredToShopify && order.ShopifyOrderID
+    const needsShopifySync = 
+      isShopifyOrder && 
+      !input.options?.skipShopifySync &&
+      (input.newStatus === 'Cancelled' || input.newStatus === 'Invoiced')
+
+    if (needsShopifySync && shopify.isConfigured()) {
+      const syncResult = await syncStatusToShopify(
+        order.ShopifyOrderID!,
+        oldStatus,
+        input.newStatus,
+        input.options
+      )
+
+      shopifySyncResult = {
+        attempted: true,
+        success: syncResult.success,
+        error: syncResult.error,
+      }
+
+      // If sync failed, return the error to let UI decide what to do
+      // Don't update local status yet - let caller handle it
+      if (!syncResult.success) {
+        return {
+          success: false,
+          error: syncResult.error,
+          shopifySync: shopifySyncResult,
+        }
+      }
+    } else if (isShopifyOrder && (input.newStatus === 'Cancelled' || input.newStatus === 'Invoiced')) {
+      // Shopify order but sync was skipped (user chose to proceed without sync)
+      shopifySyncResult = {
+        attempted: false,
+        success: false,
+      }
+    }
+
+    // Update local status
     await prisma.customerOrders.update({
       where: { ID: BigInt(input.orderId) },
       data: { OrderStatus: input.newStatus },
     })
 
+    // Log the status change
+    await logOrderStatusChange({
+      orderId: input.orderId,
+      orderNumber: order.OrderNumber,
+      oldStatus,
+      newStatus: input.newStatus,
+      performedBy,
+      shopifySync: shopifySyncResult,
+    })
+
     revalidatePath('/admin/orders')
-    return { success: true }
+    revalidatePath(`/admin/orders/${input.orderId}`)
+    
+    return { 
+      success: true, 
+      shopifySync: shopifySyncResult,
+    }
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Failed to update status'
     return { success: false, error: message }
@@ -84,16 +216,119 @@ export async function updateOrderStatus(input: {
 
 /**
  * Bulk update status for multiple orders.
+ * 
+ * For Cancel/Invoiced on Shopify orders, processes each order individually
+ * to sync with Shopify and tracks which succeeded/failed.
  */
 export async function bulkUpdateStatus(input: {
   orderIds: string[]
   newStatus: OrderStatus
-}): Promise<{ success: boolean; updated: number; error?: string }> {
+  options?: StatusChangeOptions
+}): Promise<{ 
+  success: boolean
+  updated: number
+  skipped?: number
+  shopifyResults?: Array<{ orderId: string; orderNumber: string; synced: boolean; error?: string }>
+  error?: string 
+}> {
   try {
-    await requireAdmin()
-    
+    const session = await requireAdmin()
+    const performedBy = session?.user?.name || session?.user?.loginId || 'Unknown'
+
+    // For Cancel/Invoiced, we need to process Shopify orders individually
+    const needsShopifySync = 
+      (input.newStatus === 'Cancelled' || input.newStatus === 'Invoiced') && 
+      !input.options?.skipShopifySync &&
+      shopify.isConfigured()
+
+    if (needsShopifySync) {
+      // Fetch orders to check which are in Shopify
+      const allOrders = await prisma.customerOrders.findMany({
+        where: { ID: { in: input.orderIds.map(id => BigInt(id)) } },
+        select: {
+          ID: true,
+          OrderNumber: true,
+          OrderStatus: true,
+          IsTransferredToShopify: true,
+          ShopifyOrderID: true,
+        },
+      })
+
+      // Filter out terminal states (Cancelled/Invoiced) - can't update these
+      const orders = allOrders.filter(
+        o => o.OrderStatus !== 'Cancelled' && o.OrderStatus !== 'Invoiced'
+      )
+      const skippedTerminal = allOrders.length - orders.length
+
+      const shopifyResults: Array<{ orderId: string; orderNumber: string; synced: boolean; error?: string }> = []
+      const successfulIds: bigint[] = []
+
+      for (const order of orders) {
+        const oldStatus = order.OrderStatus as OrderStatus
+
+        // If it's a Shopify order, try to sync
+        if (order.IsTransferredToShopify && order.ShopifyOrderID) {
+          const syncResult = await syncStatusToShopify(
+            order.ShopifyOrderID,
+            oldStatus,
+            input.newStatus,
+            input.options
+          )
+          
+          shopifyResults.push({
+            orderId: order.ID.toString(),
+            orderNumber: order.OrderNumber,
+            synced: syncResult.success,
+            error: syncResult.error,
+          })
+
+          // Only include in local update if Shopify sync succeeded
+          if (syncResult.success) {
+            successfulIds.push(order.ID)
+          }
+        } else {
+          // Non-Shopify order, always include
+          successfulIds.push(order.ID)
+        }
+      }
+
+      // Update local status for successful orders
+      if (successfulIds.length > 0) {
+        await prisma.customerOrders.updateMany({
+          where: { ID: { in: successfulIds } },
+          data: { OrderStatus: input.newStatus },
+        })
+
+        // Log each status change
+        for (const order of orders.filter(o => successfulIds.includes(o.ID))) {
+          await logOrderStatusChange({
+            orderId: order.ID.toString(),
+            orderNumber: order.OrderNumber,
+            oldStatus: order.OrderStatus as string,
+            newStatus: input.newStatus,
+            performedBy,
+            shopifySync: order.IsTransferredToShopify && order.ShopifyOrderID
+              ? { attempted: true, success: true }
+              : undefined,
+          })
+        }
+      }
+
+      revalidatePath('/admin/orders')
+      return { 
+        success: true, 
+        updated: successfulIds.length,
+        skipped: skippedTerminal,
+        shopifyResults,
+      }
+    }
+
+    // For non-Shopify-syncing statuses, update all at once (excluding terminal states)
     const result = await prisma.customerOrders.updateMany({
-      where: { ID: { in: input.orderIds.map((id) => BigInt(id)) } },
+      where: { 
+        ID: { in: input.orderIds.map((id) => BigInt(id)) },
+        OrderStatus: { notIn: ['Cancelled', 'Invoiced'] },
+      },
       data: { OrderStatus: input.newStatus },
     })
 

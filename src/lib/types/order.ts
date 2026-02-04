@@ -182,3 +182,44 @@ export interface UpdateOrderResult {
   orderNumber?: string
   error?: string
 }
+
+// ============================================================================
+// Status Change Types (for Shopify sync)
+// ============================================================================
+
+/**
+ * Re-export ShopifyCancelReason for convenience.
+ * See src/lib/shopify/client.ts for the actual type definition.
+ */
+export type { ShopifyCancelReason } from '@/lib/shopify/client'
+
+/**
+ * Options for changing order status with optional Shopify sync.
+ */
+export interface StatusChangeOptions {
+  /** Cancellation reason (required for Shopify orders being cancelled) */
+  cancelReason?: import('@/lib/shopify/client').ShopifyCancelReason
+  /** Whether to notify customer via Shopify email (default: true) */
+  notifyCustomer?: boolean
+  /** Whether to restock inventory in Shopify (default: true) */
+  restockInventory?: boolean
+  /** Skip Shopify sync (for retry scenarios or non-Shopify orders) */
+  skipShopifySync?: boolean
+}
+
+/**
+ * Result from a status change operation with Shopify sync info.
+ */
+export interface StatusChangeResult {
+  success: boolean
+  error?: string
+  /** Details about the Shopify sync attempt (only for Shopify orders) */
+  shopifySync?: {
+    /** Whether a sync was attempted */
+    attempted: boolean
+    /** Whether the sync succeeded */
+    success: boolean
+    /** Error message if sync failed */
+    error?: string
+  }
+}
