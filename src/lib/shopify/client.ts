@@ -265,6 +265,197 @@ export async function createOrder(
 }
 
 // ============================================================================
+// Order Management API (GraphQL)
+// ============================================================================
+
+/**
+ * Cancellation reason codes for Shopify orderCancel mutation.
+ */
+export type ShopifyCancelReason =
+  | 'CUSTOMER'   // Customer changed or cancelled order
+  | 'DECLINED'   // Payment was declined
+  | 'FRAUD'      // Order was fraudulent
+  | 'INVENTORY'  // Items in the order were not in inventory
+  | 'STAFF'      // Staff made an error
+  | 'OTHER'      // Other reason
+
+/**
+ * Options for cancelling an order in Shopify.
+ */
+export interface CancelOrderOptions {
+  reason: ShopifyCancelReason
+  notifyCustomer?: boolean  // Default: true
+  restock?: boolean         // Default: true
+  staffNote?: string
+}
+
+/**
+ * Result from order cancel/close operations.
+ */
+export interface OrderManagementResult {
+  success: boolean
+  error?: string
+  userErrors?: Array<{ field: string; message: string }>
+}
+
+/**
+ * Cancel an order in Shopify.
+ * Uses GraphQL orderCancel mutation (async job-based).
+ * 
+ * Note: Cancellation is irreversible in Shopify.
+ * 
+ * @param shopifyOrderId - The Shopify order ID (numeric string, e.g., "7654321098765")
+ * @param options - Cancellation options (reason, notify, restock)
+ */
+export async function cancelOrder(
+  shopifyOrderId: string,
+  options: CancelOrderOptions
+): Promise<OrderManagementResult> {
+  const mutation = `
+    mutation orderCancel(
+      $orderId: ID!,
+      $reason: OrderCancelReason!,
+      $notifyCustomer: Boolean,
+      $restock: Boolean,
+      $staffNote: String
+    ) {
+      orderCancel(
+        orderId: $orderId
+        reason: $reason
+        notifyCustomer: $notifyCustomer
+        restock: $restock
+        staffNote: $staffNote
+      ) {
+        job {
+          id
+          done
+        }
+        orderCancelUserErrors {
+          code
+          field
+          message
+        }
+      }
+    }
+  `
+
+  const variables = {
+    orderId: `gid://shopify/Order/${shopifyOrderId}`,
+    reason: options.reason,
+    notifyCustomer: options.notifyCustomer ?? true,
+    restock: options.restock ?? true,
+    staffNote: options.staffNote,
+  }
+
+  try {
+    const { data, error } = await shopifyGraphQLFetch(mutation, variables)
+
+    if (error) {
+      return { success: false, error }
+    }
+
+    // GraphQL response has { data: { orderCancel: ... } } structure
+    const response = data as {
+      data?: {
+        orderCancel?: {
+          job?: { id: string; done: boolean }
+          orderCancelUserErrors?: Array<{ code: string; field: string; message: string }>
+        }
+      }
+    }
+    const result = response?.data
+
+    const userErrors = result?.orderCancel?.orderCancelUserErrors
+    if (userErrors && userErrors.length > 0) {
+      return {
+        success: false,
+        error: userErrors.map(e => e.message).join(', '),
+        userErrors: userErrors.map(e => ({ field: e.field, message: e.message })),
+      }
+    }
+
+    // Job was created successfully - Shopify handles the rest asynchronously
+    return { success: true }
+  } catch (e) {
+    return {
+      success: false,
+      error: e instanceof Error ? e.message : 'Unknown error cancelling order',
+    }
+  }
+}
+
+/**
+ * Close an order in Shopify.
+ * Uses GraphQL orderClose mutation.
+ * 
+ * A closed order indicates that all work is complete (fulfilled, paid, etc.)
+ * 
+ * @param shopifyOrderId - The Shopify order ID (numeric string)
+ */
+export async function closeOrder(
+  shopifyOrderId: string
+): Promise<OrderManagementResult & { closedAt?: string }> {
+  const mutation = `
+    mutation orderClose($input: OrderCloseInput!) {
+      orderClose(input: $input) {
+        order {
+          id
+          closedAt
+        }
+        userErrors {
+          field
+          message
+        }
+      }
+    }
+  `
+
+  const variables = {
+    input: {
+      id: `gid://shopify/Order/${shopifyOrderId}`,
+    },
+  }
+
+  try {
+    const { data, error } = await shopifyGraphQLFetch(mutation, variables)
+
+    if (error) {
+      return { success: false, error }
+    }
+
+    // GraphQL response has { data: { orderClose: ... } } structure
+    const response = data as {
+      data?: {
+        orderClose?: {
+          order?: { id: string; closedAt: string }
+          userErrors?: Array<{ field: string; message: string }>
+        }
+      }
+    }
+    const result = response?.data
+
+    const userErrors = result?.orderClose?.userErrors
+    if (userErrors && userErrors.length > 0) {
+      return {
+        success: false,
+        error: userErrors.map(e => e.message).join(', '),
+        userErrors,
+      }
+    }
+
+    return {
+      success: true,
+      closedAt: result?.orderClose?.order?.closedAt,
+    }
+  } catch (e) {
+    return {
+      success: false,
+      error: e instanceof Error ? e.message : 'Unknown error closing order',
+    }
+  }
+}
+
+// ============================================================================
 // Customers API
 // ============================================================================
 
@@ -580,6 +771,8 @@ export const shopify = {
   orders: {
     create: createOrder,
     get: getOrder,
+    cancel: cancelOrder,
+    close: closeOrder,
   },
   customers: {
     create: createCustomer,
