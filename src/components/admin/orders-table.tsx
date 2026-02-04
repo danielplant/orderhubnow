@@ -38,7 +38,6 @@ import { ArchiveOrderDialog } from '@/components/admin/archive-order-dialog'
 import { TrashOrderDialog } from '@/components/admin/trash-order-dialog'
 import { PermanentDeleteDialog } from '@/components/admin/permanent-delete-dialog'
 import type { ShopifyCancelReason } from '@/lib/shopify/client'
-import { bulkUpdateStatus, updateOrderStatus } from '@/lib/data/actions/orders'
 import { validateOrderForShopify, transferOrderToShopify, bulkTransferOrdersToShopify, batchValidateOrdersForShopify } from '@/lib/data/actions/shopify'
 import { MoreHorizontal, AlertTriangle, SearchX } from 'lucide-react'
 import { toast } from 'sonner'
@@ -751,18 +750,14 @@ export function OrdersTable({ initialOrders, total, statusCounts, facets, viewMo
   // Calculate eligible orders for bulk transfer
   const eligibleForTransfer = React.useMemo(
     () =>
-      selectedOrders.filter(
-        (o) => !o.inShopify && o.status !== 'Draft'
       initialOrders.filter(
         (o) => selectedIds.includes(o.id) && !o.inShopify && o.status !== 'Draft' && o.status !== 'Cancelled'
       ),
-    [selectedOrders]
+    [initialOrders, selectedIds]
   )
 
   const ineligibleReasons = React.useMemo(() => {
     const reasons: Array<{ reason: string; count: number }> = []
-    const alreadySynced = selectedOrders.filter((o) => o.inShopify).length
-    const drafts = selectedOrders.filter((o) => o.status === 'Draft').length
     const selected = initialOrders.filter((o) => selectedIds.includes(o.id))
     const alreadySynced = selected.filter((o) => o.inShopify).length
     const drafts = selected.filter((o) => o.status === 'Draft').length
@@ -771,7 +766,7 @@ export function OrdersTable({ initialOrders, total, statusCounts, facets, viewMo
     if (drafts > 0) reasons.push({ reason: 'Draft status', count: drafts })
     if (cancelled > 0) reasons.push({ reason: 'Cancelled status', count: cancelled })
     return reasons
-  }, [selectedOrders])
+  }, [initialOrders, selectedIds])
 
   // Calculate orders eligible for status changes (not cancelled or invoiced)
   const eligibleForStatusChange = React.useMemo(
@@ -1171,8 +1166,7 @@ export function OrdersTable({ initialOrders, total, statusCounts, facets, viewMo
         ),
       },
     ],
-    [handleStatusChange, handleValidateOrder, router, viewMode, openArchiveDialog, openTrashDialog, openDeleteDialog, handleRestore]
-    [handleStatusChange, handleValidateOrder, handleCancelClick, handleInvoicedClick, router]
+    [handleStatusChange, handleValidateOrder, handleCancelClick, handleInvoicedClick, router, viewMode, openArchiveDialog, openTrashDialog, openDeleteDialog, handleRestore]
   )
 
   // Filter columns by visibility
@@ -1204,98 +1198,47 @@ export function OrdersTable({ initialOrders, total, statusCounts, facets, viewMo
 
     // Active view actions
     if (viewMode === 'active') {
-      actions.push(
-        {
-          label: 'Mark Processing',
-          onClick: () => handleBulkStatusChange('Processing'),
-    // Status change actions - only show if there are eligible orders
-    const eligibleCount = eligibleForStatusChange.length
-    const hasEligible = eligibleCount > 0
-    const showCount = eligibleCount < selectedIds.length
+      // Status change actions with eligibility counts
+      const eligibleCount = eligibleForStatusChange.length
+      const hasEligible = eligibleCount > 0
+      const showCount = eligibleCount < selectedIds.length
 
-    actions.push({
-      label: showCount ? `Mark Processing (${eligibleCount} of ${selectedIds.length})` : 'Mark Processing',
-      onClick: async () => {
-        if (!hasEligible) return
-        setIsLoading(true)
-        try {
-          await bulkUpdateStatus({ orderIds: eligibleForStatusChange.map(o => o.id), newStatus: 'Processing' })
-          setSelectedIds([])
-          router.refresh()
-        } finally {
-          setIsLoading(false)
-        }
-      },
-      disabled: !hasEligible,
-    })
-
-    actions.push({
-      label: showCount ? `Mark Shipped (${eligibleCount} of ${selectedIds.length})` : 'Mark Shipped',
-      onClick: async () => {
-        if (!hasEligible) return
-        setIsLoading(true)
-        try {
-          await bulkUpdateStatus({ orderIds: eligibleForStatusChange.map(o => o.id), newStatus: 'Shipped' })
-          setSelectedIds([])
-          router.refresh()
-        } finally {
-          setIsLoading(false)
-        }
-      },
-      disabled: !hasEligible,
-    })
-
-    actions.push({
-      label: 'Export QB',
-      onClick: () => doExport('qb'),
-    })
-
-    // Add bulk transfer with eligibility info
-    if (eligibleForTransfer.length > 0) {
-      const label =
-        eligibleForTransfer.length < selectedIds.length
-          ? `Transfer to Shopify (${eligibleForTransfer.length} of ${selectedIds.length})`
-          : `Transfer to Shopify (${eligibleForTransfer.length})`
       actions.push({
-        label,
+        label: showCount ? `Mark Processing (${eligibleCount} of ${selectedIds.length})` : 'Mark Processing',
         onClick: async () => {
-          setBulkTransferResult(null)
-          setBulkValidationResult(null)
-          setBulkModalOpen(true)
-          setBulkValidating(true)
-
+          if (!hasEligible) return
+          setIsLoading(true)
           try {
-            // Run batch validation to check for customer name discrepancies
-            const result = await batchValidateOrdersForShopify(eligibleForTransfer.map(o => o.id))
-            setBulkValidationResult(result)
-          } catch (e) {
-            // If batch validation fails entirely, show all orders as needing review
-            console.error('Batch validation failed:', e)
-            setBulkValidationResult({
-              results: [],
-              hasDiscrepancies: true,
-              discrepancyOrderIds: eligibleForTransfer.map(o => o.id),
-              discrepancyOrders: eligibleForTransfer.map(o => ({
-                orderId: o.id,
-                orderNumber: o.orderNumber,
-                ohnName: o.storeName,
-                shopifyName: null,
-              })),
-              skippedDueToCapCount: 0,
-            })
+            await bulkUpdateStatus({ orderIds: eligibleForStatusChange.map(o => o.id), newStatus: 'Processing' })
+            setSelectedIds([])
+            router.refresh()
           } finally {
-            setBulkValidating(false)
+            setIsLoading(false)
           }
         },
-        {
-          label: 'Mark Shipped',
-          onClick: () => handleBulkStatusChange('Shipped'),
+        disabled: !hasEligible,
+      })
+
+      actions.push({
+        label: showCount ? `Mark Shipped (${eligibleCount} of ${selectedIds.length})` : 'Mark Shipped',
+        onClick: async () => {
+          if (!hasEligible) return
+          setIsLoading(true)
+          try {
+            await bulkUpdateStatus({ orderIds: eligibleForStatusChange.map(o => o.id), newStatus: 'Shipped' })
+            setSelectedIds([])
+            router.refresh()
+          } finally {
+            setIsLoading(false)
+          }
         },
-        {
-          label: 'Export QB',
-          onClick: () => doExport('qb'),
-        }
-      )
+        disabled: !hasEligible,
+      })
+
+      actions.push({
+        label: 'Export QB',
+        onClick: () => doExport('qb'),
+      })
 
       // Add bulk transfer with eligibility info
       if (eligibleForTransfer.length > 0) {
@@ -1387,8 +1330,7 @@ export function OrdersTable({ initialOrders, total, statusCounts, facets, viewMo
     }
 
     return actions
-  }, [selectedIds, eligibleForTransfer, eligibleForArchive, eligibleForTrash, handleBulkStatusChange, doExport, viewMode, openArchiveDialog, openTrashDialog, openDeleteDialog, handleRestore])
-  }, [selectedIds, eligibleForTransfer, eligibleForStatusChange, doExport, router])
+  }, [selectedIds, eligibleForTransfer, eligibleForStatusChange, eligibleForArchive, eligibleForTrash, doExport, viewMode, openArchiveDialog, openTrashDialog, openDeleteDialog, handleRestore, router])
 
   return (
     <div className="space-y-4">
