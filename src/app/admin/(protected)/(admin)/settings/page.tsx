@@ -1,5 +1,6 @@
 import { auth } from '@/lib/auth/providers'
 import { redirect } from 'next/navigation'
+import Link from 'next/link'
 import {
   getInventorySettings,
   getCompanySettings,
@@ -11,12 +12,12 @@ import {
   getMissingImageProducts,
   getMissingColorProducts,
 } from '@/lib/data/queries/settings'
-import { getAvailabilitySettingsWithMeta } from '@/lib/data/queries/availability-settings'
-import { getSyncStatus } from '@/lib/data/queries/shopify'
 import { SettingsForm } from '@/components/admin/settings-form'
 import { SizeOrderConfig } from '@/components/admin/size-order-config'
 import { MissingShopifyDataPanels } from '@/components/admin/missing-shopify-data-panels'
-import { AvailabilitySettingsPanel } from '@/components/admin/availability-settings-panel'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { LayoutGrid } from 'lucide-react'
 
 export const dynamic = 'force-dynamic'
 
@@ -26,7 +27,7 @@ export default async function SettingsPage() {
     redirect('/admin/login')
   }
 
-  const [settings, companySettings, sizeOrderConfig, distinctSizes, missingSizeVariants, aliases, syncSettings, missingImages, missingColors, availabilityMeta, syncStatus] = await Promise.all([
+  const [settings, companySettings, sizeOrderConfig, distinctSizes, missingSizeVariants, aliases, syncSettings, missingImages, missingColors] = await Promise.all([
     getInventorySettings(),
     getCompanySettings(),
     getSizeOrderConfig(),
@@ -36,8 +37,6 @@ export default async function SettingsPage() {
     getSyncSettings(),
     getMissingImageProducts(),
     getMissingColorProducts(),
-    getAvailabilitySettingsWithMeta(),
-    getSyncStatus(),
   ])
 
   return (
@@ -58,13 +57,33 @@ export default async function SettingsPage() {
         aliases={aliases}
       />
 
-      <AvailabilitySettingsPanel
-        initialSettings={availabilityMeta.settings}
-        updatedAt={availabilityMeta.updatedAt?.toISOString() ?? null}
-        updatedBy={availabilityMeta.updatedBy ?? null}
-        lastSyncTime={syncStatus.lastSyncTime?.toISOString() ?? null}
-        lastSyncStatus={syncStatus.lastSyncStatus}
-      />
+      {/* Display Rules - moved to Business Portal */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <LayoutGrid className="size-5" />
+                Display Rules
+              </CardTitle>
+              <CardDescription>
+                Availability display configuration has moved to the Business Portal.
+              </CardDescription>
+            </div>
+            <Button asChild>
+              <Link href="/admin/business/display-rules">
+                Open Business Portal
+              </Link>
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground">
+            Configure which inventory fields show in each view, create calculated fields,
+            and control how availability is displayed across your catalogs and exports.
+          </p>
+        </CardContent>
+      </Card>
 
       <MissingShopifyDataPanels
         missingImages={missingImages}

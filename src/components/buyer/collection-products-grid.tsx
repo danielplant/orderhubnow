@@ -9,12 +9,14 @@ interface CollectionProductsGridProps {
   products: Product[]
   isPreOrder?: boolean
   availableLabel?: string
+  hideAvailableRow?: boolean
 }
 
 export function CollectionProductsGrid({
   products,
   isPreOrder = false,
   availableLabel,
+  hideAvailableRow = false,
 }: CollectionProductsGridProps) {
   const [filteredProducts, setFilteredProducts] = useState<Product[]>(products)
 
@@ -39,6 +41,7 @@ export function CollectionProductsGrid({
               product={product} 
               isPreOrder={isPreOrder}
               availableLabel={availableLabel}
+              hideAvailableRow={hideAvailableRow}
             />
           ))}
         </div>

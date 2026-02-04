@@ -365,6 +365,7 @@ export interface BuyerCollection {
 export interface BuyerPreOrderCollection extends BuyerCollection {
   onRouteStartDate: string | null
   onRouteEndDate: string | null
+  type: 'preorder_no_po' | 'preorder_po'
 }
 
 /**
@@ -414,6 +415,7 @@ export async function getPreOrderCollectionsForBuyer(): Promise<BuyerPreOrderCol
       imageUrl: c.imageUrl,
       onRouteStartDate: c.shipWindowStart?.toISOString() ?? null,
       onRouteEndDate: c.shipWindowEnd?.toISOString() ?? null,
+      type: c.type as 'preorder_no_po' | 'preorder_po',
     }))
 }
 
@@ -665,6 +667,7 @@ export async function getPreOrderCollectionById(collectionId: number): Promise<B
     imageUrl: collection.imageUrl,
     onRouteStartDate: collection.shipWindowStart?.toISOString() ?? null,
     onRouteEndDate: collection.shipWindowEnd?.toISOString() ?? null,
+    type: collection.type as 'preorder_no_po' | 'preorder_po',
   }
 }
 

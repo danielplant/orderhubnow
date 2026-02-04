@@ -5,10 +5,19 @@ import type {
   AvailabilityDisplayResult,
   AvailabilitySettingsRecord,
 } from '@/lib/types/availability-settings'
+import { 
+  loadDisplayRulesData, 
+  computeDisplayFromRules, 
+  getScenarioFromCollectionType,
+  type DisplayRulesData,
+  type FormulaInputs,
+} from './display-rules-loader'
 
 /**
  * Get the availability scenario based on collection type.
  * Now uses explicit collection type values instead of inferring from incoming data.
+ * 
+ * @deprecated Use getScenarioFromCollectionType from display-rules-loader instead
  */
 export function getAvailabilityScenario(
   collectionType: string | null | undefined
@@ -17,6 +26,75 @@ export function getAvailabilityScenario(
   if (collectionType === 'preorder_no_po') return 'preorder_no_incoming'
   return 'ats'
 }
+
+/**
+ * Map view name to the view keys used in DisplayRule table.
+ * This helps transition from old view names to new ones.
+ */
+export function mapViewToDisplayRuleView(view: AvailabilityView): string {
+  const mapping: Record<AvailabilityView, string> = {
+    admin_products: 'admin_products',
+    admin_inventory: 'admin_inventory',
+    xlsx: 'xlsx',
+    pdf: 'pdf',
+    buyer_products: 'buyer_ats',
+    buyer_preorder: 'buyer_preorder',
+    rep_products: 'rep_ats',
+    rep_preorder: 'rep_preorder',
+  }
+  return mapping[view] || view
+}
+
+/**
+ * Map old scenario names to new DisplayRule scenario keys.
+ */
+export function mapScenarioToDisplayRuleScenario(scenario: AvailabilityScenario): string {
+  const mapping: Record<AvailabilityScenario, string> = {
+    ats: 'ats',
+    preorder_incoming: 'preorder_po',
+    preorder_no_incoming: 'preorder_no_po',
+  }
+  return mapping[scenario] || scenario
+}
+
+/**
+ * Compute availability display using the new DisplayRule table.
+ * This is the preferred method going forward.
+ */
+export async function computeAvailabilityDisplayFromRules(
+  collectionType: string | null | undefined,
+  view: string,
+  inputs: {
+    quantity?: number | null
+    onRoute?: number | null
+    incoming?: number | null
+    committed?: number | null
+  },
+  displayRulesData?: DisplayRulesData
+): Promise<AvailabilityDisplayResult & { label: string }> {
+  const data = displayRulesData ?? await loadDisplayRulesData()
+  
+  const scenario = getScenarioFromCollectionType(collectionType)
+  
+  const formulaInputs: FormulaInputs = {
+    on_hand: inputs.quantity ?? 0,
+    incoming: inputs.incoming ?? 0,
+    committed: inputs.committed ?? 0,
+  }
+
+  const result = computeDisplayFromRules(scenario, view, formulaInputs, data)
+
+  return {
+    display: result.display,
+    numericValue: result.numericValue,
+    isBlank: result.isBlank,
+    label: result.label,
+  }
+}
+
+// Re-export for convenience
+export { loadDisplayRulesData, getScenarioFromCollectionType }
+export type { DisplayRulesData, FormulaInputs }
 
 export function computeAvailabilityDisplay(
   scenario: AvailabilityScenario,

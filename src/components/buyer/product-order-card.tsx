@@ -137,6 +137,8 @@ interface ProductOrderCardProps {
   /** PreOrder mode: no qty caps, all lines marked as OnRoute */
   isPreOrder?: boolean;
   availableLabel?: string;
+  /** Hide the "Available" row entirely (for PreOrder no PO scenario) */
+  hideAvailableRow?: boolean;
 }
 
 /**
@@ -173,6 +175,7 @@ export function ProductOrderCard({
   product,
   isPreOrder = false,
   availableLabel,
+  hideAvailableRow = false,
 }: ProductOrderCardProps) {
   const { orders, setQuantity, getProductTotal } = useOrder();
   const { announce } = useAnnouncement();
@@ -353,20 +356,24 @@ export function ProductOrderCard({
                 </div>
               ))}
 
-              <div className="bg-muted px-2 py-2 text-xs font-semibold border-b border-border">
-                {availabilityLabel}
-              </div>
-              {orderableVariants.map((variant) => (
-                <div
-                  key={`avail-${variant.sku}`}
-                  className="px-2 py-2 text-xs text-center tabular-nums border-b border-border"
-                >
-                  {variant.availableDisplay ??
-                    (isPreOrder
-                      ? (variant.available > 0 ? String(variant.available) : "")
-                      : String(variant.available))}
-                </div>
-              ))}
+              {!hideAvailableRow && (
+                <>
+                  <div className="bg-muted px-2 py-2 text-xs font-semibold border-b border-border">
+                    {availabilityLabel}
+                  </div>
+                  {orderableVariants.map((variant) => (
+                    <div
+                      key={`avail-${variant.sku}`}
+                      className="px-2 py-2 text-xs text-center tabular-nums border-b border-border"
+                    >
+                      {variant.availableDisplay ??
+                        (isPreOrder
+                          ? (variant.available > 0 ? String(variant.available) : "")
+                          : String(variant.available))}
+                    </div>
+                  ))}
+                </>
+              )}
 
               <div className="bg-muted px-2 py-1.5 text-xs font-semibold">Order</div>
               {orderableVariants.map((variant) => {

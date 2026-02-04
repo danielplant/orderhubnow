@@ -6,7 +6,7 @@ import {
   getPreOrderCollectionById,
   getPreOrderProductsByCollection,
 } from "@/lib/data/queries/collections";
-import { getAvailabilitySettings } from "@/lib/data/queries/availability-settings";
+import { getDisplayRuleFor } from "@/lib/availability/display-rules-loader";
 import { buildRepQueryStringFromObject } from "@/lib/utils/rep-context";
 
 interface Props {
@@ -51,10 +51,9 @@ export default async function PreOrderCollectionPage({ params, searchParams }: P
   const repQuery = buildRepQueryStringFromObject(queryParams);
 
   // Fetch collection and products in parallel
-  const [collection, products, availabilitySettings] = await Promise.all([
+  const [collection, products] = await Promise.all([
     getPreOrderCollectionById(collectionId),
     getPreOrderProductsByCollection(collectionId),
-    getAvailabilitySettings(),
   ]);
 
   // Validate collection exists and is a pre-order collection
@@ -62,11 +61,15 @@ export default async function PreOrderCollectionPage({ params, searchParams }: P
     notFound();
   }
 
+  // Get display rule for this collection type and view
+  const displayRule = await getDisplayRuleFor(collection.type, 'buyer_preorder');
+  const availableLabel = displayRule.label;
+  const hideAvailableRow = displayRule.rowBehavior === 'hide';
+
   const shipWindow = formatShipWindow(
     collection.onRouteStartDate,
     collection.onRouteEndDate
   );
-  const availableLabel = availabilitySettings.matrix.preorder_incoming.buyer_preorder.label;
 
   return (
     <div className="bg-background text-foreground">
@@ -103,6 +106,7 @@ export default async function PreOrderCollectionPage({ params, searchParams }: P
             products={products}
             isPreOrder
             availableLabel={availableLabel}
+            hideAvailableRow={hideAvailableRow}
           />
         ) : (
           <div className="text-center py-16">
