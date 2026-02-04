@@ -99,6 +99,11 @@ export interface OrdersListResult {
 }
 
 /**
+ * View mode for orders list (active, archived, or trashed).
+ */
+export type ViewMode = 'active' | 'archived' | 'trashed'
+
+/**
  * Input parameters for orders list query (maps from URL searchParams).
  */
 export interface OrdersListInput {
@@ -115,6 +120,7 @@ export interface OrdersListInput {
   dir?: SortDirection;
   page?: number;
   pageSize?: number;
+  viewMode?: ViewMode;  // Filter by active/archived/trashed
 }
 
 /**
@@ -126,6 +132,15 @@ export interface OrderFacets {
   seasons: Array<{ value: string; count: number }>;
   collections: Array<{ value: string; count: number }>;
   reps: Array<{ value: string; count: number }>;
+}
+
+/**
+ * Counts for archive/trash view mode tabs.
+ */
+export interface ArchiveTrashCounts {
+  active: number;
+  archived: number;
+  trashed: number;
 }
 
 // ============================================================================

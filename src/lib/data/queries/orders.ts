@@ -7,6 +7,7 @@ import { prisma } from '@/lib/prisma';
 import { formatCurrency } from '@/lib/utils';
 import type {
   AdminOrderRow,
+  ArchiveTrashCounts,
   OrderFacets,
   OrdersListInput,
   OrdersListResult,
@@ -77,6 +78,7 @@ export function parseOrdersListInput(
   const dir = (getString(getParam('dir')) as SortDirection | undefined) ?? 'desc';
   const page = toInt(getParam('page'), 1);
   const pageSize = toInt(getParam('pageSize'), 50);
+  const viewMode = getString(getParam('viewMode'));
 
   return {
     status: (status as OrdersListInput['status']) || 'All',
@@ -92,6 +94,7 @@ export function parseOrdersListInput(
     dir,
     page,
     pageSize,
+    viewMode: (viewMode === 'archived' || viewMode === 'trashed') ? viewMode : 'active',
   };
 }
 
@@ -130,6 +133,18 @@ export async function getOrders(
   // Build base where clause (applies to all queries)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const baseWhere: any = {};
+
+  // View mode filter (active/archived/trashed)
+  if (input.viewMode === 'archived') {
+    baseWhere.ArchivedAt = { not: null };
+    baseWhere.TrashedAt = null;
+  } else if (input.viewMode === 'trashed') {
+    baseWhere.TrashedAt = { not: null };
+  } else {
+    // Default: active (not archived, not trashed)
+    baseWhere.ArchivedAt = null;
+    baseWhere.TrashedAt = null;
+  }
 
   // Multi-field search - matches OrderNumber, StoreName, SalesRep, CustomerEmail
   // Note: SQL Server collation is case-insensitive by default
@@ -953,6 +968,39 @@ export async function getOrderFacets(): Promise<OrderFacets> {
       .filter((r) => r.SalesRep && r._count?._all && r._count._all > 0)
       .map((r) => ({ value: r.SalesRep!, count: r._count!._all! })),
   };
+}
+
+// ============================================================================
+// View Mode Counts (Archive/Trash tabs)
+// ============================================================================
+
+/**
+ * Get counts for active, archived, and trashed orders.
+ * Used for the view mode tabs above the orders list.
+ */
+export async function getViewModeCounts(): Promise<ArchiveTrashCounts> {
+  const [active, archived, trashed] = await Promise.all([
+    prisma.customerOrders.count({
+      where: { 
+        ArchivedAt: null, 
+        TrashedAt: null, 
+        OrderStatus: { not: 'Draft' } 
+      }
+    }),
+    prisma.customerOrders.count({
+      where: { 
+        ArchivedAt: { not: null }, 
+        TrashedAt: null 
+      }
+    }),
+    prisma.customerOrders.count({
+      where: { 
+        TrashedAt: { not: null } 
+      }
+    }),
+  ]);
+  
+  return { active, archived, trashed };
 }
 
 // ============================================================================

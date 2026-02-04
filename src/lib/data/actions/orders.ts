@@ -341,6 +341,263 @@ export async function bulkUpdateStatus(input: {
 }
 
 // ============================================================================
+// Archive/Trash Actions
+// ============================================================================
+
+/**
+ * Archive orders (only Cancelled/Invoiced).
+ * Moves orders out of the active view for long-term storage.
+ */
+export async function archiveOrders(input: {
+  orderIds: string[]
+}): Promise<{ success: boolean; archived: number; error?: string }> {
+  try {
+    const session = await requireAdmin()
+    const userName = session.user?.name || session.user?.email || 'Unknown'
+    
+    // Convert string IDs to BigInt
+    const ids = input.orderIds.map(id => BigInt(id))
+    
+    // Validate: only Cancelled/Invoiced orders can be archived
+    const orders = await prisma.customerOrders.findMany({
+      where: { ID: { in: ids } },
+      select: { ID: true, OrderNumber: true, OrderStatus: true, ArchivedAt: true, TrashedAt: true },
+    })
+    
+    const validOrders = orders.filter(o => 
+      (o.OrderStatus === 'Cancelled' || o.OrderStatus === 'Invoiced') &&
+      o.ArchivedAt === null &&
+      o.TrashedAt === null
+    )
+    
+    if (validOrders.length === 0) {
+      return { 
+        success: false, 
+        archived: 0, 
+        error: 'No valid orders to archive. Only active Cancelled or Invoiced orders can be archived.' 
+      }
+    }
+    
+    const validIds = validOrders.map(o => o.ID)
+    
+    // Archive the orders
+    const result = await prisma.customerOrders.updateMany({
+      where: { ID: { in: validIds } },
+      data: {
+        ArchivedAt: new Date(),
+        ArchivedBy: userName,
+      },
+    })
+    
+    revalidatePath('/admin/orders')
+    return { success: true, archived: result.count }
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'Failed to archive orders'
+    return { success: false, archived: 0, error: message }
+  }
+}
+
+/**
+ * Restore orders from archive to active.
+ */
+export async function restoreFromArchive(input: {
+  orderIds: string[]
+}): Promise<{ success: boolean; restored: number; error?: string }> {
+  try {
+    await requireAdmin()
+    
+    const ids = input.orderIds.map(id => BigInt(id))
+    
+    // Only restore archived orders (not trashed)
+    const result = await prisma.customerOrders.updateMany({
+      where: { 
+        ID: { in: ids },
+        ArchivedAt: { not: null },
+        TrashedAt: null,
+      },
+      data: {
+        ArchivedAt: null,
+        ArchivedBy: null,
+      },
+    })
+    
+    revalidatePath('/admin/orders')
+    return { success: true, restored: result.count }
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'Failed to restore orders'
+    return { success: false, restored: 0, error: message }
+  }
+}
+
+/**
+ * Move orders to trash. 
+ * Shopify orders must be Cancelled/Invoiced first.
+ * Orders in trash are auto-deleted after 30 days.
+ */
+export async function trashOrders(input: {
+  orderIds: string[]
+}): Promise<{ success: boolean; trashed: number; error?: string }> {
+  try {
+    const session = await requireAdmin()
+    const userName = session.user?.name || session.user?.email || 'Unknown'
+    
+    const ids = input.orderIds.map(id => BigInt(id))
+    
+    // Validate: Shopify orders must be Cancelled/Invoiced
+    const orders = await prisma.customerOrders.findMany({
+      where: { ID: { in: ids } },
+      select: { 
+        ID: true, 
+        OrderNumber: true, 
+        OrderStatus: true, 
+        IsTransferredToShopify: true,
+        TrashedAt: true,
+      },
+    })
+    
+    const validOrders = orders.filter(o => {
+      // Already trashed? Skip
+      if (o.TrashedAt !== null) return false
+      
+      // Shopify orders must be Cancelled/Invoiced
+      if (o.IsTransferredToShopify) {
+        return o.OrderStatus === 'Cancelled' || o.OrderStatus === 'Invoiced'
+      }
+      
+      // Non-Shopify orders: all statuses allowed
+      return true
+    })
+    
+    if (validOrders.length === 0) {
+      return { 
+        success: false, 
+        trashed: 0, 
+        error: 'No valid orders to trash. Shopify orders must be Cancelled or Invoiced first.' 
+      }
+    }
+    
+    const validIds = validOrders.map(o => o.ID)
+    
+    // Move to trash
+    const result = await prisma.customerOrders.updateMany({
+      where: { ID: { in: validIds } },
+      data: {
+        TrashedAt: new Date(),
+        TrashedBy: userName,
+        // Clear archived status if it was archived
+        ArchivedAt: null,
+        ArchivedBy: null,
+      },
+    })
+    
+    revalidatePath('/admin/orders')
+    return { success: true, trashed: result.count }
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'Failed to trash orders'
+    return { success: false, trashed: 0, error: message }
+  }
+}
+
+/**
+ * Restore orders from trash to active.
+ */
+export async function restoreFromTrash(input: {
+  orderIds: string[]
+}): Promise<{ success: boolean; restored: number; error?: string }> {
+  try {
+    await requireAdmin()
+    
+    const ids = input.orderIds.map(id => BigInt(id))
+    
+    // Only restore trashed orders
+    const result = await prisma.customerOrders.updateMany({
+      where: { 
+        ID: { in: ids },
+        TrashedAt: { not: null },
+      },
+      data: {
+        TrashedAt: null,
+        TrashedBy: null,
+      },
+    })
+    
+    revalidatePath('/admin/orders')
+    return { success: true, restored: result.count }
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'Failed to restore orders'
+    return { success: false, restored: 0, error: message }
+  }
+}
+
+/**
+ * Permanently delete orders (only from trash).
+ * Deletes related records first (items, comments, shipments).
+ */
+export async function permanentlyDeleteOrders(input: {
+  orderIds: string[]
+}): Promise<{ success: boolean; deleted: number; error?: string }> {
+  try {
+    await requireAdmin()
+    
+    const ids = input.orderIds.map(id => BigInt(id))
+    
+    // Only delete orders that are in trash
+    const orders = await prisma.customerOrders.findMany({
+      where: { 
+        ID: { in: ids },
+        TrashedAt: { not: null },
+      },
+      select: { ID: true, OrderNumber: true },
+    })
+    
+    if (orders.length === 0) {
+      return { 
+        success: false, 
+        deleted: 0, 
+        error: 'No valid orders to delete. Only trashed orders can be permanently deleted.' 
+      }
+    }
+    
+    let deleted = 0
+    for (const order of orders) {
+      // Delete related records first (no cascade in schema)
+      await prisma.customerOrdersItems.deleteMany({ 
+        where: { CustomerOrderID: order.ID } 
+      })
+      await prisma.customerOrdersComments.deleteMany({ 
+        where: { OrderID: order.ID } 
+      })
+      
+      // Delete shipment items before shipments
+      await prisma.shipmentItems.deleteMany({
+        where: { Shipment: { CustomerOrderID: order.ID } }
+      })
+      await prisma.shipments.deleteMany({ 
+        where: { CustomerOrderID: order.ID } 
+      })
+      
+      // PlannedShipments (has cascade from FK but let's be explicit)
+      await prisma.plannedShipment.deleteMany({
+        where: { CustomerOrderID: order.ID }
+      })
+      
+      // Finally delete the order
+      await prisma.customerOrders.delete({ 
+        where: { ID: order.ID } 
+      })
+      
+      deleted++
+    }
+    
+    revalidatePath('/admin/orders')
+    return { success: true, deleted }
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'Failed to delete orders'
+    return { success: false, deleted: 0, error: message }
+  }
+}
+
+// ============================================================================
 // Comments Actions
 // ============================================================================
 

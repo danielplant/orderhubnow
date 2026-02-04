@@ -72,6 +72,10 @@ model CustomerOrders {
   EmailSentAt              DateTime?                @db.DateTime
   EmailSentCustomer        Boolean?                 @default(false)
   EmailSentRep             Boolean?                 @default(false)
+  ArchivedAt               DateTime?                @db.DateTime
+  ArchivedBy               String?                  @db.NVarChar(255)
+  TrashedAt                DateTime?                @db.DateTime
+  TrashedBy                String?                  @db.NVarChar(255)
   CustomerOrdersComments   CustomerOrdersComments[]
   CustomerOrdersItems      CustomerOrdersItems[]
   PlannedShipments         PlannedShipment[]
@@ -1337,29 +1341,23 @@ model SizeOrderConfig {
   ValidatedSizes String?  @db.NVarChar(Max)
 }
 
-// ============================================================================
-// Availability Settings
-// ============================================================================
-// Matrix-based configuration for availability display across scenarios and views.
-// ============================================================================
-
 model AvailabilitySettings {
-  id                    Int      @id @default(autoincrement()) @map("ID")
-  matrixConfig          String   @db.NVarChar(Max) @map("MatrixConfig")
-  showOnRouteProducts   Boolean  @default(false) @map("ShowOnRouteProducts")
-  showOnRouteInventory  Boolean  @default(false) @map("ShowOnRouteInventory")
-  showOnRouteXlsx       Boolean  @default(false) @map("ShowOnRouteXlsx")
-  showOnRoutePdf        Boolean  @default(false) @map("ShowOnRoutePdf")
-  onRouteLabelProducts  String   @default("On Route") @db.NVarChar(100) @map("OnRouteLabelProducts")
-  onRouteLabelInventory String   @default("On Route") @db.NVarChar(100) @map("OnRouteLabelInventory")
-  onRouteLabelXlsx      String   @default("On Route") @db.NVarChar(100) @map("OnRouteLabelXlsx")
-  onRouteLabelPdf       String   @default("On Route") @db.NVarChar(100) @map("OnRouteLabelPdf")
-  legendText                    String   @default("Blank means no inbound PO yet — pre-order allowed.") @db.NVarChar(500) @map("LegendText")
-  showLegendAts                 Boolean  @default(false) @map("ShowLegendAts")
-  showLegendPreorderIncoming    Boolean  @default(false) @map("ShowLegendPreorderIncoming")
-  showLegendPreorderNoIncoming  Boolean  @default(true) @map("ShowLegendPreorderNoIncoming")
-  updatedAt             DateTime @default(now()) @updatedAt @map("UpdatedAt")
-  updatedBy             String?  @db.NVarChar(255) @map("UpdatedBy")
+  id                           Int      @id @default(autoincrement()) @map("ID")
+  matrixConfig                 String   @map("MatrixConfig") @db.NVarChar(Max)
+  showOnRouteProducts          Boolean  @default(false) @map("ShowOnRouteProducts")
+  showOnRouteInventory         Boolean  @default(false) @map("ShowOnRouteInventory")
+  showOnRouteXlsx              Boolean  @default(false) @map("ShowOnRouteXlsx")
+  showOnRoutePdf               Boolean  @default(false) @map("ShowOnRoutePdf")
+  onRouteLabelProducts         String   @default("On Route") @map("OnRouteLabelProducts") @db.NVarChar(100)
+  onRouteLabelInventory        String   @default("On Route") @map("OnRouteLabelInventory") @db.NVarChar(100)
+  onRouteLabelXlsx             String   @default("On Route") @map("OnRouteLabelXlsx") @db.NVarChar(100)
+  onRouteLabelPdf              String   @default("On Route") @map("OnRouteLabelPdf") @db.NVarChar(100)
+  updatedAt                    DateTime @default(now()) @updatedAt @map("UpdatedAt")
+  updatedBy                    String?  @map("UpdatedBy") @db.NVarChar(255)
+  legendText                   String   @default("Blank means no inbound PO yet — pre-order allowed.") @map("LegendText") @db.NVarChar(500)
+  showLegendAts                Boolean  @default(false) @map("ShowLegendAts")
+  showLegendPreorderIncoming   Boolean  @default(false) @map("ShowLegendPreorderIncoming")
+  showLegendPreorderNoIncoming Boolean  @default(true) @map("ShowLegendPreorderNoIncoming")
 
   @@map("AvailabilitySettings")
 }
