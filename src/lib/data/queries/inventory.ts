@@ -1,8 +1,12 @@
 import { prisma } from '@/lib/prisma'
 import type { DashboardMetrics, CategoryMetric } from '@/lib/types'
 import { getEffectiveQuantity } from '@/lib/utils'
-import { getAvailabilitySettings, getIncomingMapForSkus } from '@/lib/data/queries/availability-settings'
-import { computeAvailabilityDisplay, getAvailabilityScenario } from '@/lib/availability/compute'
+import { getIncomingMapForSkus } from '@/lib/data/queries/availability-settings'
+import {
+  computeAvailabilityDisplayFromRules,
+  loadDisplayRulesData,
+  getScenarioFromCollectionType,
+} from '@/lib/availability/compute'
 
 // ============================================================================
 // Types for Inventory List
@@ -40,8 +44,8 @@ export interface InventoryListItem {
   availableDisplay: string
   availableSortValue: number | null
   availableSortRank: number
-  availabilityScenario: 'ats' | 'preorder_incoming' | 'preorder_no_incoming'
-  collectionType?: 'ATS' | 'PreOrder' | null
+  availabilityScenario: 'ats' | 'preorder_po' | 'preorder_no_po'
+  collectionType?: 'ats' | 'preorder_po' | 'preorder_no_po' | null
   effectiveQuantity: number
   prepackMultiplier: number // 1 for singles, 2+ for prepacks
   unitPriceCad: number | null
@@ -61,6 +65,7 @@ export interface InventoryListResult {
   total: number
   statusCounts: { all: number; low: number; out: number; onroute: number }
   lowThreshold: number
+  availableLabel: string
 }
 
 // ============================================================================
@@ -144,12 +149,11 @@ export async function getInventoryList(
   filters: InventoryListFilters,
   page: number,
   pageSize: number,
-  options?: { settings?: import('@/lib/types/availability-settings').AvailabilitySettingsRecord }
 ): Promise<InventoryListResult> {
   const status = filters.status ?? 'all'
   const q = (filters.search ?? '').trim()
   const lowThreshold = await getLowStockThreshold()
-  const availabilitySettings = options?.settings ?? await getAvailabilitySettings()
+  const displayRulesData = await loadDisplayRulesData()
 
   // Build base where clause for search and dropdown filters
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -229,7 +233,7 @@ export async function getInventoryList(
 
   const incomingMap = await getIncomingMapForSkus(rows.map((row) => row.SkuID))
 
-  const items: InventoryListItem[] = rows.map((r) => {
+  const items: InventoryListItem[] = await Promise.all(rows.map(async (r) => {
     const qty = r.Quantity ?? 0
     const onRoute = r.OnRoute ?? 0
     // Effective quantity is the prepack-adjusted quantity (not including onRoute)
@@ -241,17 +245,12 @@ export async function getInventoryList(
     const incomingEntry = incomingMap.get(r.SkuID)
     const incoming = incomingEntry?.incoming ?? null
     const committed = incomingEntry?.committed ?? null
-    const scenario = getAvailabilityScenario(r.Collection?.type ?? null)
-    const displayResult = computeAvailabilityDisplay(
-      scenario,
+    const onHand = incomingEntry?.onHand ?? null
+    const displayResult = await computeAvailabilityDisplayFromRules(
+      r.Collection?.type ?? null,
       'admin_inventory',
-      {
-        quantity: qty,
-        onRoute,
-        incoming,
-        committed,
-      },
-      availabilitySettings
+      { quantity: qty, incoming, committed, onHand },
+      displayRulesData
     )
 
     return {
@@ -263,8 +262,8 @@ export async function getInventoryList(
       availableDisplay: displayResult.display,
       availableSortValue: displayResult.numericValue,
       availableSortRank: displayResult.isBlank ? 1 : 0,
-      availabilityScenario: scenario,
-      collectionType: (r.Collection?.type as 'ATS' | 'PreOrder' | undefined) ?? null,
+      availabilityScenario: getScenarioFromCollectionType(r.Collection?.type ?? null) as 'ats' | 'preorder_po' | 'preorder_no_po',
+      collectionType: (r.Collection?.type as 'ats' | 'preorder_po' | 'preorder_no_po' | undefined) ?? null,
       effectiveQuantity: effective,
       prepackMultiplier,
       unitPriceCad: r.UnitPriceCAD ? Number(r.UnitPriceCAD) : null,
@@ -278,7 +277,7 @@ export async function getInventoryList(
       fabric: r.FabricContent ?? null,
       size: r.Size ?? null,
     }
-  })
+  }))
 
   const finalItems = manualAvailableSort
     ? items
@@ -322,11 +321,15 @@ export async function getInventoryList(
     }),
   ])
 
+  // Determine column label from display rules
+  const availableLabel = displayRulesData.rules['ats']?.['admin_inventory']?.label ?? 'Available'
+
   return {
     items: finalItems,
     total,
     statusCounts: { all: allCount, low: lowCount, out: outCount, onroute: onRouteCount },
     lowThreshold,
+    availableLabel,
   }
 }
 

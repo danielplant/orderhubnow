@@ -11,7 +11,7 @@ import { updateInventoryQuantity, updateInventoryOnRoute } from '@/lib/data/acti
 import { cn } from '@/lib/utils'
 import { formatDate } from '@/lib/utils/format'
 import { AlertTriangle } from 'lucide-react'
-import type { AvailabilitySettingsRecord } from '@/lib/types/availability-settings'
+// Old availability settings types no longer needed - using Display Rules system
 import { AVAILABILITY_LEGEND_TEXT } from '@/lib/availability/settings'
 
 // ============================================================================
@@ -26,7 +26,7 @@ export interface InventoryTableProps {
   facets: InventoryFacets
   sortBy?: InventorySortField
   sortDir?: SortDirection
-  availabilitySettings?: AvailabilitySettingsRecord
+  availableLabel?: string
 }
 
 // ============================================================================
@@ -52,32 +52,15 @@ export function InventoryTable({
   facets,
   sortBy,
   sortDir = 'asc',
-  availabilitySettings,
+  availableLabel: availableLabelProp,
 }: InventoryTableProps) {
   // Use shared table search hook
   const { q, page, pageSize, setParam, setPage, setSort, getParam } = useTableSearch()
   const router = useRouter()
 
-  const onRouteEnabled = availabilitySettings?.showOnRouteInventory ?? true
-  const onRouteLabel = availabilitySettings?.onRouteLabelInventory ?? 'On Route'
-
-  const availableLabel = React.useMemo(() => {
-    if (!availabilitySettings) return 'Available'
-    const types = initialItems
-      .map((item) => item.collectionType)
-      .filter(Boolean) as string[]
-    const uniqueTypes = new Set(types)
-    if (uniqueTypes.size === 1) {
-      const onlyType = Array.from(uniqueTypes)[0]
-      if (onlyType === 'preorder_no_po' || onlyType === 'preorder_po') {
-        return availabilitySettings.matrix.preorder_incoming.admin_inventory.label
-      }
-      if (onlyType === 'ats') {
-        return availabilitySettings.matrix.ats.admin_inventory.label
-      }
-    }
-    return availabilitySettings.matrix.ats.admin_inventory.label
-  }, [availabilitySettings, initialItems])
+  const onRouteEnabled = false
+  const onRouteLabel = 'On Route'
+  const availableLabel = availableLabelProp ?? 'Available'
 
   const tabs = React.useMemo(
     () => (onRouteEnabled ? TABS : TABS.filter((t) => t.value !== 'onroute')),

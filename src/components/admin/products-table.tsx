@@ -30,13 +30,11 @@ import { ProductDetailModal } from '@/components/admin/product-detail-modal'
 import { cn } from '@/lib/utils'
 import { useImageConfig } from '@/lib/contexts'
 import type { AdminSkuRow, CategoryForFilter } from '@/lib/types'
-import type { AvailabilitySettingsRecord, AvailabilityView } from '@/lib/types/availability-settings'
+// Old availability settings types no longer needed - using Display Rules system
 import { AVAILABILITY_LEGEND_TEXT } from '@/lib/availability/settings'
 import {
   deleteSku,
   bulkDeleteSkus,
-  setSkuPreOrderFlag,
-  bulkSetPreOrderFlag,
 } from '@/lib/data/actions/products'
 import { UploadProductsModal } from '@/components/admin/upload-products-modal'
 import { CollectionSelector, type CollectionFilterMode } from '@/components/admin/collection-selector'
@@ -125,8 +123,7 @@ interface ProductsTableProps {
   total: number
   categories: CategoryForFilter[]
   readOnly?: boolean
-  availabilitySettings?: AvailabilitySettingsRecord
-  availabilityView?: AvailabilityView
+  availableLabel?: string
 }
 
 // ============================================================================
@@ -138,8 +135,7 @@ export function ProductsTable({
   total,
   categories,
   readOnly = false,
-  availabilitySettings,
-  availabilityView = 'admin_products',
+  availableLabel: availableLabelProp,
 }: ProductsTableProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -169,7 +165,7 @@ export function ProductsTable({
     coveragePercent: number
   } | null>(null)
 
-  const onRouteEnabled = availabilitySettings?.showOnRouteProducts ?? true
+  const onRouteEnabled = false
 
   // Parse collections param: 'all' | 'ats' | 'preorder' | '1,2,3'
   // NOTE: Must be declared BEFORE availableLabel which depends on it
@@ -186,27 +182,10 @@ export function ProductsTable({
     }
   }, [collectionsParam])
 
-  const availableLabel = React.useMemo(() => {
-    if (!availabilitySettings) return 'Available'
-    if (collectionMode === 'ats') return availabilitySettings.matrix.ats[availabilityView].label
-    if (collectionMode === 'preorder') return availabilitySettings.matrix.preorder_incoming[availabilityView].label
+  // Use the label from display rules, passed from query result
+  const availableLabel = availableLabelProp ?? 'Available'
 
-    if (collectionMode === 'specific' && selectedCollectionIds.length > 0) {
-      const types = selectedCollectionIds
-        .map((id) => categories.find((c) => c.id === id)?.type)
-        .filter(Boolean) as string[]
-      if (types.length > 0 && types.every((t) => t === 'ats')) {
-        return availabilitySettings.matrix.ats[availabilityView].label
-      }
-      if (types.length > 0 && types.every((t) => t === 'preorder_no_po' || t === 'preorder_po')) {
-        return availabilitySettings.matrix.preorder_incoming[availabilityView].label
-      }
-    }
-
-    return availabilitySettings.matrix.ats[availabilityView].label
-  }, [availabilitySettings, collectionMode, selectedCollectionIds, categories, availabilityView])
-
-  const onRouteLabel = availabilitySettings?.onRouteLabelProducts ?? 'On Route'
+  const onRouteLabel = 'On Route'
 
   const defaultColumns = React.useMemo(() => {
     const base = [...BASE_VISIBLE_COLUMNS]
@@ -268,20 +247,6 @@ export function ProductsTable({
     [router]
   )
 
-  const handleTogglePreOrder = React.useCallback(
-    async (id: string, currentValue: boolean | null) => {
-      setIsLoading(true)
-      try {
-        // Toggle: if currently pre-order (true), set to ATS (false); otherwise set to pre-order (true)
-        await setSkuPreOrderFlag(id, !currentValue)
-        router.refresh()
-      } finally {
-        setIsLoading(false)
-      }
-    },
-    [router]
-  )
-
   const handleBulkDelete = React.useCallback(async () => {
     if (selectedIds.length === 0) return
     if (!confirm(`Delete ${selectedIds.length} SKU(s)?`)) return
@@ -294,21 +259,6 @@ export function ProductsTable({
       setIsLoading(false)
     }
   }, [selectedIds, router])
-
-  const handleBulkSetPreOrder = React.useCallback(
-    async (showInPreOrder: boolean) => {
-      if (selectedIds.length === 0) return
-      setIsLoading(true)
-      try {
-        await bulkSetPreOrderFlag(selectedIds, showInPreOrder)
-        setSelectedIds([])
-        router.refresh()
-      } finally {
-        setIsLoading(false)
-      }
-    },
-    [selectedIds, router]
-  )
 
   // Export using async job queue via new API
   // Shows progress dialog and handles background processing
@@ -504,7 +454,11 @@ export function ProductsTable({
             <span className="text-xs text-muted-foreground" title={AVAILABILITY_LEGEND_TEXT}>ⓘ</span>
           </div>
         ),
-        cell: (r) => (
+        cell: (r) => readOnly ? (
+          <span className="text-right tabular-nums font-medium">
+            {r.availableDisplay}
+          </span>
+        ) : (
           <a
             href={`/admin/dev/debug/shopify?sku=${encodeURIComponent(r.skuId)}`}
             target="_blank"
@@ -582,12 +536,15 @@ export function ProductsTable({
           <span
             className={cn(
               'inline-flex rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap',
-              r.showInPreOrder
+              r.collectionType === 'preorder_po' || r.collectionType === 'preorder_no_po'
                 ? 'bg-purple-100 text-purple-700'
                 : 'bg-green-100 text-green-700'
             )}
           >
-            {r.showInPreOrder ? 'Pre-Order' : 'ATS'}
+            {r.collectionType === 'ats' ? 'ATS'
+              : r.collectionType === 'preorder_po' ? 'Pre-Order (PO)'
+              : r.collectionType === 'preorder_no_po' ? 'Pre-Order'
+              : '—'}
           </span>
         ),
       },
@@ -605,11 +562,6 @@ export function ProductsTable({
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuItem
-                onClick={() => handleTogglePreOrder(r.id, r.showInPreOrder)}
-              >
-                {r.showInPreOrder ? 'Move to ATS' : 'Move to Pre-Order'}
-              </DropdownMenuItem>
-              <DropdownMenuItem
                 onClick={() => handleDelete(r.id)}
                 className="text-destructive"
               >
@@ -620,7 +572,7 @@ export function ProductsTable({
         ),
       }] : []),
     ],
-    [handleDelete, handleTogglePreOrder, handleSkuClick, readOnly, availableLabel, onRouteLabel]
+    [handleDelete, handleSkuClick, readOnly, availableLabel, onRouteLabel]
   )
 
   // Filter columns by visibility
@@ -639,21 +591,13 @@ export function ProductsTable({
       selectedIds.length > 0
         ? [
             {
-              label: 'Move to ATS',
-              onClick: () => handleBulkSetPreOrder(false),
-            },
-            {
-              label: 'Move to Pre-Order',
-              onClick: () => handleBulkSetPreOrder(true),
-            },
-            {
               label: 'Delete',
               onClick: handleBulkDelete,
               variant: 'destructive' as const,
             },
           ]
         : [],
-    [selectedIds.length, handleBulkSetPreOrder, handleBulkDelete]
+    [selectedIds.length, handleBulkDelete]
   )
 
   return (

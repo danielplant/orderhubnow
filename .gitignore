@@ -68,5 +68,7 @@ prisma/migrations/manual/
 .ai/runs/
 .ai/current-run
 
+.cursor/
+
 # Trash folder (recoverable deleted files)
 .trash/

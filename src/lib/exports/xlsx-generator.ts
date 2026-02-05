@@ -24,7 +24,10 @@ import {
 } from '@/lib/config/export-config'
 import { type ExportPolicy } from '@/lib/data/queries/export-policy'
 import { getAvailabilitySettings, getIncomingMapForSkus } from '@/lib/data/queries/availability-settings'
-import { computeAvailabilityDisplay, getAvailabilityScenario } from '@/lib/availability/compute'
+import {
+  computeAvailabilityDisplayFromRules,
+  loadDisplayRulesData,
+} from '@/lib/availability/compute'
 import { fetchThumbnailForExport } from './thumbnail-fetcher'
 import type { CurrencyMode } from '@/lib/types/export'
 import type { AvailabilityDisplayResult, AvailabilitySettingsRecord } from '@/lib/types/availability-settings'
@@ -195,7 +198,8 @@ export async function generateXlsxExport(
     }
   }
 
-  const availabilitySettings = await getAvailabilitySettings()
+  const displayRulesData = await loadDisplayRulesData()
+  const availabilitySettings = await getAvailabilitySettings() // For on-route and legend settings
 
   // -------------------------------------------------------------------------
   // Step 2: Fetch SKUs
@@ -365,24 +369,28 @@ export async function generateXlsxExport(
     const incomingEntry = incomingMap.get(sku.SkuID)
     const incoming = incomingEntry?.incoming ?? null
     const committed = incomingEntry?.committed ?? null
-    const scenario = getAvailabilityScenario(sku.Collection?.type ?? null)
+    const onHand = incomingEntry?.onHand ?? null
+    const collectionType = sku.Collection?.type ?? null
 
     // Track scenario for legend display
-    if (scenario === 'ats') scenariosPresent.hasAts = true
-    else if (scenario === 'preorder_incoming') scenariosPresent.hasPreorderIncoming = true
-    else if (scenario === 'preorder_no_incoming') scenariosPresent.hasPreorderNoIncoming = true
+    if (collectionType === 'ats' || collectionType === 'ATS' || !collectionType) scenariosPresent.hasAts = true
+    else if (collectionType === 'preorder_po') scenariosPresent.hasPreorderIncoming = true
+    else if (collectionType === 'preorder_no_po' || collectionType === 'PreOrder') scenariosPresent.hasPreorderNoIncoming = true
 
-    const availableResult = computeAvailabilityDisplay(
-      scenario,
+    const availableResult = await computeAvailabilityDisplayFromRules(
+      collectionType,
       'xlsx',
-      {
-        quantity: sku.Quantity ?? 0,
-        onRoute: sku.OnRoute ?? 0,
-        incoming,
-        committed,
-      },
-      availabilitySettings
+      { quantity: sku.Quantity ?? 0, incoming, committed, onHand },
+      displayRulesData
     )
+
+    // Derive status from collection type
+    const statusLabel = collectionType === 'ats' ? 'ATS'
+      : collectionType === 'preorder_po' ? 'Pre-Order (PO)'
+      : collectionType === 'preorder_no_po' ? 'Pre-Order'
+      : collectionType === 'ATS' ? 'ATS'
+      : collectionType === 'PreOrder' ? 'Pre-Order'
+      : '—'
 
     const rowData: Record<string, string | number> = {
       image: '',
@@ -394,7 +402,7 @@ export async function generateXlsxExport(
       size: sku.size,
       available: toExportCellValue(availableResult),
       collection: sku.isFirstInGroup ? (sku.Collection?.name ?? '') : '',
-      status: sku.isFirstInGroup ? (sku.ShowInPreOrder ? 'Pre-Order' : 'ATS') : '',
+      status: sku.isFirstInGroup ? statusLabel : '',
       units: sku.isFirstInGroup ? unitsPerSku : '',
       packPrice: sku.isFirstInGroup ? packPrice : '',
       unitPrice: sku.isFirstInGroup ? unitPrice : '',

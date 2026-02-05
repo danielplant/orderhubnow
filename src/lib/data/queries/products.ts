@@ -6,11 +6,14 @@
 import { prisma } from '@/lib/prisma'
 import { parsePrice, getBaseSku, resolveColor } from '@/lib/utils'
 import {
-  getAvailabilitySettings,
   getIncomingMapForSkus,
 } from '@/lib/data/queries/availability-settings'
-import { getAvailabilityScenario, computeAvailabilityDisplay } from '@/lib/availability/compute'
-import type { AvailabilityView, AvailabilitySettingsRecord } from '@/lib/types/availability-settings'
+import {
+  computeAvailabilityDisplayFromRules,
+  loadDisplayRulesData,
+  getScenarioFromCollectionType,
+  type DisplayRulesData,
+} from '@/lib/availability/compute'
 import type {
   ProductsListInput,
   ProductsListResult,
@@ -123,11 +126,11 @@ function buildOrderBy(sort: ProductsSortColumn, dir: SortDirection) {
  */
 export async function getProducts(
   searchParams: Record<string, string | string[] | undefined>,
-  options?: { view?: AvailabilityView; settings?: AvailabilitySettingsRecord }
+  options?: { view?: string; displayRulesData?: DisplayRulesData }
 ): Promise<ProductsListResult> {
   const input = parseProductsListInput(searchParams)
   const view = options?.view ?? 'admin_products'
-  const availabilitySettings = options?.settings ?? await getAvailabilitySettings()
+  const displayRulesData = options?.displayRulesData ?? await loadDisplayRulesData()
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const where: any = {}
@@ -204,7 +207,7 @@ export async function getProducts(
 
   const incomingMap = await getIncomingMapForSkus(rows.map((row) => row.SkuID))
 
-  const mappedRows = rows.map((r) => {
+  const mappedRows = await Promise.all(rows.map(async (r) => {
     const skuId = r.SkuID
     const qty = r.Quantity ?? 0
     const baseSku = getBaseSku(skuId, r.Size)
@@ -213,17 +216,12 @@ export async function getProducts(
     const incomingEntry = incomingMap.get(skuId)
     const incoming = incomingEntry?.incoming ?? null
     const committed = incomingEntry?.committed ?? null
-    const scenario = getAvailabilityScenario(r.Collection?.type ?? null)
-    const displayResult = computeAvailabilityDisplay(
-      scenario,
+    const onHand = incomingEntry?.onHand ?? null
+    const displayResult = await computeAvailabilityDisplayFromRules(
+      r.Collection?.type ?? null,
       view,
-      {
-        quantity: qty,
-        onRoute: r.OnRoute ?? 0,
-        incoming,
-        committed,
-      },
-      availabilitySettings
+      { quantity: qty, incoming, committed, onHand },
+      displayRulesData
     )
 
     return {
@@ -237,14 +235,14 @@ export async function getProducts(
       material: r.FabricContent ?? '',
       categoryId: r.CollectionID ?? null,
       categoryName: r.Collection?.name ?? null,
-      collectionType: (r.Collection?.type as 'ATS' | 'PreOrder' | undefined) ?? null,
+      collectionType: (r.Collection?.type as 'ats' | 'preorder_po' | 'preorder_no_po' | undefined) ?? null,
       showInPreOrder: r.ShowInPreOrder ?? null,
       quantity: qty,
       onRoute: r.OnRoute ?? 0,
       availableDisplay: displayResult.display,
       availableSortValue: displayResult.numericValue,
       availableSortRank: displayResult.isBlank ? 1 : 0,
-      availabilityScenario: scenario,
+      availabilityScenario: getScenarioFromCollectionType(r.Collection?.type ?? null) as 'ats' | 'preorder_po' | 'preorder_no_po',
       priceCadRaw: r.PriceCAD,
       priceUsdRaw: r.PriceUSD,
       priceCad: parsePrice(r.PriceCAD),
@@ -259,7 +257,7 @@ export async function getProducts(
       imageUrl: r.ShopifyImageURL ?? null,
       thumbnailPath: r.ThumbnailPath ?? null,
     }
-  })
+  }))
 
   const finalRows = manualAvailableSort
     ? mappedRows
@@ -282,11 +280,17 @@ export async function getProducts(
         .slice((input.page - 1) * input.pageSize, input.page * input.pageSize)
     : mappedRows
 
+  // Determine column label from display rules (normalize legacy view keys)
+  const VIEW_LABEL_MAP: Record<string, string> = { rep_products: 'rep_ats', buyer_products: 'buyer_ats' }
+  const labelView = VIEW_LABEL_MAP[view] ?? view
+  const availableLabel = displayRulesData.rules['ats']?.[labelView]?.label ?? 'Available'
+
   return {
     total,
     // Tab counts no longer needed - keep empty for backward compatibility
     tabCounts: { all: total, ats: 0, preorder: 0 },
     rows: finalRows,
+    availableLabel,
   }
 }
 
@@ -393,6 +397,7 @@ export async function getProductByBaseSku(baseSku: string) {
       ShopifyImageURL: true,
       ThumbnailPath: true,
       Size: true,
+      Collection: { select: { type: true } },
     },
   })
 
@@ -402,9 +407,9 @@ export async function getProductByBaseSku(baseSku: string) {
 
   // Build variants array with size info
   const variants = skus.map((sku) => {
-    // For PreOrder items, use OnRoute (incoming - committed) as the available value
-    // For ATS items, use Quantity (on_hand from Shopify)
-    const isPreOrder = sku.ShowInPreOrder ?? false
+    // Derive preorder status from collection type, not ShowInPreOrder flag
+    const collectionType = sku.Collection?.type ?? null
+    const isPreOrder = collectionType === 'preorder_po' || collectionType === 'preorder_no_po'
     const available = isPreOrder ? (sku.OnRoute ?? 0) : (sku.Quantity ?? 0)
 
     return {
@@ -424,7 +429,7 @@ export async function getProductByBaseSku(baseSku: string) {
     material: first.FabricContent ?? '',
     imageUrl: first.ShopifyImageURL ?? null,
     thumbnailPath: first.ThumbnailPath ?? null,
-    isPreOrder: first.ShowInPreOrder ?? false,
+    isPreOrder: first.Collection?.type === 'preorder_po' || first.Collection?.type === 'preorder_no_po',
     priceCad: parsePrice(first.PriceCAD),
     priceUsd: parsePrice(first.PriceUSD),
     msrpCad: parsePrice(first.MSRPCAD),

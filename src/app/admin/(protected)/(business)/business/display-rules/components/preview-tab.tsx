@@ -33,6 +33,7 @@ interface PreviewRow {
   onRoute: number
   incoming: number | null
   committed: number | null
+  onHand: number | null
 }
 
 interface PreviewTabProps {
@@ -122,9 +123,11 @@ export function PreviewTab({ displayRules, calculatedFields }: PreviewTabProps) 
       return '—'
     }
 
-    // Raw fields
+    // Raw fields — use actual on_hand from inventory level when available,
+    // falling back to Sku.Quantity (which is inventoryQuantity/available)
+    const onHandValue = row.onHand ?? row.quantity
     if (fieldSource === 'on_hand') {
-      return String(row.quantity)
+      return String(onHandValue)
     }
     if (fieldSource === 'incoming') {
       return row.incoming != null ? String(row.incoming) : '—'
@@ -139,7 +142,7 @@ export function PreviewTab({ displayRules, calculatedFields }: PreviewTabProps) 
       try {
         // Simple formula evaluation (only supports basic arithmetic)
         let expr = formula
-        expr = expr.replace(/on_hand/g, String(row.quantity))
+        expr = expr.replace(/on_hand/g, String(onHandValue))
         expr = expr.replace(/incoming/g, String(row.incoming ?? 0))
         expr = expr.replace(/committed/g, String(row.committed ?? 0))
         

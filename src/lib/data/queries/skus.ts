@@ -1,8 +1,11 @@
 import { prisma } from '@/lib/prisma'
 import { parsePrice, getBaseSku, resolveColor } from '@/lib/utils'
 import { sortBySize, loadSizeOrderConfig, loadSizeAliasConfig } from '@/lib/utils/size-sort'
-import { getAvailabilitySettings, getIncomingMapForSkus } from '@/lib/data/queries/availability-settings'
-import { computeAvailabilityDisplay, getAvailabilityScenario } from '@/lib/availability/compute'
+import { getIncomingMapForSkus } from '@/lib/data/queries/availability-settings'
+import {
+  computeAvailabilityDisplayFromRules,
+  loadDisplayRulesData,
+} from '@/lib/availability/compute'
 import type { Product, ProductVariant } from '@/lib/types'
 
 /**
@@ -13,7 +16,6 @@ export async function getSkusByCategory(categoryId: number): Promise<Product[]> 
   const skus = await prisma.sku.findMany({
     where: {
       CategoryID: categoryId,
-      ShowInPreOrder: false,
       OR: [
         { Quantity: { gte: 1 } },
         { OnRoute: { gt: 0 } }
@@ -25,7 +27,7 @@ export async function getSkusByCategory(categoryId: number): Promise<Product[]> 
     ]
   })
 
-  const availabilitySettings = await getAvailabilitySettings()
+  const displayRulesData = await loadDisplayRulesData()
   const incomingMap = await getIncomingMapForSkus(skus.map((sku) => sku.SkuID))
 
   // Group SKUs by BaseSku + ImageURL to split cards when images differ
@@ -60,21 +62,16 @@ export async function getSkusByCategory(categoryId: number): Promise<Product[]> 
 
     // Map variants and sort by size using Limeapple's specific size sequence
     const variants: ProductVariant[] = sortBySize(
-      skuGroup.map(sku => {
+      await Promise.all(skuGroup.map(async (sku) => {
         const incomingEntry = incomingMap.get(sku.SkuID)
         const incoming = incomingEntry?.incoming ?? null
         const committed = incomingEntry?.committed ?? null
-        const scenario = getAvailabilityScenario('ats')
-        const displayResult = computeAvailabilityDisplay(
-          scenario,
-          'buyer_products',
-          {
-            quantity: sku.Quantity ?? 0,
-            onRoute: sku.OnRoute ?? 0,
-            incoming,
-            committed,
-          },
-          availabilitySettings
+        const onHand = incomingEntry?.onHand ?? null
+        const displayResult = await computeAvailabilityDisplayFromRules(
+          'ats',
+          'buyer_ats',
+          { quantity: sku.Quantity ?? 0, incoming, committed, onHand },
+          displayRulesData
         )
 
         return {
@@ -86,7 +83,7 @@ export async function getSkusByCategory(categoryId: number): Promise<Product[]> 
           priceCad: parsePrice(sku.PriceCAD),
           priceUsd: parsePrice(sku.PriceUSD),
         }
-      })
+      }))
     )
 
     // Use groupKey as ID to ensure uniqueness when baseSku has multiple image variants

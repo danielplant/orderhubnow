@@ -41,14 +41,14 @@ export interface AdminSkuRow {
   material: string // FabricContent
   categoryId: number | null
   categoryName: string | null
-  collectionType?: 'ATS' | 'PreOrder' | null
+  collectionType?: 'ats' | 'preorder_po' | 'preorder_no_po' | null
   showInPreOrder: boolean | null
   quantity: number // Available
   onRoute: number
   availableDisplay: string
   availableSortValue: number | null
   availableSortRank: number
-  availabilityScenario: 'ats' | 'preorder_incoming' | 'preorder_no_incoming'
+  availabilityScenario: 'ats' | 'preorder_po' | 'preorder_no_po'
   // Wholesale price (CAD/USD)
   priceCadRaw: string | null
   priceUsdRaw: string | null
@@ -72,6 +72,7 @@ export interface ProductsListResult {
   total: number
   tabCounts: { all: number; ats: number; preorder: number }
   rows: AdminSkuRow[]
+  availableLabel?: string
 }
 
 export interface CreateSkuInput {
