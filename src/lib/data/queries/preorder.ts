@@ -15,8 +15,11 @@ import { prisma } from '@/lib/prisma'
 import type { Product, ProductVariant } from '@/lib/types/inventory'
 import { sortBySize, loadSizeOrderConfig, loadSizeAliasConfig } from '@/lib/utils/size-sort'
 import { resolveColor, getBaseSku } from '@/lib/utils'
-import { getAvailabilitySettings, getIncomingMapForSkus } from '@/lib/data/queries/availability-settings'
-import { computeAvailabilityDisplay, getAvailabilityScenario } from '@/lib/availability/compute'
+import { getIncomingMapForSkus } from '@/lib/data/queries/availability-settings'
+import {
+  computeAvailabilityDisplayFromRules,
+  loadDisplayRulesData,
+} from '@/lib/availability/compute'
 
 // ============================================================================
 // Types
@@ -130,15 +133,10 @@ export async function getPreOrderProductsWithVariants(
   }
 
   // Fetch SKUs from SQL database with their collection
-  // Match .NET behavior: Show sizes where ShowInPreOrder=true OR Quantity<1
-  // This ensures all available sizes appear, not just those explicitly marked
+  // Show all SKUs in this pre-order category (the category itself defines what's pre-order)
   const skus = await prisma.sku.findMany({
     where: {
       CategoryID: categoryId,
-      OR: [
-        { ShowInPreOrder: true },
-        { Quantity: { lt: 1 } },
-      ],
     },
     include: {
       Collection: { select: { type: true } },
@@ -151,7 +149,7 @@ export async function getPreOrderProductsWithVariants(
     return []
   }
 
-  const availabilitySettings = await getAvailabilitySettings()
+  const displayRulesData = await loadDisplayRulesData()
   const incomingMap = await getIncomingMapForSkus(skus.map((sku) => sku.SkuID))
 
   // Group SKUs by base SKU + image URL to split cards when images differ
@@ -194,22 +192,17 @@ export async function getPreOrderProductsWithVariants(
     }
 
     // Build variants - extract clean size from variant title (removes color suffix)
-    const variants: ProductVariant[] = variantSkus.map((sku) => {
+    const variants: ProductVariant[] = await Promise.all(variantSkus.map(async (sku) => {
       const incomingEntry = incomingMap.get(sku.SkuID)
       const incoming = incomingEntry?.incoming ?? null
       const committed = incomingEntry?.committed ?? null
+      const onHand = incomingEntry?.onHand ?? null
       const collectionType = sku.Collection?.type ?? 'preorder_no_po'
-      const scenario = getAvailabilityScenario(collectionType)
-      const displayResult = computeAvailabilityDisplay(
-        scenario,
+      const displayResult = await computeAvailabilityDisplayFromRules(
+        collectionType,
         'buyer_preorder',
-        {
-          quantity: sku.Quantity ?? 0,
-          onRoute: sku.OnRoute ?? 0,
-          incoming,
-          committed,
-        },
-        availabilitySettings
+        { quantity: sku.Quantity ?? 0, incoming, committed, onHand },
+        displayRulesData
       )
 
       return {
@@ -222,7 +215,7 @@ export async function getPreOrderProductsWithVariants(
         priceUsd: parsePriceFromString(sku.PriceUSD),
         status: 'preorder' as const,
       }
-    })
+    }))
 
     // Use groupKey as ID to ensure uniqueness when baseSku has multiple image variants
     const title = firstSku.OrderEntryDescription || firstSku.Description || baseSku

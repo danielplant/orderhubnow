@@ -59,6 +59,7 @@ export async function getAvailabilitySettings(): Promise<AvailabilitySettingsRec
 export interface IncomingMapEntry {
   incoming: number | null
   committed: number | null
+  onHand: number | null
 }
 
 export async function getIncomingMapForSkus(
@@ -68,11 +69,12 @@ export async function getIncomingMapForSkus(
   if (skuIds.length === 0) return map
 
   const rows = await prisma.$queryRaw<
-    Array<{ skuId: string; incoming: number | null; committed: number | null }>
+    Array<{ skuId: string; incoming: number | null; committed: number | null; onHand: number | null }>
   >(Prisma.sql`
     SELECT r.SkuID AS skuId,
            inv.Incoming AS incoming,
-           inv.CommittedQuantity AS committed
+           inv.CommittedQuantity AS committed,
+           inv.OnHand AS onHand
     FROM RawSkusFromShopify r
     LEFT JOIN RawSkusInventoryLevelFromShopify inv ON r.InventoryItemId = inv.ParentId
     WHERE r.SkuID IN (${Prisma.join(skuIds)})
@@ -81,7 +83,7 @@ export async function getIncomingMapForSkus(
   for (const row of rows) {
     const existing = map.get(row.skuId)
     if (!existing || (existing.incoming == null && row.incoming != null)) {
-      map.set(row.skuId, { incoming: row.incoming, committed: row.committed })
+      map.set(row.skuId, { incoming: row.incoming, committed: row.committed, onHand: row.onHand })
     }
   }
 

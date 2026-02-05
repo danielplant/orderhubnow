@@ -5,7 +5,6 @@ import {
   type InventorySortField,
   type SortDirection,
 } from '@/lib/data/queries/inventory'
-import { getAvailabilitySettings } from '@/lib/data/queries/availability-settings'
 import { InventoryTable } from '@/components/admin/inventory-table'
 
 export const dynamic = 'force-dynamic'
@@ -38,13 +37,11 @@ export default async function InventoryPage({
   const sortDir: SortDirection = sp.sortDir === 'desc' ? 'desc' : 'asc'
 
   // Fetch inventory data and facets in parallel
-  const availabilitySettings = await getAvailabilitySettings()
   const [result, facets] = await Promise.all([
     getInventoryList(
       { status, search: q, sortBy, sortDir, collectionId, color, fabric, size },
       page,
       pageSize,
-      { settings: availabilitySettings }
     ),
     getInventoryFacets(),
   ])
@@ -66,7 +63,7 @@ export default async function InventoryPage({
         facets={facets}
         sortBy={sortBy}
         sortDir={sortDir}
-        availabilitySettings={availabilitySettings}
+        availableLabel={result.availableLabel}
       />
     </main>
   )

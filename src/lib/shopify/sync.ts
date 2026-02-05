@@ -199,7 +199,7 @@ export const BULK_OPERATION_QUERY = `
                   edges {
                     node {
                       id
-                      quantities(names: ["incoming", "committed"]) { name quantity }
+                      quantities(names: ["on_hand", "incoming", "committed"]) { name quantity }
                     }
                   }
                 }
@@ -518,6 +518,7 @@ export interface ShopifyInventoryLevelData {
   inventoryItemId: string
   incoming: number
   committed: number
+  onHand: number
 }
 
 /**
@@ -596,6 +597,7 @@ export async function upsertInventoryLevel(data: ShopifyInventoryLevelData): Pro
     ParentId: data.inventoryItemId,
     Incoming: data.incoming,
     CommittedQuantity: data.committed,
+    OnHand: data.onHand,
   }
 
   if (existing) {
@@ -769,9 +771,11 @@ async function processJsonlItem(
 
     let incoming = 0
     let committed = 0
+    let onHand = 0
 
     if (quantities) {
       for (const q of quantities) {
+        if (q.name === 'on_hand') onHand = q.quantity
         if (q.name === 'incoming') incoming = q.quantity
         if (q.name === 'committed') committed = q.quantity
       }
@@ -791,6 +795,7 @@ async function processJsonlItem(
       inventoryItemId,
       incoming,
       committed,
+      onHand,
     })
     return true
   }

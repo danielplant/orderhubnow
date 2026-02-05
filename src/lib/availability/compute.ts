@@ -69,6 +69,7 @@ export async function computeAvailabilityDisplayFromRules(
     onRoute?: number | null
     incoming?: number | null
     committed?: number | null
+    onHand?: number | null
   },
   displayRulesData?: DisplayRulesData
 ): Promise<AvailabilityDisplayResult & { label: string }> {
@@ -77,12 +78,19 @@ export async function computeAvailabilityDisplayFromRules(
   const scenario = getScenarioFromCollectionType(collectionType)
   
   const formulaInputs: FormulaInputs = {
-    on_hand: inputs.quantity ?? 0,
+    on_hand: inputs.onHand ?? inputs.quantity ?? 0,
     incoming: inputs.incoming ?? 0,
     committed: inputs.committed ?? 0,
   }
 
-  const result = computeDisplayFromRules(scenario, view, formulaInputs, data)
+  // Normalize legacy view keys to DisplayRule table keys
+  const VIEW_KEY_MAP: Record<string, string> = {
+    rep_products: 'rep_ats',
+    buyer_products: 'buyer_ats',
+  }
+  const normalizedView = VIEW_KEY_MAP[view] ?? view
+
+  const result = computeDisplayFromRules(scenario, normalizedView, formulaInputs, data)
 
   return {
     display: result.display,

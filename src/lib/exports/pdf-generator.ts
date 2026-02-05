@@ -21,7 +21,10 @@ import { sortBySize, loadSizeOrderConfig, loadSizeAliasConfig } from '@/lib/util
 import { getImageDataUrlByPolicyWithStats } from '@/lib/utils/pdf-images'
 import { type ExportPolicy } from '@/lib/data/queries/export-policy'
 import { getAvailabilitySettings, getIncomingMapForSkus } from '@/lib/data/queries/availability-settings'
-import { computeAvailabilityDisplay, getAvailabilityScenario } from '@/lib/availability/compute'
+import {
+  computeAvailabilityDisplayFromRules,
+  loadDisplayRulesData,
+} from '@/lib/availability/compute'
 import type { CurrencyMode } from '@/lib/types/export'
 import type { AvailabilitySettingsRecord } from '@/lib/types/availability-settings'
 
@@ -246,7 +249,8 @@ export async function generatePdfExport(
     },
   })
 
-  const availabilitySettings = await getAvailabilitySettings()
+  const displayRulesData = await loadDisplayRulesData()
+  const availabilitySettings = await getAvailabilitySettings() // For on-route and legend settings
   const incomingMap = await getIncomingMapForSkus(rawSkus.map((sku) => sku.SkuID))
   const showOnRoute = availabilitySettings.showOnRoutePdf
   const onRouteLabel = availabilitySettings.onRouteLabelPdf
@@ -268,29 +272,25 @@ export async function generatePdfExport(
     hasPreorderNoIncoming: false,
   }
 
-  const skusWithParsed = rawSkus.map((sku) => {
+  const skusWithParsed = await Promise.all(rawSkus.map(async (sku) => {
     const baseSku = getBaseSku(sku.SkuID, sku.Size)
     const size = sku.Size || ''
     const incomingEntry = incomingMap.get(sku.SkuID)
     const incoming = incomingEntry?.incoming ?? null
     const committed = incomingEntry?.committed ?? null
-    const scenario = getAvailabilityScenario(sku.Collection?.type ?? null)
+    const onHand = incomingEntry?.onHand ?? null
+    const collectionType = sku.Collection?.type ?? null
 
     // Track scenario for legend display
-    if (scenario === 'ats') scenariosPresent.hasAts = true
-    else if (scenario === 'preorder_incoming') scenariosPresent.hasPreorderIncoming = true
-    else if (scenario === 'preorder_no_incoming') scenariosPresent.hasPreorderNoIncoming = true
+    if (collectionType === 'ats' || collectionType === 'ATS' || !collectionType) scenariosPresent.hasAts = true
+    else if (collectionType === 'preorder_po') scenariosPresent.hasPreorderIncoming = true
+    else if (collectionType === 'preorder_no_po' || collectionType === 'PreOrder') scenariosPresent.hasPreorderNoIncoming = true
 
-    const displayResult = computeAvailabilityDisplay(
-      scenario,
+    const displayResult = await computeAvailabilityDisplayFromRules(
+      collectionType,
       'pdf',
-      {
-        quantity: sku.Quantity ?? 0,
-        onRoute: sku.OnRoute ?? 0,
-        incoming,
-        committed,
-      },
-      availabilitySettings
+      { quantity: sku.Quantity ?? 0, incoming, committed, onHand },
+      displayRulesData
     )
 
     return {
@@ -300,7 +300,7 @@ export async function generatePdfExport(
       availableDisplay: displayResult.display,
       availableNumeric: displayResult.numericValue,
     }
-  })
+  }))
 
   const grouped = new Map<string, typeof skusWithParsed>()
   for (const sku of skusWithParsed) {
@@ -490,7 +490,7 @@ interface SkuForPdf {
   ShowInPreOrder: boolean | null
   ShopifyImageURL: string | null
   ThumbnailPath: string | null
-  Collection: { name: string } | null
+  Collection: { name: string; type: string } | null
   availableDisplay: string
   availableNumeric: number | null
   isFirstInGroup: boolean
@@ -589,7 +589,7 @@ function generateProductsPdfHtml(
                 <td class="text-center">${sku.size || '—'}</td>
                 <td class="text-right">${sku.availableDisplay}</td>
                 ${showOnRoute ? `<td class="text-right">${onRouteValue}</td>` : ''}
-                <td class="text-center">${sku.isFirstInGroup ? (sku.ShowInPreOrder ? 'Pre-Order' : 'ATS') : ''}</td>
+                <td class="text-center">${sku.isFirstInGroup ? (sku.Collection?.type === 'ats' || sku.Collection?.type === 'ATS' ? 'ATS' : sku.Collection?.type === 'preorder_po' ? 'Pre-Order (PO)' : sku.Collection?.type === 'preorder_no_po' || sku.Collection?.type === 'PreOrder' ? 'Pre-Order' : '—') : ''}</td>
                 <td class="text-center">${sku.isFirstInGroup ? unitsPerSku : ''}</td>
                 <td class="price-cell">${sku.isFirstInGroup ? packPrice : ''}</td>
                 <td class="price-cell">${sku.isFirstInGroup ? unitPrice : ''}</td>

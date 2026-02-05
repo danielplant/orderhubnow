@@ -12,6 +12,7 @@ interface PreviewRow {
   onRoute: number
   incoming: number | null
   committed: number | null
+  onHand: number | null
 }
 
 interface PreviewResponse {
@@ -81,11 +82,12 @@ export async function GET(request: NextRequest) {
 
     // Get incoming data for this SKU
     const incomingData = await prisma.$queryRaw<
-      Array<{ skuId: string; incoming: number | null; committed: number | null }>
+      Array<{ skuId: string; incoming: number | null; committed: number | null; onHand: number | null }>
     >(Prisma.sql`
       SELECT r.SkuID AS skuId,
              inv.Incoming AS incoming,
-             inv.CommittedQuantity AS committed
+             inv.CommittedQuantity AS committed,
+             inv.OnHand AS onHand
       FROM RawSkusFromShopify r
       LEFT JOIN RawSkusInventoryLevelFromShopify inv ON r.InventoryItemId = inv.ParentId
       WHERE r.SkuID = ${skuId}
@@ -105,6 +107,7 @@ export async function GET(request: NextRequest) {
       onRoute: sku.OnRoute ?? 0,
       incoming: incomingEntry?.incoming ?? null,
       committed: incomingEntry?.committed ?? null,
+      onHand: incomingEntry?.onHand ?? null,
     }
 
     const response: PreviewResponse = {
