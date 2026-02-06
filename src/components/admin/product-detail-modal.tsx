@@ -15,6 +15,7 @@ interface ProductVariant {
   sku: string
   size: string
   available: number
+  availableDisplay?: string
   priceCad: number
   priceUsd: number
 }
@@ -176,7 +177,7 @@ export function ProductDetailModal({
                   >
                     <td className="px-4 py-2 font-mono text-xs">{variant.sku}</td>
                     <td className="px-4 py-2">{variant.size}</td>
-                    <td className="px-4 py-2 text-right tabular-nums">{variant.available}</td>
+                    <td className="px-4 py-2 text-right tabular-nums">{variant.availableDisplay ?? String(variant.available)}</td>
                   </tr>
                 ))}
               </tbody>

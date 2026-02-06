@@ -443,6 +443,13 @@ export async function getCollectionName(collectionId: number): Promise<string | 
  * Image: Uses product-level image (canonical, not per-variant).
  */
 export async function getSkusByCollection(collectionId: number): Promise<Product[]> {
+  // Fetch collection type for display rules scenario mapping
+  const collection = await prisma.collection.findUnique({
+    where: { id: collectionId },
+    select: { type: true },
+  })
+  const collectionType = collection?.type ?? 'ats'
+
   const skus = await prisma.sku.findMany({
     where: {
       CollectionID: collectionId,
@@ -494,7 +501,7 @@ export async function getSkusByCollection(collectionId: number): Promise<Product
         const committed = incomingEntry?.committed ?? null
         const onHand = incomingEntry?.onHand ?? null
         const displayResult = await computeAvailabilityDisplayFromRules(
-          'ats',
+          collectionType,
           'buyer_ats',
           { quantity: sku.Quantity ?? 0, incoming, committed, onHand },
           displayRulesData

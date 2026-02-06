@@ -24,7 +24,10 @@ export async function getSkusByCategory(categoryId: number): Promise<Product[]> 
     orderBy: [
       { DisplayPriority: 'asc' },
       { SkuID: 'asc' }
-    ]
+    ],
+    include: {
+      Collection: { select: { type: true } },
+    },
   })
 
   const displayRulesData = await loadDisplayRulesData()
@@ -68,7 +71,7 @@ export async function getSkusByCategory(categoryId: number): Promise<Product[]> 
         const committed = incomingEntry?.committed ?? null
         const onHand = incomingEntry?.onHand ?? null
         const displayResult = await computeAvailabilityDisplayFromRules(
-          'ats',
+          sku.Collection?.type ?? null,
           'buyer_ats',
           { quantity: sku.Quantity ?? 0, incoming, committed, onHand },
           displayRulesData
