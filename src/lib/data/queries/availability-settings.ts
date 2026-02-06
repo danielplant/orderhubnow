@@ -68,22 +68,28 @@ export async function getIncomingMapForSkus(
   const map = new Map<string, IncomingMapEntry>()
   if (skuIds.length === 0) return map
 
-  const rows = await prisma.$queryRaw<
-    Array<{ skuId: string; incoming: number | null; committed: number | null; onHand: number | null }>
-  >(Prisma.sql`
-    SELECT r.SkuID AS skuId,
-           inv.Incoming AS incoming,
-           inv.CommittedQuantity AS committed,
-           inv.OnHand AS onHand
-    FROM RawSkusFromShopify r
-    LEFT JOIN RawSkusInventoryLevelFromShopify inv ON r.InventoryItemId = inv.ParentId
-    WHERE r.SkuID IN (${Prisma.join(skuIds)})
-  `)
+  // SQL Server limits to 2100 parameters per query.
+  // Batch into chunks of 2000 to stay safely under the limit.
+  const BATCH_SIZE = 2000
+  for (let i = 0; i < skuIds.length; i += BATCH_SIZE) {
+    const batch = skuIds.slice(i, i + BATCH_SIZE)
+    const rows = await prisma.$queryRaw<
+      Array<{ skuId: string; incoming: number | null; committed: number | null; onHand: number | null }>
+    >(Prisma.sql`
+      SELECT r.SkuID AS skuId,
+             inv.Incoming AS incoming,
+             inv.CommittedQuantity AS committed,
+             inv.OnHand AS onHand
+      FROM RawSkusFromShopify r
+      LEFT JOIN RawSkusInventoryLevelFromShopify inv ON r.InventoryItemId = inv.ParentId
+      WHERE r.SkuID IN (${Prisma.join(batch)})
+    `)
 
-  for (const row of rows) {
-    const existing = map.get(row.skuId)
-    if (!existing || (existing.incoming == null && row.incoming != null)) {
-      map.set(row.skuId, { incoming: row.incoming, committed: row.committed, onHand: row.onHand })
+    for (const row of rows) {
+      const existing = map.get(row.skuId)
+      if (!existing || (existing.incoming == null && row.incoming != null)) {
+        map.set(row.skuId, { incoming: row.incoming, committed: row.committed, onHand: row.onHand })
+      }
     }
   }
 
