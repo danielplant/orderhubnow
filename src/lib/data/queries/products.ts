@@ -405,21 +405,33 @@ export async function getProductByBaseSku(baseSku: string) {
 
   const first = skus[0]
 
-  // Build variants array with size info
-  const variants = skus.map((sku) => {
-    // Derive preorder status from collection type, not ShowInPreOrder flag
-    const collectionType = sku.Collection?.type ?? null
-    const isPreOrder = collectionType === 'preorder_po' || collectionType === 'preorder_no_po'
-    const available = isPreOrder ? (sku.OnRoute ?? 0) : (sku.Quantity ?? 0)
+  // Load display rules and incoming data for all variants
+  const displayRulesData = await loadDisplayRulesData()
+  const incomingMap = await getIncomingMapForSkus(skus.map((s) => s.SkuID))
+
+  // Build variants array using display rules (same pipeline as all other views)
+  const variants = await Promise.all(skus.map(async (sku) => {
+    const qty = sku.Quantity ?? 0
+    const incomingEntry = incomingMap.get(sku.SkuID)
+    const incoming = incomingEntry?.incoming ?? null
+    const committed = incomingEntry?.committed ?? null
+    const onHand = incomingEntry?.onHand ?? null
+    const displayResult = await computeAvailabilityDisplayFromRules(
+      sku.Collection?.type ?? null,
+      'admin_modal',
+      { quantity: qty, incoming, committed, onHand },
+      displayRulesData
+    )
 
     return {
       sku: sku.SkuID,
       size: sku.Size || '',
-      available,
+      available: displayResult.numericValue ?? 0,
+      availableDisplay: displayResult.display,
       priceCad: parsePrice(sku.PriceCAD),
       priceUsd: parsePrice(sku.PriceUSD),
     }
-  })
+  }))
 
   const title = first.OrderEntryDescription ?? first.Description ?? baseSku
   return {

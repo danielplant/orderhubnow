@@ -77,8 +77,11 @@ export async function computeAvailabilityDisplayFromRules(
   
   const scenario = getScenarioFromCollectionType(collectionType)
   
+  // Phase 1: derive on_hand from Quantity (= on_hand - committed) + committed
+  // because RawSkusInventoryLevelFromShopify.OnHand is not reliably populated yet.
+  // Phase 2 will switch to raw Shopify on_hand once the sync is fixed.
   const formulaInputs: FormulaInputs = {
-    on_hand: inputs.onHand ?? inputs.quantity ?? 0,
+    on_hand: (inputs.quantity ?? 0) + (inputs.committed ?? 0),
     incoming: inputs.incoming ?? 0,
     committed: inputs.committed ?? 0,
   }
